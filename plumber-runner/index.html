@@ -189,7 +189,7 @@ let diffProgress = 0;       // 0..1 progress within current level toward next
 const player = {
   x: 120, y: 0, w: 28, h: 36,
   vy: 0, onGround: true, frame: 0,
-  animState: 'run',   // run | jump_up | fall | land
+  animState: 'idle',  // idle | run | jump_up | fall | land
   landTimer: 0,       // frames remaining in land animation
   wasOnGround: true,  // track previous frame for landing detection
 };
@@ -245,7 +245,7 @@ function drawPixelRect(x, y, w, h, color) {
 }
 
 // ── Animation State Machine ───────────────────────────
-// States: run, jump_up, fall, land
+// States: idle, run, jump_up, fall, land
 const LAND_DURATION = 6; // frames for land squash animation
 
 function updateAnimState() {
@@ -284,184 +284,316 @@ function updateAnimState() {
   player.animState = 'run';
 }
 
-// Draw the player character — original pixel adventurer with goggles
-// 28x36 px, distinct from any Nintendo IP
+// Draw the player character — original pixel "Bolt" explorer
+// 28x36 px, fully original design: spiky-haired explorer with visor & jetpack
+// NOT derived from any Nintendo or copyrighted IP
 function drawPlayer(px, py, frame) {
   const x = Math.round(px);
   const y = Math.round(py);
   const st = player.animState;
 
-  // ── Color palette ──
-  const HAIR   = '#4a2c0a';   // dark brown hair
-  const SKIN   = '#e8b88a';   // warm skin
-  const GOGGLE = '#42d4f4';   // cyan goggles
-  const GFRAME = '#555';      // goggle frame
-  const VEST   = '#e67e22';   // orange vest
-  const SHIRT  = '#2c3e50';   // dark teal undershirt
-  const PANTS  = '#7f8c8d';   // grey pants
-  const BOOTS  = '#5d4037';   // brown boots
-  const BELT   = '#f1c40f';   // yellow belt buckle
+  // ── Original color palette — "Bolt" the Explorer ──
+  const HAIR    = '#2d1b69';  // deep indigo hair
+  const HAIR_HI = '#5b3fbf';  // hair highlight
+  const SKIN    = '#f0c090';  // peach skin
+  const SKIN_SH = '#c89060';  // skin shadow
+  const VISOR   = '#00e5ff';  // electric cyan visor
+  const VISOR_D = '#0097a7';  // visor rim
+  const JACKET  = '#d84315';  // burnt orange jacket
+  const JACK_HI = '#ff7043';  // jacket highlight
+  const JACK_SH = '#bf360c';  // jacket shadow
+  const PACK    = '#546e7a';  // grey-blue jetpack
+  const PACK_LT = '#78909c';  // pack highlight
+  const VENT    = '#ff6d00';  // jetpack vent glow
+  const CARGO   = '#37474f';  // dark cargo pants
+  const CARGO_L = '#607d8b';  // cargo lighter
+  const BOOTS_C = '#4e342e';  // dark leather boots
+  const BOOTS_H = '#6d4c41';  // boots highlight
+  const BUCKLE  = '#ffd600';  // yellow utility buckle
+  const MOUTH   = '#e64a19';  // mouth/expression
 
-  if (st === 'land') {
-    // ── LAND: squash pose (wider, shorter) ──
-    // Hair (flat)
-    drawPixelRect(x + 4, y + 4, 20, 4, HAIR);
+  // ── IDLE: relaxed stance, subtle breathing bob ──
+  if (st === 'idle') {
+    const bob = Math.sin(frameCount * 0.06) * 1.5;
+    const by = y + Math.round(bob);
+    // Hair — tall spiky
+    drawPixelRect(x + 7, by - 4, 4, 6, HAIR);
+    drawPixelRect(x + 11, by - 6, 4, 8, HAIR);
+    drawPixelRect(x + 15, by - 3, 4, 5, HAIR);
+    drawPixelRect(x + 5, by + 0, 18, 4, HAIR);
+    drawPixelRect(x + 8, by - 3, 3, 3, HAIR_HI);
+    drawPixelRect(x + 13, by - 5, 2, 4, HAIR_HI);
     // Head
-    drawPixelRect(x + 6, y + 8, 16, 8, SKIN);
-    // Goggles
-    drawPixelRect(x + 6, y + 9, 16, 5, GFRAME);
-    drawPixelRect(x + 7, y + 10, 6, 3, GOGGLE);
-    drawPixelRect(x + 15, y + 10, 6, 3, GOGGLE);
-    // Mouth
-    drawPixelRect(x + 11, y + 14, 6, 1, '#c0392b');
-    // Body — wider squash
-    drawPixelRect(x + 2, y + 16, 24, 4, VEST);
-    drawPixelRect(x + 6, y + 16, 16, 4, SHIRT);
+    drawPixelRect(x + 6, by + 4, 16, 10, SKIN);
+    drawPixelRect(x + 6, by + 10, 4, 4, SKIN_SH);
+    // Visor
+    drawPixelRect(x + 6, by + 5, 16, 5, VISOR_D);
+    drawPixelRect(x + 7, by + 6, 6, 3, VISOR);
+    drawPixelRect(x + 15, by + 6, 6, 3, VISOR);
+    drawPixelRect(x + 8, by + 6, 2, 1, '#b2ffff'); // visor glint
+    // Mouth — relaxed
+    drawPixelRect(x + 13, by + 11, 4, 2, MOUTH);
+    // Body — jacket
+    drawPixelRect(x + 6, by + 14, 16, 8, JACKET);
+    drawPixelRect(x + 6, by + 14, 4, 6, JACK_HI);
+    drawPixelRect(x + 18, by + 16, 4, 4, JACK_SH);
+    // Jetpack (back)
+    drawPixelRect(x + 22, by + 14, 4, 8, PACK);
+    drawPixelRect(x + 22, by + 14, 4, 2, PACK_LT);
+    drawPixelRect(x + 23, by + 22, 2, 2, VENT);
+    // Belt + buckle
+    drawPixelRect(x + 6, by + 22, 16, 2, CARGO);
+    drawPixelRect(x + 11, by + 22, 6, 2, BUCKLE);
+    // Arms at sides
+    drawPixelRect(x + 2, by + 15, 4, 6, JACKET);
+    drawPixelRect(x + 2, by + 21, 4, 2, SKIN);
+    // Legs — standing straight
+    drawPixelRect(x + 7, by + 24, 6, 8, CARGO);
+    drawPixelRect(x + 15, by + 24, 6, 8, CARGO);
+    drawPixelRect(x + 7, by + 26, 2, 2, CARGO_L);
+    drawPixelRect(x + 17, by + 26, 2, 2, CARGO_L);
+    // Boots
+    drawPixelRect(x + 5, by + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 15, by + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 6, by + 32, 3, 1, BOOTS_H);
+    drawPixelRect(x + 16, by + 32, 3, 1, BOOTS_H);
+    return;
+  }
+
+  // ── LAND: squash impact pose ──
+  if (st === 'land') {
+    // Hair — compressed flat
+    drawPixelRect(x + 4, y + 6, 20, 3, HAIR);
+    drawPixelRect(x + 6, y + 4, 4, 3, HAIR);
+    drawPixelRect(x + 16, y + 5, 4, 2, HAIR);
+    // Head — squished
+    drawPixelRect(x + 5, y + 9, 18, 7, SKIN);
+    drawPixelRect(x + 5, y + 13, 4, 3, SKIN_SH);
+    // Visor
+    drawPixelRect(x + 5, y + 10, 18, 4, VISOR_D);
+    drawPixelRect(x + 6, y + 11, 6, 2, VISOR);
+    drawPixelRect(x + 14, y + 11, 6, 2, VISOR);
+    // Mouth — strained
+    drawPixelRect(x + 12, y + 14, 5, 2, MOUTH);
+    // Body — wide squash
+    drawPixelRect(x + 2, y + 16, 24, 5, JACKET);
+    drawPixelRect(x + 2, y + 16, 6, 3, JACK_HI);
+    drawPixelRect(x + 22, y + 17, 4, 3, JACK_SH);
+    // Jetpack
+    drawPixelRect(x + 24, y + 16, 4, 5, PACK);
+    drawPixelRect(x + 25, y + 21, 2, 2, VENT);
     // Belt
-    drawPixelRect(x + 10, y + 20, 8, 2, BELT);
-    // Legs — wide bent crouch
-    drawPixelRect(x + 2, y + 22, 8, 6, PANTS);
-    drawPixelRect(x + 18, y + 22, 8, 6, PANTS);
-    // Boots — wide
-    drawPixelRect(x + 0, y + 28, 10, 4, BOOTS);
-    drawPixelRect(x + 18, y + 28, 10, 4, BOOTS);
-    // Dust puff particles
+    drawPixelRect(x + 6, y + 21, 16, 2, CARGO);
+    drawPixelRect(x + 10, y + 21, 8, 2, BUCKLE);
+    // Arms — bracing wide
+    drawPixelRect(x + 0, y + 17, 4, 5, JACKET);
+    drawPixelRect(x + 0, y + 22, 3, 2, SKIN);
+    // Legs — wide squat
+    drawPixelRect(x + 2, y + 23, 8, 5, CARGO);
+    drawPixelRect(x + 18, y + 23, 8, 5, CARGO);
+    drawPixelRect(x + 4, y + 25, 2, 2, CARGO_L);
+    drawPixelRect(x + 20, y + 25, 2, 2, CARGO_L);
+    // Boots — wide stance
+    drawPixelRect(x + 0, y + 28, 10, 4, BOOTS_C);
+    drawPixelRect(x + 18, y + 28, 10, 4, BOOTS_C);
+    drawPixelRect(x + 1, y + 28, 3, 1, BOOTS_H);
+    drawPixelRect(x + 19, y + 28, 3, 1, BOOTS_H);
+    // Dust puffs
     if (player.landTimer > 3) {
-      ctx.fillStyle = 'rgba(200,180,150,0.5)';
-      ctx.fillRect(x - 2, y + 31, 4, 3);
-      ctx.fillRect(x + 26, y + 31, 4, 3);
+      ctx.fillStyle = 'rgba(180,160,130,0.6)';
+      ctx.fillRect(x - 4, y + 30, 5, 3);
+      ctx.fillRect(x + 27, y + 30, 5, 3);
+      ctx.fillStyle = 'rgba(180,160,130,0.3)';
+      ctx.fillRect(x - 6, y + 29, 3, 2);
+      ctx.fillRect(x + 31, y + 29, 3, 2);
     }
     return;
   }
 
+  // ── JUMP_UP: arms raised, legs tucked, visor glowing ──
   if (st === 'jump_up') {
-    // ── JUMP UP: arms raised, legs tucked ──
-    // Hair (spiky upward — wind)
-    drawPixelRect(x + 6, y - 2, 4, 4, HAIR);
-    drawPixelRect(x + 12, y - 3, 4, 5, HAIR);
-    drawPixelRect(x + 18, y - 1, 4, 3, HAIR);
-    drawPixelRect(x + 4, y + 2, 20, 4, HAIR);
+    // Hair — streaming upward, wind-blown
+    drawPixelRect(x + 6, y - 4, 4, 6, HAIR);
+    drawPixelRect(x + 10, y - 6, 5, 8, HAIR);
+    drawPixelRect(x + 16, y - 3, 4, 5, HAIR);
+    drawPixelRect(x + 5, y + 1, 18, 3, HAIR);
+    drawPixelRect(x + 8, y - 4, 2, 3, HAIR_HI);
+    drawPixelRect(x + 12, y - 5, 3, 4, HAIR_HI);
     // Head
-    drawPixelRect(x + 6, y + 6, 16, 8, SKIN);
-    // Goggles
-    drawPixelRect(x + 6, y + 7, 16, 5, GFRAME);
-    drawPixelRect(x + 7, y + 8, 6, 3, GOGGLE);
-    drawPixelRect(x + 15, y + 8, 6, 3, GOGGLE);
+    drawPixelRect(x + 6, y + 4, 16, 10, SKIN);
+    drawPixelRect(x + 6, y + 10, 4, 4, SKIN_SH);
+    // Visor — bright glow
+    drawPixelRect(x + 6, y + 5, 16, 5, VISOR_D);
+    drawPixelRect(x + 7, y + 6, 6, 3, VISOR);
+    drawPixelRect(x + 15, y + 6, 6, 3, VISOR);
+    drawPixelRect(x + 8, y + 6, 3, 2, '#b2ffff');
+    drawPixelRect(x + 17, y + 6, 2, 1, '#b2ffff');
     // Mouth — open excited
-    drawPixelRect(x + 12, y + 13, 4, 2, '#c0392b');
+    drawPixelRect(x + 13, y + 12, 4, 2, MOUTH);
     // Body
-    drawPixelRect(x + 6, y + 14, 16, 8, VEST);
-    drawPixelRect(x + 8, y + 15, 12, 6, SHIRT);
-    // Arms — raised up!
-    drawPixelRect(x + 0, y + 6, 6, 4, SHIRT);
-    drawPixelRect(x + 0, y + 4, 4, 4, SKIN);
-    drawPixelRect(x + 22, y + 6, 6, 4, SHIRT);
-    drawPixelRect(x + 24, y + 4, 4, 4, SKIN);
+    drawPixelRect(x + 6, y + 14, 16, 8, JACKET);
+    drawPixelRect(x + 6, y + 14, 4, 6, JACK_HI);
+    drawPixelRect(x + 18, y + 16, 4, 4, JACK_SH);
+    // Jetpack — thrust glow!
+    drawPixelRect(x + 22, y + 14, 4, 8, PACK);
+    drawPixelRect(x + 22, y + 14, 4, 2, PACK_LT);
+    drawPixelRect(x + 22, y + 22, 4, 3, VENT);
+    drawPixelRect(x + 23, y + 25, 2, 2 + Math.round(Math.random()), '#ff9100');
+    // Arms — raised up
+    drawPixelRect(x + 1, y + 8, 5, 4, JACKET);
+    drawPixelRect(x + 0, y + 4, 4, 5, JACKET);
+    drawPixelRect(x + 0, y + 2, 4, 3, SKIN);
+    drawPixelRect(x + 22, y + 8, 5, 4, JACKET);
+    drawPixelRect(x + 24, y + 4, 4, 5, JACKET);
+    drawPixelRect(x + 24, y + 2, 4, 3, SKIN);
     // Belt
-    drawPixelRect(x + 10, y + 22, 8, 2, BELT);
-    // Legs — tucked up
-    drawPixelRect(x + 6, y + 24, 6, 4, PANTS);
-    drawPixelRect(x + 16, y + 24, 6, 4, PANTS);
-    // Boots — tucked
-    drawPixelRect(x + 5, y + 28, 8, 4, BOOTS);
-    drawPixelRect(x + 15, y + 28, 8, 4, BOOTS);
+    drawPixelRect(x + 6, y + 22, 16, 2, CARGO);
+    drawPixelRect(x + 11, y + 22, 6, 2, BUCKLE);
+    // Legs — tucked
+    drawPixelRect(x + 7, y + 24, 6, 4, CARGO);
+    drawPixelRect(x + 15, y + 24, 6, 4, CARGO);
+    // Boots — tucked under
+    drawPixelRect(x + 6, y + 28, 7, 4, BOOTS_C);
+    drawPixelRect(x + 15, y + 28, 7, 4, BOOTS_C);
+    drawPixelRect(x + 7, y + 28, 3, 1, BOOTS_H);
+    drawPixelRect(x + 16, y + 28, 3, 1, BOOTS_H);
     return;
   }
 
+  // ── FALL: arms spread, legs dangling, worried face ──
   if (st === 'fall') {
-    // ── FALL: arms out wide, legs dangling ──
-    // Hair (flat, blown back)
-    drawPixelRect(x + 4, y + 2, 20, 4, HAIR);
-    drawPixelRect(x + 22, y + 3, 4, 3, HAIR);
+    // Hair — blown back, flattened
+    drawPixelRect(x + 5, y + 2, 18, 3, HAIR);
+    drawPixelRect(x + 20, y + 1, 6, 4, HAIR);
+    drawPixelRect(x + 22, y + 3, 4, 2, HAIR_HI);
     // Head
-    drawPixelRect(x + 6, y + 6, 16, 8, SKIN);
-    // Goggles
-    drawPixelRect(x + 6, y + 7, 16, 5, GFRAME);
-    drawPixelRect(x + 7, y + 8, 6, 3, GOGGLE);
-    drawPixelRect(x + 15, y + 8, 6, 3, GOGGLE);
-    // Mouth — worried O
-    drawPixelRect(x + 12, y + 12, 3, 3, '#c0392b');
+    drawPixelRect(x + 6, y + 5, 16, 10, SKIN);
+    drawPixelRect(x + 6, y + 11, 4, 4, SKIN_SH);
+    // Visor — dim
+    drawPixelRect(x + 6, y + 6, 16, 5, VISOR_D);
+    drawPixelRect(x + 7, y + 7, 6, 3, VISOR);
+    drawPixelRect(x + 15, y + 7, 6, 3, VISOR);
+    // Mouth — worried O shape
+    drawPixelRect(x + 13, y + 12, 3, 3, MOUTH);
+    drawPixelRect(x + 14, y + 13, 1, 1, SKIN);
     // Body
-    drawPixelRect(x + 6, y + 14, 16, 8, VEST);
-    drawPixelRect(x + 8, y + 15, 12, 6, SHIRT);
-    // Arms — spread out
-    drawPixelRect(x + 0, y + 14, 6, 4, SHIRT);
-    drawPixelRect(x + 0, y + 14, 4, 2, SKIN);
-    drawPixelRect(x + 22, y + 14, 6, 4, SHIRT);
-    drawPixelRect(x + 24, y + 14, 4, 2, SKIN);
+    drawPixelRect(x + 6, y + 15, 16, 8, JACKET);
+    drawPixelRect(x + 6, y + 15, 4, 6, JACK_HI);
+    drawPixelRect(x + 18, y + 17, 4, 4, JACK_SH);
+    // Jetpack — idle
+    drawPixelRect(x + 22, y + 15, 4, 8, PACK);
+    drawPixelRect(x + 22, y + 15, 4, 2, PACK_LT);
+    drawPixelRect(x + 23, y + 23, 2, 1, VENT);
+    // Arms — spread wide for balance
+    drawPixelRect(x + 0, y + 14, 6, 4, JACKET);
+    drawPixelRect(x + 0, y + 12, 4, 3, JACKET);
+    drawPixelRect(x + 0, y + 12, 3, 2, SKIN);
+    drawPixelRect(x + 22, y + 16, 6, 4, JACKET);
+    drawPixelRect(x + 26, y + 14, 2, 3, JACKET);
+    drawPixelRect(x + 26, y + 14, 2, 2, SKIN);
     // Belt
-    drawPixelRect(x + 10, y + 22, 8, 2, BELT);
-    // Legs — dangling, slightly apart
-    drawPixelRect(x + 6, y + 24, 6, 8, PANTS);
-    drawPixelRect(x + 16, y + 24, 6, 8, PANTS);
-    // Boots — hanging
-    drawPixelRect(x + 5, y + 32, 8, 4, BOOTS);
-    drawPixelRect(x + 15, y + 32, 8, 4, BOOTS);
+    drawPixelRect(x + 6, y + 23, 16, 2, CARGO);
+    drawPixelRect(x + 11, y + 23, 6, 2, BUCKLE);
+    // Legs — dangling apart
+    drawPixelRect(x + 6, y + 25, 6, 7, CARGO);
+    drawPixelRect(x + 16, y + 25, 6, 7, CARGO);
+    drawPixelRect(x + 8, y + 27, 2, 2, CARGO_L);
+    drawPixelRect(x + 18, y + 27, 2, 2, CARGO_L);
+    // Boots — dangling
+    drawPixelRect(x + 5, y + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 15, y + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 6, y + 32, 3, 1, BOOTS_H);
+    drawPixelRect(x + 16, y + 32, 3, 1, BOOTS_H);
     return;
   }
 
-  // ── RUN: 4-frame running cycle ──
-  // Hair
-  drawPixelRect(x + 4, y, 20, 4, HAIR);
-  drawPixelRect(x + 6, y - 2, 4, 3, HAIR); // tuft
+  // ── RUN: 4-frame cycle with dynamic limbs ──
+  // Hair — bouncing tuft
+  const hbob = (frame % 2 === 0) ? 0 : -1;
+  drawPixelRect(x + 7, y - 2 + hbob, 4, 4, HAIR);
+  drawPixelRect(x + 11, y - 4 + hbob, 5, 6, HAIR);
+  drawPixelRect(x + 16, y - 1 + hbob, 4, 3, HAIR);
+  drawPixelRect(x + 5, y + 1, 18, 3, HAIR);
+  drawPixelRect(x + 9, y - 2 + hbob, 2, 3, HAIR_HI);
+  drawPixelRect(x + 13, y - 3 + hbob, 2, 3, HAIR_HI);
   // Head
   drawPixelRect(x + 6, y + 4, 16, 10, SKIN);
-  // Goggles
-  drawPixelRect(x + 6, y + 5, 16, 5, GFRAME);
-  drawPixelRect(x + 7, y + 6, 6, 3, GOGGLE);
-  drawPixelRect(x + 15, y + 6, 6, 3, GOGGLE);
-  // Mouth — grin
-  drawPixelRect(x + 12, y + 11, 5, 2, '#c0392b');
+  drawPixelRect(x + 6, y + 10, 4, 4, SKIN_SH);
+  // Visor
+  drawPixelRect(x + 6, y + 5, 16, 5, VISOR_D);
+  drawPixelRect(x + 7, y + 6, 6, 3, VISOR);
+  drawPixelRect(x + 15, y + 6, 6, 3, VISOR);
+  drawPixelRect(x + 8, y + 6, 2, 1, '#b2ffff');
+  // Mouth — determined grin
+  drawPixelRect(x + 13, y + 11, 5, 2, MOUTH);
   // Body
-  drawPixelRect(x + 6, y + 14, 16, 8, VEST);
-  drawPixelRect(x + 8, y + 15, 12, 6, SHIRT);
+  drawPixelRect(x + 6, y + 14, 16, 8, JACKET);
+  drawPixelRect(x + 6, y + 14, 4, 6, JACK_HI);
+  drawPixelRect(x + 18, y + 16, 4, 4, JACK_SH);
+  // Jetpack
+  drawPixelRect(x + 22, y + 14, 4, 8, PACK);
+  drawPixelRect(x + 22, y + 14, 4, 2, PACK_LT);
+  drawPixelRect(x + 23, y + 22, 2, 2, VENT);
   // Belt
-  drawPixelRect(x + 10, y + 22, 8, 2, BELT);
+  drawPixelRect(x + 6, y + 22, 16, 2, CARGO);
+  drawPixelRect(x + 11, y + 22, 6, 2, BUCKLE);
 
-  // Arms & Legs — 4-frame run cycle
+  // ── Arms & Legs — 4-frame run cycle ──
   const phase = frame % 4;
   if (phase === 0) {
-    // Arms: left forward, right back
-    drawPixelRect(x + 22, y + 14, 6, 4, SHIRT);  // right arm back
-    drawPixelRect(x + 24, y + 14, 4, 2, SKIN);
-    drawPixelRect(x + 0, y + 16, 6, 4, SHIRT);   // left arm forward
-    drawPixelRect(x + 0, y + 16, 4, 2, SKIN);
-    // Legs: left forward, right back
-    drawPixelRect(x + 4, y + 24, 6, 8, PANTS);
-    drawPixelRect(x + 16, y + 26, 6, 6, PANTS);
-    drawPixelRect(x + 2, y + 32, 8, 4, BOOTS);
-    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS);
+    // Left arm forward, right arm back
+    drawPixelRect(x + 0, y + 16, 6, 5, JACKET);
+    drawPixelRect(x + 0, y + 21, 4, 2, SKIN);
+    drawPixelRect(x + 22, y + 13, 4, 5, JACKET);
+    drawPixelRect(x + 22, y + 13, 3, 2, SKIN);
+    // Left leg forward, right leg back
+    drawPixelRect(x + 4, y + 24, 7, 8, CARGO);
+    drawPixelRect(x + 6, y + 26, 2, 2, CARGO_L);
+    drawPixelRect(x + 16, y + 26, 6, 6, CARGO);
+    drawPixelRect(x + 2, y + 32, 9, 4, BOOTS_C);
+    drawPixelRect(x + 3, y + 32, 3, 1, BOOTS_H);
+    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS_C);
   } else if (phase === 1) {
-    // Contact — legs closer together
-    drawPixelRect(x + 0, y + 16, 6, 3, SHIRT);
-    drawPixelRect(x + 0, y + 16, 4, 2, SKIN);
-    drawPixelRect(x + 22, y + 16, 6, 3, SHIRT);
-    drawPixelRect(x + 24, y + 16, 4, 2, SKIN);
-    drawPixelRect(x + 6, y + 24, 6, 8, PANTS);
-    drawPixelRect(x + 16, y + 24, 6, 8, PANTS);
-    drawPixelRect(x + 4, y + 32, 8, 4, BOOTS);
-    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS);
+    // Contact — both legs under body
+    drawPixelRect(x + 1, y + 15, 5, 4, JACKET);
+    drawPixelRect(x + 1, y + 19, 4, 2, SKIN);
+    drawPixelRect(x + 22, y + 15, 4, 4, JACKET);
+    drawPixelRect(x + 22, y + 19, 3, 2, SKIN);
+    drawPixelRect(x + 7, y + 24, 6, 8, CARGO);
+    drawPixelRect(x + 9, y + 26, 2, 2, CARGO_L);
+    drawPixelRect(x + 15, y + 24, 6, 8, CARGO);
+    drawPixelRect(x + 17, y + 26, 2, 2, CARGO_L);
+    drawPixelRect(x + 5, y + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 6, y + 32, 3, 1, BOOTS_H);
+    drawPixelRect(x + 15, y + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 16, y + 32, 3, 1, BOOTS_H);
   } else if (phase === 2) {
-    // Arms: right forward, left back (mirror of 0)
-    drawPixelRect(x + 0, y + 14, 6, 4, SHIRT);   // left arm back
-    drawPixelRect(x + 0, y + 14, 4, 2, SKIN);
-    drawPixelRect(x + 22, y + 16, 6, 4, SHIRT);  // right arm forward
-    drawPixelRect(x + 24, y + 16, 4, 2, SKIN);
-    // Legs: right forward, left back
-    drawPixelRect(x + 16, y + 24, 6, 8, PANTS);
-    drawPixelRect(x + 4, y + 26, 6, 6, PANTS);
-    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS);
-    drawPixelRect(x + 2, y + 32, 8, 4, BOOTS);
+    // Right arm forward, left arm back (mirror of 0)
+    drawPixelRect(x + 22, y + 16, 6, 5, JACKET);
+    drawPixelRect(x + 24, y + 21, 4, 2, SKIN);
+    drawPixelRect(x + 2, y + 13, 4, 5, JACKET);
+    drawPixelRect(x + 2, y + 13, 3, 2, SKIN);
+    // Right leg forward, left leg back
+    drawPixelRect(x + 15, y + 24, 7, 8, CARGO);
+    drawPixelRect(x + 17, y + 26, 2, 2, CARGO_L);
+    drawPixelRect(x + 6, y + 26, 6, 6, CARGO);
+    drawPixelRect(x + 15, y + 32, 9, 4, BOOTS_C);
+    drawPixelRect(x + 16, y + 32, 3, 1, BOOTS_H);
+    drawPixelRect(x + 4, y + 32, 8, 4, BOOTS_C);
   } else {
-    // phase === 3: passing — legs closer together again
-    drawPixelRect(x + 22, y + 16, 6, 3, SHIRT);
-    drawPixelRect(x + 24, y + 16, 4, 2, SKIN);
-    drawPixelRect(x + 0, y + 16, 6, 3, SHIRT);
-    drawPixelRect(x + 0, y + 16, 4, 2, SKIN);
-    drawPixelRect(x + 8, y + 24, 6, 8, PANTS);
-    drawPixelRect(x + 14, y + 24, 6, 8, PANTS);
-    drawPixelRect(x + 6, y + 32, 8, 4, BOOTS);
-    drawPixelRect(x + 14, y + 32, 8, 4, BOOTS);
+    // phase 3: passing — legs close, arms neutral
+    drawPixelRect(x + 1, y + 16, 5, 3, JACKET);
+    drawPixelRect(x + 1, y + 19, 3, 2, SKIN);
+    drawPixelRect(x + 22, y + 16, 5, 3, JACKET);
+    drawPixelRect(x + 23, y + 19, 3, 2, SKIN);
+    drawPixelRect(x + 8, y + 24, 6, 8, CARGO);
+    drawPixelRect(x + 10, y + 26, 2, 2, CARGO_L);
+    drawPixelRect(x + 14, y + 24, 6, 8, CARGO);
+    drawPixelRect(x + 16, y + 26, 2, 2, CARGO_L);
+    drawPixelRect(x + 6, y + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 7, y + 32, 3, 1, BOOTS_H);
+    drawPixelRect(x + 14, y + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 15, y + 32, 3, 1, BOOTS_H);
   }
 }
 
@@ -1285,7 +1417,7 @@ function resetGame() {
   player.vy = 0;
   player.onGround = true;
   player.frame = 0;
-  player.animState = 'run';
+  player.animState = 'idle';
   player.landTimer = 0;
   player.wasOnGround = true;
   pipes = [];
@@ -1871,7 +2003,11 @@ function draw() {
   if (state === 'playing' || state === 'dead') {
     drawPlayer(player.x, player.y, player.frame);
   } else {
+    // Title screen: show idle animation
+    const prevAnim = player.animState;
+    player.animState = 'idle';
     drawPlayer(player.x, DESIGN_H - GROUND_H - player.h, 0);
+    player.animState = prevAnim;
   }
 
   // Debris fragments (drawn on top of everything)
@@ -1961,6 +2097,7 @@ olBtn.addEventListener('click', (e) => {
 function startGame() {
   hideOverlay();
   resetGame();
+  player.animState = 'run';
   state = 'playing';
 }
 

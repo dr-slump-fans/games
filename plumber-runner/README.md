@@ -143,18 +143,34 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 - Bricks scroll with the world at the same speed as pipes
 - Broken bricks are removed immediately — fragments are cosmetic only
 
+## Player Character — "Bolt" the Explorer
+
+The player character is a fully **original pixel art creation** named "Bolt" — a spiky-haired explorer with a cyan visor and mini jetpack. The character is rendered procedurally on the HTML5 Canvas using filled rectangles (no sprite sheets or external images).
+
+**Design features:**
+- Deep indigo spiky hair with highlights
+- Cyan tech visor (not goggles) with glint effects
+- Burnt orange explorer jacket with shading
+- Grey-blue jetpack on back with animated thrust glow
+- Dark cargo pants with pocket details
+- Utility belt with yellow buckle
+
+**This character is 100% original and is NOT derived from any Nintendo, Super Mario, or other copyrighted IP.** No external sprite sheets, images, or third-party assets are used.
+
 ## Animation States
 
-The player character has a state machine that drives distinct visual poses based on physics:
+The player character has a 5-state animation machine that drives distinct visual poses based on physics:
 
 | State | Trigger | Visual |
 |-------|---------|--------|
-| `run` | On ground, not landing | 4-frame run cycle — arms and legs alternate |
-| `jump_up` | Airborne with upward velocity (`vy < -0.5`) | Arms raised, legs tucked, hair blown upward |
-| `fall` | Airborne with downward velocity (`vy >= -0.5`) | Arms spread wide, legs dangling |
-| `land` | Just touched ground after being airborne | 6-frame squash pose with dust puffs |
+| `idle` | Title screen / pre-game | Relaxed stance with subtle breathing bob animation |
+| `run` | On ground, not landing | 4-frame run cycle — arms and legs alternate, hair bounces |
+| `jump_up` | Airborne with upward velocity (`vy < -0.5`) | Arms raised, legs tucked, hair streaming up, jetpack thrust glow |
+| `fall` | Airborne with downward velocity (`vy >= -0.5`) | Arms spread for balance, legs dangling, worried expression |
+| `land` | Just touched ground after being airborne | 6-frame squash impact pose with dual dust puffs |
 
 Transitions happen automatically every frame in `updateAnimState()`:
+- **Idle → Run**: game starts → state becomes `run`
 - **Ground → Air**: jump sets `onGround = false` → state becomes `jump_up`
 - **Rising → Falling**: when `vy` crosses the threshold → state becomes `fall`
 - **Air → Ground**: landing detected via `wasOnGround` flag → state becomes `land` for 6 frames
@@ -269,8 +285,9 @@ https://<username>.github.io/<repo>/plumber-runner/
 **All game assets (character, pipes, ground, clouds, hills, breakable bricks, debris fragments) are drawn programmatically on the HTML5 Canvas at runtime.** No external sprite sheets, images, or fonts are used.
 
 - All visual assets are **original pixel art** rendered via JavaScript/Canvas code
-- The player character is an **original goggle-wearing adventurer** — not derived from any Nintendo or other copyrighted IP
-- No Nintendo, Super Mario, or other copyrighted materials are used
+- The player character **"Bolt"** is a fully **original pixel art explorer** with visor and jetpack — designed from scratch, not derived from any Nintendo or other copyrighted IP
+- **No Nintendo sprites, Super Mario assets, or any third-party copyrighted materials are used anywhere in this project**
+- All 5 animation states (idle, run, jump_up, fall, land) are hand-crafted procedural pixel art with multi-frame animation
 - The game concept (side-scrolling runner with pipe obstacles) is a generic game mechanic not subject to copyright
 
 ### License
