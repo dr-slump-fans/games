@@ -72,11 +72,20 @@ This prevents unfair situations where a single ultra-tall pipe appears with no w
 | Bottom pipe | Rises from the ground — you can jump over **or stand on top** |
 | Ceiling pipe | Hangs from the top — duck under or time your jump carefully |
 | Pipe pair | Bottom + ceiling pipe together — navigate through the gap |
-| Breakable brick | Floating sandy brick — **smash it from below** for bonus points! |
+| Breakable brick | Stepping-stone brick placed before pipes — **stand on it or smash it from below** for bonus points! |
 
-## Breakable Brick Rules
+## Breakable Brick Rules — Stepping Stones
 
-Breakable bricks are floating obstacles that spawn near pipes. Unlike pipes and ground, **bricks can be destroyed**.
+Breakable bricks serve as **stepping stones** placed in front of pipes. They help players reach tall pipe tops and add strategic platforming.
+
+### Stepping Stone Placement
+
+- Bricks spawn **40–140 px to the left** of a bottom pipe (never on top of or touching a pipe)
+- **Tall pipes** (≥ 140 px) **always** get stepping-stone bricks; shorter pipes have a 30% chance
+- **Very tall pipes** (≥ 180 px) get **2 stepping stones** at different heights; others get 1
+- Lower bricks are placed ~40–70 px above ground (reachable with a small jump)
+- Higher bricks (second stone) are placed at 40–65% of the pipe's height for bridging
+- Bricks and pipes maintain a minimum gap (no overlapping or flush contact)
 
 ### How to Break
 
@@ -96,7 +105,9 @@ Breakable bricks are floating obstacles that spawn near pipes. Unlike pipes and 
 | Property | Value |
 |----------|-------|
 | Size | 32×24 pixels |
-| Spawn chance | 30% per pipe group (bottom-only or pair without ceiling) |
+| Spawn chance | 100% for tall pipes (≥ 140 px), 30% for shorter pipes |
+| Count | 2 bricks for very tall pipes (≥ 180 px), 1 otherwise |
+| Horizontal distance | 40–140 px in front of the pipe |
 | Break condition | Player rising (`vy < 0`) + head overlaps brick bottom |
 | Score | +5 per brick |
 | Fragments | 6 debris pieces with gravity physics |
@@ -111,6 +122,7 @@ Breakable bricks are floating obstacles that spawn near pipes. Unlike pipes and 
 ### Brick Interaction
 
 - You can **stand on top** of intact bricks (they act as platforms from above)
+- Bricks are placed before pipes as launch platforms — use them to reach tall pipe tops
 - Bricks scroll with the world at the same speed as pipes
 - Broken bricks are removed immediately — fragments are cosmetic only
 

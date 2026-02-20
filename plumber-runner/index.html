@@ -985,28 +985,108 @@ function spawnStaircaseFor(targetH, targetX, gapMin, gapMax) {
   return curX; // returns leftmost step X so we know where steps start
 }
 
-// Maybe spawn a breakable brick floating above a bottom pipe
-function maybeSpawnBrick(pipeX, pipeH, hasCeiling) {
+// Spawn stepping-stone bricks before a bottom pipe
+// Bricks are placed 40~140px to the LEFT of the pipe, at heights that help
+// the player reach the pipe top via small or large jumps.
+// Tall pipes (>= TALL_PIPE_THRESHOLD) always get bricks; shorter pipes have a random chance.
+function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
   if (hasCeiling) return; // don't spawn bricks under ceiling pipes
-  if (Math.random() > BRICK_SPAWN_CHANCE) return;
   const groundY = DESIGN_H - GROUND_H;
   const pipeTopY = groundY - pipeH;
-  // Place brick in the air above the pipe, at a height the player can reach by jumping
-  // Brick bottom should be above pipe top, and reachable from the ground
-  // Player jump apex from ground is roughly: groundY - playerH + JUMP_INITIAL^2/(2*GRAVITY) ≈ about 85 px above ground
-  const minBrickY = 40; // don't place too close to screen top
-  const maxBrickY = pipeTopY - BRICK_H - 20; // leave clearance above pipe
-  if (maxBrickY < minBrickY) return; // not enough space
-  const brickY = minBrickY + Math.random() * (maxBrickY - minBrickY);
-  // Offset brick horizontally a bit (near the pipe, not exactly on it)
-  const brickX = pipeX + (PIPE_W - BRICK_W) / 2 + (Math.random() - 0.5) * 20;
-  bricks.push({
-    x: brickX,
-    y: brickY,
-    w: BRICK_W,
-    h: BRICK_H,
-    broken: false,
-  });
+
+  // Tall pipes always get stepping stones; shorter pipes use BRICK_SPAWN_CHANCE
+  const isTall = pipeH >= TALL_PIPE_THRESHOLD;
+  if (!isTall && Math.random() > BRICK_SPAWN_CHANCE) return;
+
+  // Decide 1 or 2 bricks: tall pipes get 2, shorter pipes get 1
+  const brickCount = (isTall && pipeH >= 180) ? 2 : 1;
+
+  // Player physics reference:
+  // Small jump apex from ground ≈ 45px above ground (JUMP_INITIAL^2 / (2*GRAVITY))
+  // Full jump apex from ground ≈ 130px above ground (with hold boost)
+  // Ground surface Y = groundY (DESIGN_H - GROUND_H)
+  // Player stands at groundY - player.h (36)
+
+  for (let i = 0; i < brickCount; i++) {
+    // Horizontal distance: 40~140px before the pipe
+    // For 2 bricks, spread them: first one farther, second one closer
+    let horizDist;
+    if (brickCount === 2) {
+      horizDist = (i === 0)
+        ? 100 + Math.random() * 40   // farther brick: 100~140px
+        : 40 + Math.random() * 40;   // closer brick: 40~80px
+    } else {
+      horizDist = 40 + Math.random() * 100; // single brick: 40~140px
+    }
+    const brickX = pipeX - horizDist;
+
+    // Vertical placement: brick top is a stepping height
+    // For single or first brick: reachable from ground via small jump
+    //   Place brick surface at roughly 30~60px above ground
+    // For second (closer) brick: higher, bridging to pipe top
+    //   Place brick surface at roughly 50~80% of pipe height
+    let brickTopY;
+    if (brickCount === 2 && i === 1) {
+      // Higher stepping stone — between 40% and 65% of pipe height off ground
+      const ratio = 0.40 + Math.random() * 0.25;
+      brickTopY = groundY - Math.round(pipeH * ratio);
+    } else {
+      // Lower stepping stone — reachable from ground with small jump
+      // Player can small-jump about 45px, so brick top at groundY - 40~70
+      const stepH = 40 + Math.random() * 30;
+      brickTopY = groundY - stepH;
+    }
+
+    // Clamp: don't place too high (above screen) or too low (at ground)
+    brickTopY = Math.max(30, Math.min(brickTopY, groundY - BRICK_H - 10));
+
+    // Prevent overlapping with existing pipes
+    const brickRight = brickX + BRICK_W;
+    const brickBottom = brickTopY + BRICK_H;
+    let overlaps = false;
+    for (const pipe of pipes) {
+      const rects = getPipeRects(pipe);
+      // Check against lip and body rects
+      if (rectsOverlap(brickX, brickTopY, BRICK_W, BRICK_H,
+          rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
+          rectsOverlap(brickX, brickTopY, BRICK_W, BRICK_H,
+          rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+        overlaps = true;
+        break;
+      }
+      // Also ensure minimum 8px gap from pipe edges (no "touching")
+      const lipR = rects.lipRect;
+      if (Math.abs(brickX - (lipR.x + lipR.w)) < 8 || Math.abs(brickRight - lipR.x) < 8) {
+        if (brickTopY < lipR.y + lipR.h && brickBottom > lipR.y) {
+          overlaps = true;
+          break;
+        }
+      }
+    }
+
+    // Also prevent overlapping with existing bricks
+    if (!overlaps) {
+      for (const existingBrick of bricks) {
+        if (existingBrick.broken) continue;
+        if (rectsOverlap(brickX, brickTopY, BRICK_W, BRICK_H,
+            existingBrick.x - 8, existingBrick.y - 8,
+            existingBrick.w + 16, existingBrick.h + 16)) {
+          overlaps = true;
+          break;
+        }
+      }
+    }
+
+    if (overlaps) continue; // skip this brick if overlapping
+
+    bricks.push({
+      x: brickX,
+      y: brickTopY,
+      w: BRICK_W,
+      h: BRICK_H,
+      broken: false,
+    });
+  }
 }
 
 function spawnPipe() {
@@ -1046,8 +1126,8 @@ function spawnPipe() {
       spawnStaircaseFor(h, newX, gapMin, gapMax);
     }
     pipes.push({ x: newX, h, fromTop: false, scored: false });
-    // Maybe spawn a breakable brick above this pipe
-    maybeSpawnBrick(newX, h, false);
+    // Maybe spawn stepping-stone bricks before this pipe
+    maybeSpawnSteppingStoneBricks(newX, h, false);
   } else if (roll < bottomOnlyChance + topOnlyChance) {
     // Top pipe only
     pipes.push({
@@ -1074,8 +1154,8 @@ function spawnPipe() {
       pipes.push({ x: newX, h: Math.max(50, topH), fromTop: true, scored: false });
     } else {
       pipes.push({ x: newX, h: bottomH, fromTop: false, scored: false });
-      // Spawn brick in the open space above (no ceiling pipe)
-      maybeSpawnBrick(newX, bottomH, false);
+      // Spawn stepping-stone bricks before this pipe (no ceiling pipe)
+      maybeSpawnSteppingStoneBricks(newX, bottomH, false);
     }
   }
 }
