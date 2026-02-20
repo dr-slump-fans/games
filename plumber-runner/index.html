@@ -77,12 +77,17 @@ const GROUND_H = 60;
 const GRAVITY = 0.55;
 const JUMP_INITIAL = -8.5;
 const JUMP_HOLD_ACCEL = -0.45;
-const JUMP_HOLD_MAX_T = 14; // frames of hold boost
+const JUMP_HOLD_MAX_T = 14;
 const SCROLL_SPEED_BASE = 3.5;
-const SCROLL_ACCEL = 0.0003; // speed increases over time
-const PIPE_MIN_GAP = 220;
-const PIPE_MAX_GAP = 340;
-const PIPE_HEIGHTS = [60, 90, 120, 150, 50, 75, 105]; // multiple heights
+const SCROLL_ACCEL = 0.0003;
+const PIPE_MIN_GAP = 240;
+const PIPE_MAX_GAP = 360;
+const PIPE_HEIGHTS_BOTTOM = [60, 90, 120, 150, 75, 105];
+const PIPE_HEIGHTS_TOP = [60, 80, 100, 120, 140];
+const PIPE_W = 48;
+const LIP_W = 56;
+const LIP_H = 16;
+const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
 
 // ── Canvas Setup ───────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -124,6 +129,7 @@ const player = {
 };
 
 // ── Pipes ──────────────────────────────────────────────
+// Each pipe: { x, h, fromTop (bool), scored }
 let pipes = [];
 
 // ── Clouds (decorative) ────────────────────────────────
@@ -160,7 +166,7 @@ function drawPixelRect(x, y, w, h, color) {
   ctx.fillRect(Math.round(x), Math.round(y), w, h);
 }
 
-// Draw the player character (a little plumber-like pixel guy, original design)
+// Draw the player character (original pixel plumber)
 function drawPlayer(px, py, frame) {
   const x = Math.round(px);
   const y = Math.round(py);
@@ -200,47 +206,86 @@ function drawPlayer(px, py, frame) {
   }
 }
 
-// Draw a pipe (green, with lip)
-function drawPipe(px, ph) {
+// Get pipe collision rectangles
+// Returns { lipRect, bodyRect, topY (top of entire pipe visual) }
+function getPipeRects(pipe) {
+  const groundY = DESIGN_H - GROUND_H;
+  const lipOffset = (LIP_W - PIPE_W) / 2;
+  if (!pipe.fromTop) {
+    // Bottom pipe
+    const topY = groundY - pipe.h;
+    return {
+      lipRect: { x: pipe.x, y: topY, w: LIP_W, h: LIP_H },
+      bodyRect: { x: pipe.x + lipOffset, y: topY + LIP_H, w: PIPE_W, h: pipe.h - LIP_H },
+      standY: topY, // top surface Y for standing
+    };
+  } else {
+    // Top (ceiling) pipe — hangs from y=0
+    const bottomY = pipe.h;
+    return {
+      lipRect: { x: pipe.x, y: bottomY - LIP_H, w: LIP_W, h: LIP_H },
+      bodyRect: { x: pipe.x + lipOffset, y: 0, w: PIPE_W, h: pipe.h - LIP_H },
+      standY: null, // cannot stand on top pipes
+    };
+  }
+}
+
+// Draw a bottom pipe (green, with lip at top)
+function drawBottomPipe(px, ph) {
   const x = Math.round(px);
   const groundY = DESIGN_H - GROUND_H;
-  const pipeW = 48;
-  const lipW = 56;
-  const lipH = 16;
-  const bodyY = groundY - ph;
-  const bodyH = ph - lipH;
+  const lipOffset = (LIP_W - PIPE_W) / 2;
+  const bodyY = groundY - ph + LIP_H;
+  const bodyH = ph - LIP_H;
+  const topY = groundY - ph;
   // Pipe body
   ctx.fillStyle = '#27ae60';
-  ctx.fillRect(x + (lipW - pipeW) / 2, bodyY + lipH, pipeW, bodyH);
-  // Pipe body highlight
+  ctx.fillRect(x + lipOffset, bodyY, PIPE_W, bodyH);
   ctx.fillStyle = '#2ecc71';
-  ctx.fillRect(x + (lipW - pipeW) / 2 + 4, bodyY + lipH, 8, bodyH);
-  // Pipe body shadow
+  ctx.fillRect(x + lipOffset + 4, bodyY, 8, bodyH);
   ctx.fillStyle = '#1e8449';
-  ctx.fillRect(x + (lipW - pipeW) / 2 + pipeW - 8, bodyY + lipH, 8, bodyH);
+  ctx.fillRect(x + lipOffset + PIPE_W - 8, bodyY, 8, bodyH);
   // Lip
   ctx.fillStyle = '#27ae60';
-  ctx.fillRect(x, bodyY, lipW, lipH);
-  // Lip highlight
+  ctx.fillRect(x, topY, LIP_W, LIP_H);
   ctx.fillStyle = '#2ecc71';
-  ctx.fillRect(x + 4, bodyY + 2, 8, lipH - 4);
-  // Lip shadow
+  ctx.fillRect(x + 4, topY + 2, 8, LIP_H - 4);
   ctx.fillStyle = '#1e8449';
-  ctx.fillRect(x + lipW - 8, bodyY + 2, 6, lipH - 4);
-  // Lip top line
+  ctx.fillRect(x + LIP_W - 8, topY + 2, 6, LIP_H - 4);
   ctx.fillStyle = '#196f3d';
-  ctx.fillRect(x, bodyY, lipW, 2);
+  ctx.fillRect(x, topY, LIP_W, 2);
+}
 
-  return { x: x + (lipW - pipeW) / 2, y: bodyY, w: pipeW, h: ph, lipX: x, lipW: lipW, lipH: lipH };
+// Draw a top (ceiling) pipe (hanging from top, lip at bottom)
+function drawTopPipe(px, ph) {
+  const x = Math.round(px);
+  const lipOffset = (LIP_W - PIPE_W) / 2;
+  const bodyH = ph - LIP_H;
+  const lipY = bodyH;
+  // Pipe body
+  ctx.fillStyle = '#27ae60';
+  ctx.fillRect(x + lipOffset, 0, PIPE_W, bodyH);
+  ctx.fillStyle = '#2ecc71';
+  ctx.fillRect(x + lipOffset + 4, 0, 8, bodyH);
+  ctx.fillStyle = '#1e8449';
+  ctx.fillRect(x + lipOffset + PIPE_W - 8, 0, 8, bodyH);
+  // Lip (at bottom of top pipe)
+  ctx.fillStyle = '#27ae60';
+  ctx.fillRect(x, lipY, LIP_W, LIP_H);
+  ctx.fillStyle = '#2ecc71';
+  ctx.fillRect(x + 4, lipY + 2, 8, LIP_H - 4);
+  ctx.fillStyle = '#1e8449';
+  ctx.fillRect(x + LIP_W - 8, lipY + 2, 6, LIP_H - 4);
+  // Bottom line of lip
+  ctx.fillStyle = '#196f3d';
+  ctx.fillRect(x, lipY + LIP_H - 2, LIP_W, 2);
 }
 
 // Draw ground with brick pattern
 function drawGround(offset) {
   const groundY = DESIGN_H - GROUND_H;
-  // Base
   ctx.fillStyle = '#c0784a';
   ctx.fillRect(0, groundY, DESIGN_W, GROUND_H);
-  // Brick pattern
   const brickW = 32;
   const brickH = 16;
   const startX = -(offset % brickW);
@@ -250,13 +295,10 @@ function drawGround(offset) {
     for (let col = -1; col < Math.ceil(DESIGN_W / brickW) + 2; col++) {
       const bx = startX + col * brickW + rowOffset;
       const by = groundY + row * brickH;
-      // horizontal mortar
       ctx.fillRect(bx, by, brickW, 1);
-      // vertical mortar
       ctx.fillRect(bx, by, 1, brickH);
     }
   }
-  // Top line
   ctx.fillStyle = '#8B4513';
   ctx.fillRect(0, groundY, DESIGN_W, 3);
 }
@@ -285,29 +327,141 @@ function drawHill(hx, hw, hh) {
 }
 
 // ── Collision ──────────────────────────────────────────
-function boxCollide(ax, ay, aw, ah, bx, by, bw, bh) {
+function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
-function checkCollision() {
+// Get player hitbox (slightly shrunken for fairness)
+function getPlayerHitbox() {
+  return {
+    x: player.x + 4,
+    y: player.y + 2,
+    w: player.w - 8,
+    h: player.h - 4,
+  };
+}
+
+// Check if player is standing on any pipe top. Returns standY or null.
+function checkPipeStanding() {
+  const pb = getPlayerHitbox();
+  const feetY = pb.y + pb.h;
   const groundY = DESIGN_H - GROUND_H;
-  const px = player.x + 4; // shrink hitbox a bit
-  const py = player.y + 2;
-  const pw = player.w - 8;
-  const ph = player.h - 4;
 
   for (const pipe of pipes) {
-    const lipW = 56;
-    const pipeW = 48;
-    const lipH = 16;
-    const pipeBodyX = pipe.x + (lipW - pipeW) / 2;
-    const pipeTopY = groundY - pipe.h;
-
-    // Lip collision
-    if (boxCollide(px, py, pw, ph, pipe.x, pipeTopY, lipW, lipH)) return true;
-    // Body collision
-    if (boxCollide(px, py, pw, ph, pipeBodyX, pipeTopY + lipH, pipeW, pipe.h - lipH)) return true;
+    if (pipe.fromTop) continue; // can't stand on ceiling pipes
+    const rects = getPipeRects(pipe);
+    const standY = rects.standY;
+    // Player feet must be near the pipe top surface, falling downward
+    // and horizontally overlapping the lip
+    if (player.vy >= 0 &&
+        feetY >= standY && feetY <= standY + 10 &&
+        pb.x + pb.w > pipe.x + 4 && pb.x < pipe.x + LIP_W - 4) {
+      return standY;
+    }
   }
+  return null;
+}
+
+// Check for side collision with pipes — returns push-back amount or 0
+function checkSideCollision() {
+  const pb = getPlayerHitbox();
+  let pushBack = 0;
+
+  for (const pipe of pipes) {
+    const rects = getPipeRects(pipe);
+    // Check against lip rect
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h)) {
+      // Determine if this is a side collision (player approaching from left)
+      const playerRight = pb.x + pb.w;
+      const pipeLeft = rects.lipRect.x;
+      const overlapX = playerRight - pipeLeft;
+      // Only treat as side hit if player center is to the left of pipe center
+      // and the overlap is lateral (not landing on top)
+      const playerBottom = pb.y + pb.h;
+      const isAbove = playerBottom <= rects.lipRect.y + 6;
+      if (!isAbove && overlapX > 0 && overlapX < pb.w) {
+        pushBack = Math.max(pushBack, overlapX);
+      }
+    }
+    // Check against body rect
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+      const playerRight = pb.x + pb.w;
+      const pipeLeft = rects.bodyRect.x;
+      const overlapX = playerRight - pipeLeft;
+      if (overlapX > 0 && overlapX < pb.w) {
+        pushBack = Math.max(pushBack, overlapX);
+      }
+    }
+  }
+  return pushBack;
+}
+
+// Check if player is being crushed (squeezed between obstacles)
+function checkCrush() {
+  const pb = getPlayerHitbox();
+
+  // 1) Crushed against left screen edge by pipe pushing from right
+  if (player.x <= 0) {
+    // Check if any pipe body/lip overlaps horizontally
+    for (const pipe of pipes) {
+      const rects = getPipeRects(pipe);
+      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+          rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
+          rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+          rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+        return true;
+      }
+    }
+  }
+
+  // 2) Vertically crushed between bottom pipe/ground and top pipe/ceiling
+  // Find the highest floor surface under player and lowest ceiling above
+  let floorY = DESIGN_H - GROUND_H; // ground
+  let ceilY = 0; // screen top
+
+  for (const pipe of pipes) {
+    const rects = getPipeRects(pipe);
+    // Check if pipe is horizontally relevant (overlaps player X)
+    const horizOverlap = pb.x + pb.w > rects.lipRect.x + 4 &&
+                         pb.x < rects.lipRect.x + rects.lipRect.w - 4;
+    if (!horizOverlap) continue;
+
+    if (!pipe.fromTop) {
+      // Bottom pipe — acts as raised floor
+      const pipeTop = rects.standY;
+      if (pipeTop < floorY) floorY = pipeTop;
+    } else {
+      // Top pipe — acts as lowered ceiling
+      const pipeBottom = pipe.h; // bottom of top pipe
+      if (pipeBottom > ceilY) ceilY = pipeBottom;
+    }
+  }
+
+  // If the available vertical space is less than player height, crushed
+  const availableSpace = floorY - ceilY;
+  if (availableSpace < pb.h - CRUSH_THRESHOLD) {
+    // Only trigger if player is actually in this squeeze zone
+    if (pb.y + pb.h >= floorY - 2 && pb.y <= ceilY + 2) {
+      return true;
+    }
+  }
+
+  // 3) Head hitting ceiling pipe while standing on bottom pipe
+  for (const topPipe of pipes) {
+    if (!topPipe.fromTop) continue;
+    const topRects = getPipeRects(topPipe);
+    // Check if player head overlaps top pipe
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        topRects.lipRect.x, topRects.lipRect.y, topRects.lipRect.w, topRects.lipRect.h) ||
+        rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        topRects.bodyRect.x, topRects.bodyRect.y, topRects.bodyRect.w, topRects.bodyRect.h)) {
+      // Player is also on a platform (ground or bottom pipe)
+      if (player.onGround) return true;
+    }
+  }
+
   return false;
 }
 
@@ -316,6 +470,7 @@ let groundOffset = 0;
 
 function resetGame() {
   player.y = DESIGN_H - GROUND_H - player.h;
+  player.x = 120;
   player.vy = 0;
   player.onGround = true;
   player.frame = 0;
@@ -327,10 +482,17 @@ function resetGame() {
   jumpHoldFrames = 0;
   initClouds();
   initHills();
-  // Seed first pipe far away
+  // Seed first pipe pair far away
+  spawnInitialPipes();
+}
+
+function spawnInitialPipes() {
+  const x = DESIGN_W + 100;
+  // Bottom pipe
   pipes.push({
-    x: DESIGN_W + 100,
-    h: PIPE_HEIGHTS[Math.floor(Math.random() * PIPE_HEIGHTS.length)],
+    x: x,
+    h: PIPE_HEIGHTS_BOTTOM[Math.floor(Math.random() * PIPE_HEIGHTS_BOTTOM.length)],
+    fromTop: false,
     scored: false,
   });
 }
@@ -338,11 +500,60 @@ function resetGame() {
 function spawnPipe() {
   const lastPipe = pipes[pipes.length - 1];
   const gap = PIPE_MIN_GAP + Math.random() * (PIPE_MAX_GAP - PIPE_MIN_GAP);
-  pipes.push({
-    x: lastPipe.x + gap,
-    h: PIPE_HEIGHTS[Math.floor(Math.random() * PIPE_HEIGHTS.length)],
-    scored: false,
-  });
+  const newX = lastPipe.x + gap;
+
+  // Decide what to spawn: bottom only, top only, or both (squeeze corridor)
+  const roll = Math.random();
+  const difficulty = Math.min(frameCount / 3000, 1); // 0..1 over time
+
+  if (roll < 0.35) {
+    // Bottom pipe only
+    pipes.push({
+      x: newX,
+      h: PIPE_HEIGHTS_BOTTOM[Math.floor(Math.random() * PIPE_HEIGHTS_BOTTOM.length)],
+      fromTop: false,
+      scored: false,
+    });
+  } else if (roll < 0.55) {
+    // Top pipe only
+    pipes.push({
+      x: newX,
+      h: PIPE_HEIGHTS_TOP[Math.floor(Math.random() * PIPE_HEIGHTS_TOP.length)],
+      fromTop: true,
+      scored: false,
+    });
+  } else {
+    // Both top and bottom — create a passable gap
+    const groundY = DESIGN_H - GROUND_H;
+    const bottomH = PIPE_HEIGHTS_BOTTOM[Math.floor(Math.random() * PIPE_HEIGHTS_BOTTOM.length)];
+    const bottomTopY = groundY - bottomH;
+    // Ensure gap is passable (at least player.h + 30px)
+    const minGapSize = player.h + 30 + (1 - difficulty) * 30;
+    const maxTopH = bottomTopY - minGapSize;
+    if (maxTopH >= 50) {
+      const topH = 50 + Math.floor(Math.random() * (maxTopH - 50));
+      pipes.push({
+        x: newX,
+        h: bottomH,
+        fromTop: false,
+        scored: false,
+      });
+      pipes.push({
+        x: newX,
+        h: topH,
+        fromTop: true,
+        scored: false,
+      });
+    } else {
+      // Not enough room for both, just bottom
+      pipes.push({
+        x: newX,
+        h: bottomH,
+        fromTop: false,
+        scored: false,
+      });
+    }
+  }
 }
 
 function update() {
@@ -352,9 +563,9 @@ function update() {
   scrollSpeed = SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL;
   groundOffset += scrollSpeed;
 
-  // Player physics
   const groundY = DESIGN_H - GROUND_H - player.h;
 
+  // Jump initiation
   if (jumpPressed && player.onGround) {
     player.vy = JUMP_INITIAL;
     player.onGround = false;
@@ -370,11 +581,80 @@ function update() {
   player.vy += GRAVITY;
   player.y += player.vy;
 
+  // Ground collision
   if (player.y >= groundY) {
     player.y = groundY;
     player.vy = 0;
     player.onGround = true;
     jumpHoldFrames = 0;
+  }
+
+  // Pipe top standing
+  if (!player.onGround || player.vy > 0) {
+    const standY = checkPipeStanding();
+    if (standY !== null) {
+      player.y = standY - player.h + 2; // +2 to account for hitbox shrink
+      player.vy = 0;
+      player.onGround = true;
+      jumpHoldFrames = 0;
+    }
+  }
+
+  // If player is standing on a pipe that has moved, check if still supported
+  if (player.onGround && player.y < groundY - 5) {
+    const stillOnPipe = checkPipeStanding();
+    if (stillOnPipe === null) {
+      player.onGround = false; // fell off pipe edge
+    }
+  }
+
+  // Ceiling pipe collision — push player down
+  const pb = getPlayerHitbox();
+  for (const pipe of pipes) {
+    if (!pipe.fromTop) continue;
+    const rects = getPipeRects(pipe);
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h)) {
+      // Push player below the lip
+      const pushTo = rects.lipRect.y + rects.lipRect.h - 2;
+      if (player.y < pushTo) {
+        player.y = pushTo;
+        if (player.vy < 0) player.vy = 0;
+      }
+    }
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+      const pushTo = rects.bodyRect.y + rects.bodyRect.h - 2;
+      if (player.y < pushTo) {
+        player.y = pushTo;
+        if (player.vy < 0) player.vy = 0;
+      }
+    }
+  }
+
+  // Side collision — push player back
+  const sideOverlap = checkSideCollision();
+  if (sideOverlap > 0) {
+    player.x -= sideOverlap + 1;
+  }
+
+  // Clamp player X (don't go off-screen right)
+  if (player.x < -10) player.x = -10;
+
+  // Check crush death
+  if (checkCrush()) {
+    state = 'dead';
+    if (score > highScore) highScore = score;
+    showOverlay('Game Over', `Score: ${score}`, score);
+    return;
+  }
+
+  // If player pushed too far left off screen, also die
+  if (player.x + player.w < -5) {
+    state = 'dead';
+    if (score > highScore) highScore = score;
+    showOverlay('Game Over', `Score: ${score}`, score);
+    return;
   }
 
   // Animation frame
@@ -387,28 +667,30 @@ function update() {
     pipe.x -= scrollSpeed;
   }
 
-  // Score: passed pipe
+  // Score: passed pipe (only count bottom pipes or solo top pipes)
   for (const pipe of pipes) {
-    if (!pipe.scored && pipe.x + 56 < player.x) {
+    if (!pipe.scored && pipe.x + LIP_W < player.x) {
       pipe.scored = true;
       score++;
     }
   }
 
   // Remove off-screen pipes
-  pipes = pipes.filter(p => p.x > -60);
+  pipes = pipes.filter(p => p.x > -LIP_W - 10);
 
-  // Spawn pipes
-  const lastPipe = pipes[pipes.length - 1];
-  if (lastPipe && lastPipe.x < DESIGN_W) {
-    spawnPipe();
+  // Spawn pipes — check only among the rightmost pipe
+  if (pipes.length > 0) {
+    const rightmost = pipes.reduce((a, b) => a.x > b.x ? a : b);
+    if (rightmost.x < DESIGN_W) {
+      spawnPipe();
+    }
+  } else {
+    spawnInitialPipes();
   }
 
-  // Collision
-  if (checkCollision()) {
-    state = 'dead';
-    if (score > highScore) highScore = score;
-    showOverlay('Game Over', `Score: ${score}`, score);
+  // Recover player X towards default position when not being pushed
+  if (sideOverlap === 0 && player.x < 120) {
+    player.x += Math.min(1.5, 120 - player.x);
   }
 
   // Update clouds
@@ -457,14 +739,17 @@ function draw() {
 
   // Pipes
   for (const pipe of pipes) {
-    drawPipe(pipe.x, pipe.h);
+    if (pipe.fromTop) {
+      drawTopPipe(pipe.x, pipe.h);
+    } else {
+      drawBottomPipe(pipe.x, pipe.h);
+    }
   }
 
   // Player
   if (state === 'playing' || state === 'dead') {
     drawPlayer(player.x, player.y, player.frame);
   } else {
-    // Title screen: show player standing on ground
     drawPlayer(player.x, DESIGN_H - GROUND_H - player.h, 0);
   }
 }
@@ -536,7 +821,6 @@ document.addEventListener('keyup', (e) => {
 
 // Touch
 document.addEventListener('touchstart', (e) => {
-  // Don't intercept button taps
   if (e.target === olBtn) return;
   e.preventDefault();
   onInputDown(e);

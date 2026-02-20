@@ -4,12 +4,25 @@ A retro-style side-scrolling runner game playable in the browser (desktop & mobi
 
 ## How to Play
 
-The screen scrolls automatically to the right. Your character runs forward on their own — your only control is **jumping** to avoid pipes.
+The screen scrolls automatically to the right. Your character runs forward on their own — your only control is **jumping**.
 
 - **Tap / hold** to jump higher (variable jump height)
-- Avoid all pipes — hitting one means Game Over
+- You can **stand on top of pipes** — pipe tops are platforms!
+- **Side collisions push you back** instead of killing you instantly
+- You die when you get **crushed/squeezed** between obstacles:
+  - Pushed off the left edge of the screen by a pipe
+  - Squeezed between a bottom pipe and a ceiling pipe
+  - Pinned between a ceiling pipe and the ground
 - Your score increases each time you clear a pipe
 - The game speeds up over time!
+
+## Obstacle Types
+
+| Type | Description |
+|------|-------------|
+| Bottom pipe | Rises from the ground — you can jump over **or stand on top** |
+| Ceiling pipe | Hangs from the top — duck under or time your jump carefully |
+| Pipe pair | Bottom + ceiling pipe together — navigate through the gap |
 
 ## Controls
 
