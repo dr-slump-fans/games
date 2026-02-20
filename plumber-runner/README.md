@@ -15,6 +15,33 @@ The screen scrolls automatically to the right. Your character runs forward on th
   - Pinned between a ceiling pipe and the ground
 - Your score increases each time you clear a pipe
 - The game speeds up over time!
+- **HUD** shows survival time, current difficulty level (Lv.1~Lv.5), and progress bar
+
+## Difficulty Growth Rules
+
+Difficulty scales **smoothly** over survival time across 5 levels. All transitions use smooth-step interpolation (no sudden jumps).
+
+| Level | Name | Starts at | Speed | Pipe Spacing | Max Pipe Height | Pair Chance |
+|-------|------|-----------|-------|-------------|-----------------|-------------|
+| Lv.1 | EASY | 0s | 1.0x | 280–380 px | 150 px | 35% |
+| Lv.2 | NORMAL | 30s | 1.25x | 250–340 px | 170 px | 40% |
+| Lv.3 | HARD | 75s | 1.55x | 220–300 px | 195 px | 47% |
+| Lv.4 | EXPERT | 140s | 1.85x | 195–270 px | 220 px | 52% |
+| Lv.5 | INSANE | 240s | 2.15x | 175–245 px | 240 px | 55% |
+
+**What changes with difficulty:**
+- **Scroll speed**: Multiplied by the level's speed factor (on top of gradual per-frame acceleration)
+- **Pipe spacing**: Horizontal gap between obstacles shrinks, making runs denser
+- **Pipe height cap**: Later levels unlock taller bottom/ceiling pipes that require more precise jumping
+- **Pair frequency**: More top+bottom pipe combinations appear, creating tighter squeeze corridors
+- **Passable gap**: The vertical gap in pipe pairs narrows smoothly from ~96 px to ~66 px
+
+The difficulty curve is designed so:
+- **0–30s**: Gentle warm-up, easy spacing, low pipes only
+- **30–75s**: Speed picks up, taller pipes appear, more pairs
+- **75–140s**: Demanding — tight gaps, fast scroll, tall obstacles
+- **140–240s**: Expert territory — requires precise jump timing
+- **240s+**: Maximum difficulty reached, stays constant
 
 ## Obstacle Types
 

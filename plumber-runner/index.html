@@ -47,11 +47,29 @@ canvas {
   background: #e74c3c; color: #fff; cursor: pointer;
 }
 #overlay button:hover { background: #c0392b; }
-#score-display {
-  position: absolute; top: 12px; right: 16px;
-  font-family: monospace; font-size: 22px;
-  color: #fff; text-shadow: 2px 2px 0 #000;
+#hud {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   pointer-events: none;
+}
+#hud-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 10px 16px;
+  font-family: monospace; font-size: 18px;
+  color: #fff; text-shadow: 2px 2px 0 #000;
+}
+#hud-left { text-align: left; }
+#hud-right { text-align: right; }
+#hud-time { font-size: 22px; font-weight: bold; }
+#hud-level { font-size: 16px; margin-top: 2px; }
+#score-display { font-size: 22px; }
+#hud-level-bar {
+  margin-top: 4px; width: 100px; height: 6px;
+  background: rgba(255,255,255,0.25); border-radius: 3px;
+  overflow: hidden;
+}
+#hud-level-fill {
+  height: 100%; width: 0%; border-radius: 3px;
+  transition: width 0.5s ease, background 0.5s ease;
 }
 </style>
 </head>
@@ -59,8 +77,19 @@ canvas {
 <div id="wrap">
   <canvas id="game"></canvas>
 </div>
+<div id="hud">
+  <div id="hud-top">
+    <div id="hud-left">
+      <div id="hud-time">00:00</div>
+      <div id="hud-level">Lv.1 EASY</div>
+      <div id="hud-level-bar"><div id="hud-level-fill"></div></div>
+    </div>
+    <div id="hud-right">
+      <div id="score-display">SCORE: 0</div>
+    </div>
+  </div>
+</div>
 <div id="ui">
-  <div id="score-display">SCORE: 0</div>
   <div id="overlay">
     <h1 id="ol-title">Plumber Runner</h1>
     <p id="ol-msg">Press SPACE / Tap to Start</p>
@@ -89,6 +118,17 @@ const LIP_W = 56;
 const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
 
+// ── Difficulty System ─────────────────────────────────
+// 5 levels with smooth interpolation between them
+// Each level defines target values; actual values lerp continuously
+const DIFFICULTY_LEVELS = [
+  { name: 'EASY',   time: 0,   speedMul: 1.0, gapMin: 280, gapMax: 380, pipeMaxH: 150, topMaxH: 140, pairChance: 0.35 },
+  { name: 'NORMAL', time: 30,  speedMul: 1.25, gapMin: 250, gapMax: 340, pipeMaxH: 170, topMaxH: 155, pairChance: 0.40 },
+  { name: 'HARD',   time: 75,  speedMul: 1.55, gapMin: 220, gapMax: 300, pipeMaxH: 195, topMaxH: 170, pairChance: 0.47 },
+  { name: 'EXPERT', time: 140, speedMul: 1.85, gapMin: 195, gapMax: 270, pipeMaxH: 220, topMaxH: 190, pairChance: 0.52 },
+  { name: 'INSANE', time: 240, speedMul: 2.15, gapMin: 175, gapMax: 245, pipeMaxH: 240, topMaxH: 200, pairChance: 0.55 },
+];
+
 // ── Canvas Setup ───────────────────────────────────────
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -112,6 +152,9 @@ const olMsg = document.getElementById('ol-msg');
 const olScore = document.getElementById('ol-score');
 const olBtn = document.getElementById('ol-btn');
 const scoreDisplay = document.getElementById('score-display');
+const hudTime = document.getElementById('hud-time');
+const hudLevel = document.getElementById('hud-level');
+const hudLevelFill = document.getElementById('hud-level-fill');
 
 // ── Game State ─────────────────────────────────────────
 let state = 'title'; // title | playing | dead
@@ -121,6 +164,9 @@ let frameCount = 0;
 let scrollSpeed = SCROLL_SPEED_BASE;
 let jumpPressed = false;
 let jumpHoldFrames = 0;
+let survivalTime = 0;       // seconds survived
+let diffLevel = 0;          // current difficulty level index (0-4)
+let diffProgress = 0;       // 0..1 progress within current level toward next
 
 // ── Player ─────────────────────────────────────────────
 const player = {
@@ -664,6 +710,9 @@ function resetGame() {
   pipes = [];
   score = 0;
   frameCount = 0;
+  survivalTime = 0;
+  diffLevel = 0;
+  diffProgress = 0;
   scrollSpeed = SCROLL_SPEED_BASE;
   groundOffset = 0;
   jumpHoldFrames = 0;
@@ -684,41 +733,99 @@ function spawnInitialPipes() {
   });
 }
 
+// Get smoothly interpolated difficulty parameter at current survival time
+function getDiffParam(key) {
+  const levels = DIFFICULTY_LEVELS;
+  const t = survivalTime;
+  // Find which two levels we're between
+  for (let i = levels.length - 1; i >= 0; i--) {
+    if (t >= levels[i].time) {
+      if (i === levels.length - 1) return levels[i][key]; // at max level
+      const curr = levels[i];
+      const next = levels[i + 1];
+      const frac = (t - curr.time) / (next.time - curr.time);
+      // Smooth step for less jarring transitions
+      const s = frac * frac * (3 - 2 * frac);
+      return curr[key] + (next[key] - curr[key]) * s;
+    }
+  }
+  return levels[0][key];
+}
+
+function updateDifficultyInfo() {
+  const levels = DIFFICULTY_LEVELS;
+  const t = survivalTime;
+  for (let i = levels.length - 1; i >= 0; i--) {
+    if (t >= levels[i].time) {
+      diffLevel = i;
+      if (i < levels.length - 1) {
+        diffProgress = (t - levels[i].time) / (levels[i + 1].time - levels[i].time);
+      } else {
+        diffProgress = 1;
+      }
+      break;
+    }
+  }
+}
+
 function spawnPipe() {
   const lastPipe = pipes[pipes.length - 1];
-  const gap = PIPE_MIN_GAP + Math.random() * (PIPE_MAX_GAP - PIPE_MIN_GAP);
+  const gapMin = getDiffParam('gapMin');
+  const gapMax = getDiffParam('gapMax');
+  const gap = gapMin + Math.random() * (gapMax - gapMin);
   const newX = lastPipe.x + gap;
+
+  const pipeMaxH = getDiffParam('pipeMaxH');
+  const topMaxH = getDiffParam('topMaxH');
+  const pairChance = getDiffParam('pairChance');
+
+  // Build height pools dynamically based on current difficulty
+  // Base heights always available; higher ones unlock with difficulty
+  const bottomHeights = PIPE_HEIGHTS_BOTTOM.filter(h => h <= pipeMaxH);
+  // Add taller pipes progressively
+  if (pipeMaxH >= 170) bottomHeights.push(170);
+  if (pipeMaxH >= 195) bottomHeights.push(195);
+  if (pipeMaxH >= 220) bottomHeights.push(220);
+  if (pipeMaxH >= 240) bottomHeights.push(240);
+
+  const topHeights = PIPE_HEIGHTS_TOP.filter(h => h <= topMaxH);
+  if (topMaxH >= 155) topHeights.push(155);
+  if (topMaxH >= 170) topHeights.push(170);
+  if (topMaxH >= 190) topHeights.push(190);
+  if (topMaxH >= 200) topHeights.push(200);
 
   // Decide what to spawn: bottom only, top only, or both (squeeze corridor)
   const roll = Math.random();
-  const difficulty = Math.min(frameCount / 3000, 1); // 0..1 over time
+  const topOnlyChance = 0.20;
+  const bottomOnlyChance = 1 - topOnlyChance - pairChance;
 
-  if (roll < 0.35) {
+  if (roll < bottomOnlyChance) {
     // Bottom pipe only
     pipes.push({
       x: newX,
-      h: PIPE_HEIGHTS_BOTTOM[Math.floor(Math.random() * PIPE_HEIGHTS_BOTTOM.length)],
+      h: bottomHeights[Math.floor(Math.random() * bottomHeights.length)],
       fromTop: false,
       scored: false,
     });
-  } else if (roll < 0.55) {
+  } else if (roll < bottomOnlyChance + topOnlyChance) {
     // Top pipe only
     pipes.push({
       x: newX,
-      h: PIPE_HEIGHTS_TOP[Math.floor(Math.random() * PIPE_HEIGHTS_TOP.length)],
+      h: topHeights[Math.floor(Math.random() * topHeights.length)],
       fromTop: true,
       scored: false,
     });
   } else {
     // Both top and bottom — create a passable gap
     const groundY = DESIGN_H - GROUND_H;
-    const bottomH = PIPE_HEIGHTS_BOTTOM[Math.floor(Math.random() * PIPE_HEIGHTS_BOTTOM.length)];
+    const bottomH = bottomHeights[Math.floor(Math.random() * bottomHeights.length)];
     const bottomTopY = groundY - bottomH;
-    // Ensure gap is passable (at least player.h + 30px)
-    const minGapSize = player.h + 30 + (1 - difficulty) * 30;
+    // Gap narrows smoothly: lerp from generous to tight
+    const diffFrac = Math.min(survivalTime / DIFFICULTY_LEVELS[DIFFICULTY_LEVELS.length - 1].time, 1);
+    const minGapSize = player.h + 30 + (1 - diffFrac) * 30;
     const maxTopH = bottomTopY - minGapSize;
     if (maxTopH >= 50) {
-      const topH = 50 + Math.floor(Math.random() * (maxTopH - 50));
+      const topH = 50 + Math.floor(Math.random() * (Math.min(maxTopH, topMaxH) - 50));
       pipes.push({
         x: newX,
         h: bottomH,
@@ -727,7 +834,7 @@ function spawnPipe() {
       });
       pipes.push({
         x: newX,
-        h: topH,
+        h: Math.max(50, topH),
         fromTop: true,
         scored: false,
       });
@@ -747,7 +854,10 @@ function update() {
   if (state !== 'playing') return;
 
   frameCount++;
-  scrollSpeed = SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL;
+  survivalTime = frameCount / 60; // assume ~60fps
+  updateDifficultyInfo();
+  const speedMul = getDiffParam('speedMul');
+  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
   groundOffset += scrollSpeed;
 
   const groundY = DESIGN_H - GROUND_H - player.h;
@@ -832,7 +942,10 @@ function update() {
   if (checkCrush()) {
     state = 'dead';
     if (score > highScore) highScore = score;
-    showOverlay('Game Over', `Score: ${score}`, score);
+    const tMins = Math.floor(survivalTime / 60);
+    const tSecs = Math.floor(survivalTime % 60);
+    const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
+    showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
     return;
   }
 
@@ -840,7 +953,10 @@ function update() {
   if (player.x + player.w < -5) {
     state = 'dead';
     if (score > highScore) highScore = score;
-    showOverlay('Game Over', `Score: ${score}`, score);
+    const tMins = Math.floor(survivalTime / 60);
+    const tSecs = Math.floor(survivalTime % 60);
+    const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
+    showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
     return;
   }
 
@@ -904,6 +1020,20 @@ function update() {
   }
 
   scoreDisplay.textContent = `SCORE: ${score}`;
+
+  // Update HUD
+  const mins = Math.floor(survivalTime / 60);
+  const secs = Math.floor(survivalTime % 60);
+  hudTime.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+  const lvl = DIFFICULTY_LEVELS[diffLevel];
+  hudLevel.textContent = `Lv.${diffLevel + 1} ${lvl.name}`;
+
+  const fillPct = diffLevel >= DIFFICULTY_LEVELS.length - 1 ? 100 : Math.round(diffProgress * 100);
+  hudLevelFill.style.width = fillPct + '%';
+  // Color gradient: green → yellow → orange → red → purple
+  const levelColors = ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6'];
+  hudLevelFill.style.background = levelColors[diffLevel];
 }
 
 function draw() {
