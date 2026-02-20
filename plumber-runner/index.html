@@ -125,16 +125,18 @@ const BRICK_H = 24;
 const BRICK_SCORE = 5;            // points per brick broken
 const BRICK_FRAGMENT_COUNT = 6;   // number of debris fragments
 const BRICK_SPAWN_CHANCE = 0.30;  // chance to spawn brick with pipe group
+const STANDALONE_BRICK_MIN_COUNT = 1;
+const STANDALONE_BRICK_MAX_COUNT = 3;
 
 // ── Difficulty System ─────────────────────────────────
 // 5 levels with smooth interpolation between them
 // Each level defines target values; actual values lerp continuously
 const DIFFICULTY_LEVELS = [
-  { name: 'EASY',   time: 0,   speedMul: 1.0, gapMin: 280, gapMax: 380, pipeMaxH: 150, topMaxH: 140, pairChance: 0.35 },
-  { name: 'NORMAL', time: 30,  speedMul: 1.25, gapMin: 250, gapMax: 340, pipeMaxH: 170, topMaxH: 155, pairChance: 0.40 },
-  { name: 'HARD',   time: 75,  speedMul: 1.55, gapMin: 220, gapMax: 300, pipeMaxH: 195, topMaxH: 170, pairChance: 0.47 },
-  { name: 'EXPERT', time: 140, speedMul: 1.85, gapMin: 195, gapMax: 270, pipeMaxH: 220, topMaxH: 190, pairChance: 0.52 },
-  { name: 'INSANE', time: 240, speedMul: 2.15, gapMin: 175, gapMax: 245, pipeMaxH: 240, topMaxH: 200, pairChance: 0.55 },
+  { name: 'EASY',   time: 0,   speedMul: 1.0, gapMin: 280, gapMax: 380, pipeMaxH: 150, topMaxH: 140, pairChance: 0.35, brickReplace: 0.15 },
+  { name: 'NORMAL', time: 30,  speedMul: 1.25, gapMin: 250, gapMax: 340, pipeMaxH: 170, topMaxH: 155, pairChance: 0.40, brickReplace: 0.18 },
+  { name: 'HARD',   time: 75,  speedMul: 1.55, gapMin: 220, gapMax: 300, pipeMaxH: 195, topMaxH: 170, pairChance: 0.47, brickReplace: 0.22 },
+  { name: 'EXPERT', time: 140, speedMul: 1.85, gapMin: 195, gapMax: 270, pipeMaxH: 220, topMaxH: 190, pairChance: 0.52, brickReplace: 0.25 },
+  { name: 'INSANE', time: 240, speedMul: 2.15, gapMin: 175, gapMax: 245, pipeMaxH: 240, topMaxH: 200, pairChance: 0.55, brickReplace: 0.28 },
 ];
 
 // ── Canvas Setup ───────────────────────────────────────
@@ -459,6 +461,14 @@ function drawPlayer(px, py, frame) {
 // Get pipe collision rectangles
 // Returns { lipRect, bodyRect, topY (top of entire pipe visual) }
 function getPipeRects(pipe) {
+  // Marker pipes (h=0, used for brick-replaced spawns) have no collision
+  if (pipe.h <= 0) {
+    return {
+      lipRect: { x: pipe.x, y: -100, w: 0, h: 0 },
+      bodyRect: { x: pipe.x, y: -100, w: 0, h: 0 },
+      standY: null,
+    };
+  }
   const groundY = DESIGN_H - GROUND_H;
   const lipOffset = (LIP_W - PIPE_W) / 2;
   if (!pipe.fromTop) {
@@ -1089,12 +1099,91 @@ function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
   }
 }
 
+// Spawn a standalone brick obstacle group (1~3 bricks) that replaces a pipe.
+// Bricks are arranged as a small platforming challenge: low, mid, and optionally high.
+// All heights are reachable via small/full jumps from ground or from other bricks.
+function spawnStandaloneBricks(anchorX) {
+  const groundY = DESIGN_H - GROUND_H;
+  const count = STANDALONE_BRICK_MIN_COUNT +
+    Math.floor(Math.random() * (STANDALONE_BRICK_MAX_COUNT - STANDALONE_BRICK_MIN_COUNT + 1));
+
+  // Predefined height tiers (top-of-brick Y measured from groundY upward)
+  // Low: 30–55 px above ground — reachable with small jump
+  // Mid: 70–100 px above ground — reachable with medium hold
+  // High: 110–140 px above ground — needs full jump
+  const tiers = [
+    { minH: 30, maxH: 55 },   // low
+    { minH: 70, maxH: 100 },  // mid
+    { minH: 110, maxH: 140 }, // high
+  ];
+
+  // Horizontal spread: bricks are spaced 35–55 px apart
+  const startX = anchorX;
+
+  for (let i = 0; i < count; i++) {
+    const tier = tiers[i];
+    const heightAboveGround = tier.minH + Math.random() * (tier.maxH - tier.minH);
+    const brickTopY = groundY - heightAboveGround;
+    const brickX = startX + i * (35 + Math.random() * 20);
+
+    // Clamp within screen bounds
+    const clampedY = Math.max(30, Math.min(brickTopY, groundY - BRICK_H - 10));
+
+    // Prevent overlapping with existing bricks
+    let overlaps = false;
+    for (const existingBrick of bricks) {
+      if (existingBrick.broken) continue;
+      if (rectsOverlap(brickX, clampedY, BRICK_W, BRICK_H,
+          existingBrick.x - 8, existingBrick.y - 8,
+          existingBrick.w + 16, existingBrick.h + 16)) {
+        overlaps = true;
+        break;
+      }
+    }
+
+    // Prevent overlapping with existing pipes
+    if (!overlaps) {
+      for (const pipe of pipes) {
+        const rects = getPipeRects(pipe);
+        if (rectsOverlap(brickX, clampedY, BRICK_W, BRICK_H,
+            rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
+            rectsOverlap(brickX, clampedY, BRICK_W, BRICK_H,
+            rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+          overlaps = true;
+          break;
+        }
+      }
+    }
+
+    if (overlaps) continue;
+
+    bricks.push({
+      x: brickX,
+      y: clampedY,
+      w: BRICK_W,
+      h: BRICK_H,
+      broken: false,
+    });
+  }
+}
+
 function spawnPipe() {
   const lastPipe = pipes[pipes.length - 1];
   const gapMin = getDiffParam('gapMin');
   const gapMax = getDiffParam('gapMax');
   const gap = gapMin + Math.random() * (gapMax - gapMin);
   const newX = lastPipe.x + gap;
+
+  // ── Brick-replaces-pipe check ──────────────────────────
+  const brickReplaceChance = getDiffParam('brickReplace');
+  if (Math.random() < brickReplaceChance) {
+    // Replace this pipe spawn with a standalone brick obstacle group
+    spawnStandaloneBricks(newX);
+    // Add a tiny invisible ground-level "marker pipe" so the spawn/score
+    // system keeps tracking position (h=0 is invisible, scored normally)
+    pipes.push({ x: newX, h: 0, fromTop: false, scored: false });
+    return;
+  }
 
   const pipeMaxH = getDiffParam('pipeMaxH');
   const topMaxH = getDiffParam('topMaxH');
@@ -1386,6 +1475,7 @@ function draw() {
 
   // Pipes
   for (const pipe of pipes) {
+    if (pipe.h <= 0) continue; // skip marker pipes (brick-replaced)
     if (pipe.fromTop) {
       drawTopPipe(pipe.x, pipe.h);
     } else {

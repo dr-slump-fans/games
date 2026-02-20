@@ -21,13 +21,13 @@ The screen scrolls automatically to the right. Your character runs forward on th
 
 Difficulty scales **smoothly** over survival time across 5 levels. All transitions use smooth-step interpolation (no sudden jumps).
 
-| Level | Name | Starts at | Speed | Pipe Spacing | Max Pipe Height | Pair Chance |
-|-------|------|-----------|-------|-------------|-----------------|-------------|
-| Lv.1 | EASY | 0s | 1.0x | 280–380 px | 150 px | 35% |
-| Lv.2 | NORMAL | 30s | 1.25x | 250–340 px | 170 px | 40% |
-| Lv.3 | HARD | 75s | 1.55x | 220–300 px | 195 px | 47% |
-| Lv.4 | EXPERT | 140s | 1.85x | 195–270 px | 220 px | 52% |
-| Lv.5 | INSANE | 240s | 2.15x | 175–245 px | 240 px | 55% |
+| Level | Name | Starts at | Speed | Pipe Spacing | Max Pipe Height | Pair Chance | Brick Replace |
+|-------|------|-----------|-------|-------------|-----------------|-------------|---------------|
+| Lv.1 | EASY | 0s | 1.0x | 280–380 px | 150 px | 35% | 15% |
+| Lv.2 | NORMAL | 30s | 1.25x | 250–340 px | 170 px | 40% | 18% |
+| Lv.3 | HARD | 75s | 1.55x | 220–300 px | 195 px | 47% | 22% |
+| Lv.4 | EXPERT | 140s | 1.85x | 195–270 px | 220 px | 52% | 25% |
+| Lv.5 | INSANE | 240s | 2.15x | 175–245 px | 240 px | 55% | 28% |
 
 **What changes with difficulty:**
 - **Scroll speed**: Multiplied by the level's speed factor (on top of gradual per-frame acceleration)
@@ -35,6 +35,7 @@ Difficulty scales **smoothly** over survival time across 5 levels. All transitio
 - **Pipe height cap**: Later levels unlock taller bottom/ceiling pipes that require more precise jumping
 - **Pair frequency**: More top+bottom pipe combinations appear, creating tighter squeeze corridors
 - **Passable gap**: The vertical gap in pipe pairs narrows smoothly from ~96 px to ~66 px
+- **Brick replace**: Higher difficulty means more pipes are replaced by standalone brick groups (15% → 28%)
 
 The difficulty curve is designed so:
 - **0–30s**: Gentle warm-up, easy spacing, low pipes only
@@ -73,12 +74,28 @@ This prevents unfair situations where a single ultra-tall pipe appears with no w
 | Ceiling pipe | Hangs from the top — duck under or time your jump carefully |
 | Pipe pair | Bottom + ceiling pipe together — navigate through the gap |
 | Breakable brick | Stepping-stone brick placed before pipes — **stand on it or smash it from below** for bonus points! |
+| Standalone brick group | 1–3 brick obstacle cluster that **replaces a pipe** entirely — a lighter challenge with breakable targets |
 
-## Breakable Brick Rules — Stepping Stones
+## Breakable Brick Rules — Stepping Stones & Standalone Obstacles
 
-Breakable bricks serve as **stepping stones** placed in front of pipes. They help players reach tall pipe tops and add strategic platforming.
+Breakable bricks appear in two modes: as **stepping stones** placed in front of pipes, and as **standalone obstacle groups** that replace an entire pipe spawn.
 
-### Stepping Stone Placement
+### Standalone Brick Obstacles (Pipe Replacement)
+
+On each pipe spawn, there is a chance the pipe is replaced entirely by a standalone brick group:
+
+- **Replace chance** scales with difficulty: 15% (EASY) → 28% (INSANE), interpolated smoothly
+- When triggered, **no pipe is generated** — instead, 1–3 bricks form a small obstacle cluster
+- Bricks are arranged in height tiers:
+  - **Low** (30–55 px above ground) — clearable with a small jump
+  - **Mid** (70–100 px above ground) — needs a medium-hold jump
+  - **High** (110–140 px above ground) — requires a full jump
+- Bricks are spaced 35–55 px apart horizontally, creating a compact formation
+- Standalone bricks follow the same break/stand/score rules as stepping-stone bricks
+- Overlap prevention ensures bricks never clip into existing pipes or other bricks
+- The formation is always passable — heights match the player's jump capabilities
+
+### Stepping Stone Placement (Pipe-Attached)
 
 - Bricks spawn **40–140 px to the left** of a bottom pipe (never on top of or touching a pipe)
 - **Tall pipes** (≥ 140 px) **always** get stepping-stone bricks; shorter pipes have a 30% chance
