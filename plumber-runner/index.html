@@ -139,9 +139,9 @@ const DIFFICULTY_LEVELS = [
   { name: 'INSANE', time: 240, speedMul: 2.15, gapMin: 175, gapMax: 245, pipeMaxH: 240, topMaxH: 200, pairChance: 0.55, brickReplace: 0.28 },
 ];
 
-// ── Collision Sub-step Settings ───────────────────────
-const MAX_VERTICAL_STEP = 8;    // max px per vertical sub-step (< thinnest obstacle: LIP_H=16)
-const MAX_HORIZONTAL_STEP = 6;  // max px per horizontal sub-step for scroll collision
+// ── Swept AABB Settings ──────────────────────────────
+const SWEEP_MAX_ITERATIONS = 4;   // max resolve iterations per frame
+const SWEEP_EPSILON = 0.001;      // floating-point tolerance for contact
 
 // ── Debug Mode ───────────────────────────────────────
 const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === '1';
@@ -709,7 +709,8 @@ function updateFragments() {
   }
 }
 
-// ── Collision ──────────────────────────────────────────
+// ── Collision — Swept AABB Continuous Collision Detection ──
+
 function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
@@ -724,32 +725,363 @@ function getPlayerHitbox() {
   };
 }
 
+// Gather all solid collision AABBs in the world.
+// Each rect: { x, y, w, h, type }
+// type: 'ground' | 'pipe_lip' | 'pipe_body' | 'brick' | 'ceiling_pipe_lip' | 'ceiling_pipe_body'
+function gatherCollisionRects() {
+  const rects = [];
+  const groundY = DESIGN_H - GROUND_H;
+
+  // Ground (extends infinitely left/right, thick enough to never tunnel)
+  rects.push({ x: -1000, y: groundY, w: DESIGN_W + 2000, h: 500, type: 'ground' });
+
+  // Pipes
+  for (const pipe of pipes) {
+    if (pipe.h <= 0) continue;
+    const pr = getPipeRects(pipe);
+    if (!pipe.fromTop) {
+      rects.push({ x: pr.lipRect.x, y: pr.lipRect.y, w: pr.lipRect.w, h: pr.lipRect.h, type: 'pipe_lip', standY: pr.standY });
+      rects.push({ x: pr.bodyRect.x, y: pr.bodyRect.y, w: pr.bodyRect.w, h: pr.bodyRect.h, type: 'pipe_body' });
+    } else {
+      rects.push({ x: pr.lipRect.x, y: pr.lipRect.y, w: pr.lipRect.w, h: pr.lipRect.h, type: 'ceiling_pipe_lip' });
+      rects.push({ x: pr.bodyRect.x, y: pr.bodyRect.y, w: pr.bodyRect.w, h: pr.bodyRect.h, type: 'ceiling_pipe_body' });
+    }
+  }
+
+  // Bricks
+  for (const brick of bricks) {
+    if (brick.broken) continue;
+    rects.push({ x: brick.x, y: brick.y, w: brick.w, h: brick.h, type: 'brick', brickRef: brick });
+  }
+
+  return rects;
+}
+
+// ── Swept AABB ──────────────────────────────────────────
+// Given a moving AABB (pos + size) and velocity (dx, dy),
+// and a static AABB (obstacle), compute the time of first contact [0, 1].
+// Returns { t, normalX, normalY } where t is in [0,1] (fraction of movement),
+// or { t: 1, normalX: 0, normalY: 0 } if no collision in this movement.
+//
+// The player AABB moves by (dx, dy) relative to the obstacle.
+// Obstacles are treated as static for each sweep call; scroll motion is
+// folded into the relative velocity before calling.
+function sweptAABB(px, py, pw, ph, dx, dy, ox, oy, ow, oh) {
+  // Compute entry and exit distances on each axis
+  let xEntryDist, xExitDist, yEntryDist, yExitDist;
+
+  if (dx > 0) {
+    xEntryDist = ox - (px + pw);
+    xExitDist = (ox + ow) - px;
+  } else if (dx < 0) {
+    xEntryDist = (ox + ow) - px;
+    xExitDist = ox - (px + pw);
+  } else {
+    xEntryDist = ox - (px + pw);
+    xExitDist = (ox + ow) - px;
+  }
+
+  if (dy > 0) {
+    yEntryDist = oy - (py + ph);
+    yExitDist = (oy + oh) - py;
+  } else if (dy < 0) {
+    yEntryDist = (oy + oh) - py;
+    yExitDist = oy - (py + ph);
+  } else {
+    yEntryDist = oy - (py + ph);
+    yExitDist = (oy + oh) - py;
+  }
+
+  // Compute entry and exit times
+  let xEntry, xExit, yEntry, yExit;
+
+  if (dx === 0) {
+    // Not moving on X — check static overlap
+    if (xEntryDist < 0 && xExitDist > 0) {
+      // Overlapping on X already
+      xEntry = -Infinity;
+      xExit = Infinity;
+    } else {
+      // No overlap on X, can never collide
+      return { t: 1, normalX: 0, normalY: 0 };
+    }
+  } else {
+    xEntry = xEntryDist / dx;
+    xExit = xExitDist / dx;
+  }
+
+  if (dy === 0) {
+    if (yEntryDist < 0 && yExitDist > 0) {
+      yEntry = -Infinity;
+      yExit = Infinity;
+    } else {
+      return { t: 1, normalX: 0, normalY: 0 };
+    }
+  } else {
+    yEntry = yEntryDist / dy;
+    yExit = yExitDist / dy;
+  }
+
+  // The overall entry time is the latest entry, exit is the earliest exit
+  const entryTime = Math.max(xEntry, yEntry);
+  const exitTime = Math.min(xExit, yExit);
+
+  // No collision conditions:
+  // - Entry after exit (swept past without overlap)
+  // - Entry after end of movement (t > 1)
+  // - Both entries negative (moving away)
+  if (entryTime > exitTime || entryTime > 1 || (xEntry < 0 && yEntry < 0)) {
+    return { t: 1, normalX: 0, normalY: 0 };
+  }
+
+  // Entry time must be >= 0 for a valid future collision
+  // (if < 0, we started overlapping — handle as depenetration)
+  if (entryTime < -SWEEP_EPSILON) {
+    return { t: 1, normalX: 0, normalY: 0 };
+  }
+
+  const t = Math.max(0, entryTime);
+
+  // Determine collision normal (which axis was entered last)
+  let normalX = 0, normalY = 0;
+  if (xEntry > yEntry) {
+    normalX = dx > 0 ? -1 : 1;
+  } else {
+    normalY = dy > 0 ? -1 : 1;
+  }
+
+  return { t, normalX, normalY };
+}
+
+// Depenetrate player from any overlapping obstacles.
+// Called once before the sweep loop to fix any pre-existing overlaps.
+function depenetratePlayer(collisionRects) {
+  const HB_OX = 4, HB_OY = 2, HB_W = player.w - 8, HB_H = player.h - 4;
+
+  for (let iter = 0; iter < 4; iter++) {
+    let pushed = false;
+    const hx = player.x + HB_OX;
+    const hy = player.y + HB_OY;
+
+    for (const r of collisionRects) {
+      if (!rectsOverlap(hx, hy, HB_W, HB_H, r.x, r.y, r.w, r.h)) continue;
+
+      // Compute minimum penetration vector
+      const overlapLeft = (hx + HB_W) - r.x;
+      const overlapRight = (r.x + r.w) - hx;
+      const overlapTop = (hy + HB_H) - r.y;
+      const overlapBottom = (r.y + r.h) - hy;
+
+      const minX = overlapLeft < overlapRight ? -overlapLeft : overlapRight;
+      const minY = overlapTop < overlapBottom ? -overlapTop : overlapBottom;
+
+      if (Math.abs(minX) < Math.abs(minY)) {
+        player.x += minX;
+      } else {
+        player.y += minY;
+        if (minY < 0 && player.vy > 0) {
+          // Pushed up = landed on surface
+          player.vy = 0;
+          player.onGround = true;
+        }
+        if (minY > 0 && player.vy < 0) {
+          // Pushed down = hit ceiling
+          player.vy = 0;
+        }
+      }
+      pushed = true;
+    }
+    if (!pushed) break;
+  }
+}
+
+// ── Main Swept Movement Resolver ────────────────────────
+// Resolves player movement for one frame using iterative swept AABB.
+//
+// Parameters:
+//   playerVY: vertical velocity (pixels/frame, after gravity)
+//   scrollDX: horizontal scroll displacement this frame (positive = world moves left)
+//
+// The player's relative motion vs obstacles is:
+//   dx = -scrollDX (obstacles move left → equivalent to player moving right relative to them,
+//        but player is pushed left by scroll, so relative dx = -scrollDX)
+//   dy = playerVY
+//
+// After resolving, updates player.x, player.y, player.vy, player.onGround.
+// Returns { hitBricks: [...] } for bricks hit from below.
+function resolveSweptMovement(playerVY, scrollDX) {
+  const HB_OX = 4, HB_OY = 2, HB_W = player.w - 8, HB_H = player.h - 4;
+
+  // The relative velocity of the player hitbox vs static obstacles:
+  // - Vertically: player moves by playerVY
+  // - Horizontally: obstacles move left by scrollDX, so in obstacle-frame,
+  //   player effectively moves right by scrollDX.
+  //   But we also want to keep player at x=120 (recovery), so net player
+  //   movement in world coords is 0 horizontally (scroll moves obstacles).
+  //   In the sweep frame, we move the player by (0, playerVY) in world coords,
+  //   then move obstacles by (-scrollDX, 0).
+  //
+  // To handle both in one unified sweep, we compute in "obstacle rest frame":
+  //   relative dx = +scrollDX (player moves right relative to obstacles)
+  //   relative dy = playerVY
+  // After resolving, we convert back: player world displacement = sweep displacement - scrollDX on X.
+
+  let relDX = scrollDX; // player moves right relative to obstacles
+  let relDY = playerVY;
+
+  // Gather obstacles
+  const collisionRects = gatherCollisionRects();
+
+  // Depenetrate first
+  depenetratePlayer(collisionRects);
+
+  let hitBricks = [];
+  let remainingT = 1.0;
+  let landedThisFrame = false;
+  let hitCeilingThisFrame = false;
+
+  for (let iter = 0; iter < SWEEP_MAX_ITERATIONS && remainingT > SWEEP_EPSILON; iter++) {
+    const moveDX = relDX * remainingT;
+    const moveDY = relDY * remainingT;
+
+    if (Math.abs(moveDX) < SWEEP_EPSILON && Math.abs(moveDY) < SWEEP_EPSILON) break;
+
+    // Current hitbox position
+    const hx = player.x + HB_OX;
+    const hy = player.y + HB_OY;
+
+    // Find earliest collision among all obstacles
+    let bestT = 1.0;
+    let bestNX = 0, bestNY = 0;
+    let bestRect = null;
+
+    for (const r of collisionRects) {
+      const result = sweptAABB(hx, hy, HB_W, HB_H, moveDX, moveDY, r.x, r.y, r.w, r.h);
+      if (result.t < bestT - SWEEP_EPSILON) {
+        bestT = result.t;
+        bestNX = result.normalX;
+        bestNY = result.normalY;
+        bestRect = r;
+      } else if (Math.abs(result.t - bestT) < SWEEP_EPSILON && result.t < 1.0) {
+        // Same time — prefer the collision that blocks the most relevant axis
+        // (vertical collisions take priority for landing/ceiling)
+        if (result.normalY !== 0 && bestNY === 0) {
+          bestNX = result.normalX;
+          bestNY = result.normalY;
+          bestRect = r;
+        }
+      }
+    }
+
+    // Move player to the contact point (with tiny epsilon pullback to avoid overlap)
+    const safeT = Math.max(0, bestT - SWEEP_EPSILON);
+    player.x += moveDX * safeT;
+    player.y += moveDY * safeT;
+
+    if (bestT >= 1.0 - SWEEP_EPSILON) {
+      // No collision in remaining movement — done
+      break;
+    }
+
+    // ── Collision response ──────────────────────────────
+    // Resolve normal velocity and redirect remaining time on tangent
+
+    if (bestNY === -1) {
+      // Hit top of obstacle (landed on surface)
+      // Check if this is a brick hit from below... no, normalY=-1 means
+      // player was moving down and hit the top = landing
+      landedThisFrame = true;
+      relDY = 0;
+      player.vy = 0;
+      player.onGround = true;
+    } else if (bestNY === 1) {
+      // Hit bottom of obstacle (ceiling/brick from below)
+      hitCeilingThisFrame = true;
+
+      // Check if we hit a brick from below (player moving up)
+      if (bestRect && bestRect.type === 'brick' && bestRect.brickRef && playerVY < 0) {
+        const brick = bestRect.brickRef;
+        if (!brick.broken) {
+          brick.broken = true;
+          hitBricks.push(brick);
+          spawnBrickFragments(brick.x, brick.y);
+          spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, BRICK_SCORE);
+          score += BRICK_SCORE;
+          // Bounce down
+          player.vy = Math.abs(player.vy) * 0.4;
+          relDY = player.vy;
+          // Remove this rect from future iterations (brick is gone)
+          const idx = collisionRects.indexOf(bestRect);
+          if (idx >= 0) collisionRects.splice(idx, 1);
+        }
+      } else {
+        // Hit solid ceiling — stop upward movement
+        relDY = 0;
+        player.vy = 0;
+      }
+    }
+
+    if (bestNX === -1) {
+      // Hit left face of obstacle (player moving right relative to it)
+      // This means the scroll is pushing player into obstacle.
+      // Stop the horizontal relative motion component.
+      relDX = 0;
+    } else if (bestNX === 1) {
+      // Hit right face of obstacle — unusual (player moving left relative)
+      relDX = 0;
+    }
+
+    // Consume the used time fraction
+    remainingT *= (1.0 - bestT);
+  }
+
+  // Convert back from obstacle-relative frame to world frame.
+  // In the sweep, player.x moved by (actual sweep displacement).
+  // But obstacles actually move left by scrollDX in world coords.
+  // The sweep already moved player.x by the relative displacement,
+  // so we subtract the scroll portion to get world coords:
+  // world_x = original_x + (relDisp - scrollDX)
+  // But since sweep already applied the displacement to player.x,
+  // we just need to subtract scrollDX from player.x to account for
+  // the fact that obstacles were treated as static.
+  // Actually: let's think carefully.
+  //   Before sweep: player at world px, obstacles at world ox.
+  //   Sweep uses relative frame: player moves by (scrollDX, vy) relative to obstacles.
+  //   After sweep: player.x += actualRelDX. But in world frame, obstacles moved by -scrollDX.
+  //   So player.x in world = original_px + actualRelDX, obstacles at original_ox - scrollDX.
+  //   For world correctness, we need: player.x stays in world frame, obstacles get scrollDX subtracted.
+  //   Since sweep already added relDX contribution to player.x, and relDX included scrollDX,
+  //   we need to subtract scrollDX from player.x (it was the obstacle's motion, not player's).
+  player.x -= scrollDX;
+
+  return { hitBricks, landedThisFrame, hitCeilingThisFrame };
+}
+
 // Check if player is standing on any pipe top or brick top. Returns standY or null.
-function checkPipeStanding() {
+// Used for edge-fall-off detection after movement resolves.
+function checkStandingSupport() {
   const pb = getPlayerHitbox();
   const feetY = pb.y + pb.h;
   const groundY = DESIGN_H - GROUND_H;
 
+  // On ground?
+  if (Math.abs(feetY - groundY) < 2) return groundY;
+
   for (const pipe of pipes) {
-    if (pipe.fromTop) continue; // can't stand on ceiling pipes
+    if (pipe.fromTop) continue;
     const rects = getPipeRects(pipe);
     const standY = rects.standY;
-    // Player feet must be near the pipe top surface, falling downward
-    // and horizontally overlapping the lip.
-    // Tolerance is MAX_VERTICAL_STEP + 2 to guarantee sub-step never skips.
-    if (player.vy >= 0 &&
-        feetY >= standY && feetY <= standY + MAX_VERTICAL_STEP + 2 &&
+    if (standY === null) continue;
+    // Feet at or very close to the surface, and horizontally overlapping lip
+    if (Math.abs(feetY - standY) < 3 &&
         pb.x + pb.w > pipe.x + 4 && pb.x < pipe.x + LIP_W - 4) {
       return standY;
     }
   }
 
-  // Check standing on intact bricks
   for (const brick of bricks) {
     if (brick.broken) continue;
-    // Tolerance is MAX_VERTICAL_STEP + 2 to guarantee sub-step never skips.
-    if (player.vy >= 0 &&
-        feetY >= brick.y && feetY <= brick.y + MAX_VERTICAL_STEP + 2 &&
+    if (Math.abs(feetY - brick.y) < 3 &&
         pb.x + pb.w > brick.x + 2 && pb.x < brick.x + brick.w - 2) {
       return brick.y;
     }
@@ -758,66 +1090,12 @@ function checkPipeStanding() {
   return null;
 }
 
-// Check for side collision with pipes — returns push-back amount or 0
-function checkSideCollision() {
-  const pb = getPlayerHitbox();
-  let pushBack = 0;
-
-  for (const pipe of pipes) {
-    const rects = getPipeRects(pipe);
-    // Check against lip rect
-    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-        rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h)) {
-      // Determine if this is a side collision (player approaching from left)
-      const playerRight = pb.x + pb.w;
-      const pipeLeft = rects.lipRect.x;
-      const overlapX = playerRight - pipeLeft;
-      // Only treat as side hit if player center is to the left of pipe center
-      // and the overlap is lateral (not landing on top)
-      const playerBottom = pb.y + pb.h;
-      const isAbove = playerBottom <= rects.lipRect.y + 6;
-      if (!isAbove && overlapX > 0 && overlapX < pb.w) {
-        pushBack = Math.max(pushBack, overlapX);
-      }
-    }
-    // Check against body rect
-    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-        rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
-      const playerRight = pb.x + pb.w;
-      const pipeLeft = rects.bodyRect.x;
-      const overlapX = playerRight - pipeLeft;
-      if (overlapX > 0 && overlapX < pb.w) {
-        pushBack = Math.max(pushBack, overlapX);
-      }
-    }
-  }
-
-  // Also check side collision with intact bricks
-  for (const brick of bricks) {
-    if (brick.broken) continue;
-    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-        brick.x, brick.y, brick.w, brick.h)) {
-      const playerRight = pb.x + pb.w;
-      const brickLeft = brick.x;
-      const overlapX = playerRight - brickLeft;
-      const playerBottom = pb.y + pb.h;
-      const isAbove = playerBottom <= brick.y + 6;
-      if (!isAbove && overlapX > 0 && overlapX < pb.w) {
-        pushBack = Math.max(pushBack, overlapX);
-      }
-    }
-  }
-
-  return pushBack;
-}
-
 // Check if player is being crushed (squeezed between obstacles)
 function checkCrush() {
   const pb = getPlayerHitbox();
 
-  // 1) Crushed against left screen edge by pipe pushing from right
+  // 1) Crushed against left screen edge by pipe/brick pushing from right
   if (player.x <= 0) {
-    // Check if any pipe body/lip overlaps horizontally
     for (const pipe of pipes) {
       const rects = getPipeRects(pipe);
       if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
@@ -827,35 +1105,35 @@ function checkCrush() {
         return true;
       }
     }
+    for (const brick of bricks) {
+      if (brick.broken) continue;
+      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, brick.x, brick.y, brick.w, brick.h)) {
+        return true;
+      }
+    }
   }
 
   // 2) Vertically crushed between bottom pipe/ground and top pipe/ceiling
-  // Find the highest floor surface under player and lowest ceiling above
-  let floorY = DESIGN_H - GROUND_H; // ground
-  let ceilY = 0; // screen top
+  let floorY = DESIGN_H - GROUND_H;
+  let ceilY = 0;
 
   for (const pipe of pipes) {
     const rects = getPipeRects(pipe);
-    // Check if pipe is horizontally relevant (overlaps player X)
     const horizOverlap = pb.x + pb.w > rects.lipRect.x + 4 &&
                          pb.x < rects.lipRect.x + rects.lipRect.w - 4;
     if (!horizOverlap) continue;
 
     if (!pipe.fromTop) {
-      // Bottom pipe — acts as raised floor
       const pipeTop = rects.standY;
-      if (pipeTop < floorY) floorY = pipeTop;
+      if (pipeTop !== null && pipeTop < floorY) floorY = pipeTop;
     } else {
-      // Top pipe — acts as lowered ceiling
-      const pipeBottom = pipe.h; // bottom of top pipe
+      const pipeBottom = pipe.h;
       if (pipeBottom > ceilY) ceilY = pipeBottom;
     }
   }
 
-  // If the available vertical space is less than player height, crushed
   const availableSpace = floorY - ceilY;
   if (availableSpace < pb.h - CRUSH_THRESHOLD) {
-    // Only trigger if player is actually in this squeeze zone
     if (pb.y + pb.h >= floorY - 2 && pb.y <= ceilY + 2) {
       return true;
     }
@@ -865,12 +1143,10 @@ function checkCrush() {
   for (const topPipe of pipes) {
     if (!topPipe.fromTop) continue;
     const topRects = getPipeRects(topPipe);
-    // Check if player head overlaps top pipe
     if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
         topRects.lipRect.x, topRects.lipRect.y, topRects.lipRect.w, topRects.lipRect.h) ||
         rectsOverlap(pb.x, pb.y, pb.w, pb.h,
         topRects.bodyRect.x, topRects.bodyRect.y, topRects.bodyRect.w, topRects.bodyRect.h)) {
-      // Player is also on a platform (ground or bottom pipe)
       if (player.onGround) return true;
     }
   }
@@ -878,34 +1154,126 @@ function checkCrush() {
   return false;
 }
 
-// Check if player's head hits a brick from below (rising)
-function checkBrickHeadHit() {
-  if (player.vy >= 0) return; // must be moving upward
-  const pb = getPlayerHitbox();
-  const headY = pb.y; // top of player hitbox
-  const headCenterX = pb.x + pb.w / 2;
+// ── Swept AABB Self-Test (debug=1 only) ─────────────────
+// Simulates extreme velocity scenarios and asserts no penetration.
+// Call via console: runCollisionSelfTest()
+function runCollisionSelfTest() {
+  const results = [];
+  const HB_W = player.w - 8;
+  const HB_H = player.h - 4;
 
-  for (let i = bricks.length - 1; i >= 0; i--) {
-    const brick = bricks[i];
-    if (brick.broken) continue;
-    // Check: player head (top edge) is at or just above brick bottom,
-    // and horizontally overlapping.
-    // Tolerance is MAX_VERTICAL_STEP + 2 to guarantee sub-step never skips.
-    const brickBottom = brick.y + brick.h;
-    if (headY <= brickBottom && headY >= brickBottom - (MAX_VERTICAL_STEP + 2) &&
-        headCenterX > brick.x && headCenterX < brick.x + brick.w) {
-      // Break the brick!
-      brick.broken = true;
-      spawnBrickFragments(brick.x, brick.y);
-      spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, BRICK_SCORE);
-      // Score
-      score += BRICK_SCORE;
-      // Velocity feedback: reverse/dampen upward velocity
-      player.vy = Math.abs(player.vy) * 0.4; // bounce down gently
-      return true;
-    }
+  // Test 1: High-speed downward fall through a thin obstacle (brick 24px)
+  {
+    const obstacle = { x: 100, y: 200, w: 32, h: 24 };
+    // Player hitbox bottom at py+HB_H=160+32=192, obstacle top at 200 → gap 8px
+    // Falling at 50 px/frame (extreme) — must detect contact, not tunnel through
+    const px = 105, py = 160, dx = 0, dy = 50;
+    const r = sweptAABB(px, py, HB_W, HB_H, dx, dy, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+    const contactY = py + dy * r.t;
+    const passed = r.t < 1 && r.normalY === -1 && (contactY + HB_H) <= obstacle.y + 1;
+    results.push({ name: 'Downward 50px/f through 24px brick', t: r.t, normalY: r.normalY, contactY, passed });
   }
-  return false;
+
+  // Test 2: High-speed upward through brick bottom
+  {
+    const obstacle = { x: 100, y: 200, w: 32, h: 24 };
+    const px = 105, py = 280, dx = 0, dy = -60;
+    const r = sweptAABB(px, py, HB_W, HB_H, dx, dy, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+    const contactY = py + dy * r.t;
+    const passed = r.t < 1 && r.normalY === 1 && contactY >= obstacle.y + obstacle.h - 1;
+    results.push({ name: 'Upward 60px/f through 24px brick', t: r.t, normalY: r.normalY, contactY, passed });
+  }
+
+  // Test 3: High-speed horizontal through pipe body (48px wide)
+  {
+    const obstacle = { x: 300, y: 100, w: 48, h: 200 };
+    const px = 100, py = 150, dx = 250, dy = 0;
+    const r = sweptAABB(px, py, HB_W, HB_H, dx, dy, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+    const contactX = px + dx * r.t;
+    const passed = r.t < 1 && r.normalX === -1 && (contactX + HB_W) <= obstacle.x + 1;
+    results.push({ name: 'Horizontal 250px/f through 48px pipe', t: r.t, normalX: r.normalX, contactX, passed });
+  }
+
+  // Test 4: Diagonal high-speed through thin lip (16px)
+  {
+    const obstacle = { x: 200, y: 250, w: 56, h: 16 };
+    const px = 150, py = 200, dx = 80, dy = 40;
+    const r = sweptAABB(px, py, HB_W, HB_H, dx, dy, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+    const passed = r.t < 1; // must detect collision
+    results.push({ name: 'Diagonal 80,40 px/f through 16px lip', t: r.t, passed });
+  }
+
+  // Test 5: Verify no false positive (moving away from obstacle)
+  {
+    const obstacle = { x: 300, y: 100, w: 48, h: 200 };
+    const px = 100, py = 150, dx = -50, dy = 0;
+    const r = sweptAABB(px, py, HB_W, HB_H, dx, dy, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+    const passed = r.t >= 1; // should NOT collide
+    results.push({ name: 'Moving away — no false positive', t: r.t, passed });
+  }
+
+  // Test 6: Scroll-induced collision (obstacle moves into player at high speed)
+  {
+    const obstacle = { x: 130, y: 200, w: 56, h: 100 };
+    // Player at x=100, obstacle approaches from right. In relative frame,
+    // player moves right by scrollDX=20 toward obstacle.
+    const px = 100, py = 220, dx = 20, dy = 0;
+    const r = sweptAABB(px, py, HB_W, HB_H, dx, dy, obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+    const passed = r.t < 1 && r.normalX === -1;
+    results.push({ name: 'Scroll-induced horizontal collision', t: r.t, normalX: r.normalX, passed });
+  }
+
+  // Test 7: Full movement resolver — extreme fall with obstacles below
+  {
+    // Save state
+    const savedX = player.x, savedY = player.y, savedVY = player.vy;
+    const savedOnGround = player.onGround;
+    const savedPipes = [...pipes];
+    const savedBricks = [...bricks];
+
+    // Set up scenario: player close above pipe, extreme downward velocity
+    // Pipe top (standY) = DESIGN_H - GROUND_H - 120 = 220
+    // Player hitbox bottom = player.y + 2 + (player.h - 4) = player.y + 34
+    // Set player.y = 190 → hitbox bottom = 224, just 4px below pipe top at 220
+    // Actually we want player ABOVE pipe: hitbox bottom < 220
+    // player.y = 180 → hitbox bottom = 214, gap = 6px, vy = 80 → easily reaches
+    player.x = 100;
+    player.y = 180;
+    player.vy = 80; // extreme fall speed
+    player.onGround = false;
+    pipes = [{ x: 96, h: 120, fromTop: false, scored: false }];
+    bricks = [];
+
+    const groundY = DESIGN_H - GROUND_H;
+    const pipeTopY = groundY - 120;
+    resolveSweptMovement(80, 0);
+
+    const pb = getPlayerHitbox();
+    const feetY = pb.y + pb.h;
+    const penetrated = feetY > pipeTopY + 3;
+    results.push({ name: 'Resolver: 80px/f fall onto pipe', feetY: feetY.toFixed(1), pipeTop: pipeTopY, penetrated: penetrated, passed: !penetrated });
+
+    // Restore state
+    player.x = savedX; player.y = savedY; player.vy = savedVY;
+    player.onGround = savedOnGround;
+    pipes = savedPipes;
+    bricks = savedBricks;
+  }
+
+  // Print results
+  let allPassed = true;
+  console.log('%c=== Swept AABB Collision Self-Test ===', 'color: #42d4f4; font-weight: bold');
+  for (const r of results) {
+    const icon = r.passed ? '\u2705' : '\u274c';
+    console.log(`${icon} ${r.name}`, r);
+    if (!r.passed) allPassed = false;
+  }
+  console.log(allPassed
+    ? '%c\u2705 ALL TESTS PASSED — no penetration detected'
+    : '%c\u274c SOME TESTS FAILED — check results above',
+    `color: ${allPassed ? '#2ecc71' : '#e74c3c'}; font-weight: bold`);
+
+  return { allPassed, results };
 }
 
 // ── Game Logic ─────────────────────────────────────────
@@ -1286,8 +1654,7 @@ function update() {
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
   groundOffset += scrollSpeed;
 
-  const groundY = DESIGN_H - GROUND_H - player.h;
-
+  // ── Phase 1: Compute desired velocity vector ──────────
   // Jump initiation
   if (jumpPressed && player.onGround) {
     player.vy = JUMP_INITIAL;
@@ -1301,94 +1668,58 @@ function update() {
     jumpHoldFrames++;
   }
 
+  // Apply gravity to get desired vertical velocity
   player.vy += GRAVITY;
 
-  // ── Sub-stepped vertical movement ──────────────────
-  // Divide vertical displacement into small sub-steps to prevent tunneling
-  // through thin obstacles (bricks=24px, lips=16px).
-  let remainingVY = player.vy;
-  const vySign = remainingVY >= 0 ? 1 : -1;
-  let totalDist = Math.abs(remainingVY);
+  // ── Phase 2: Swept AABB resolve ───────────────────────
+  // Combine player's vertical motion + scroll-induced horizontal motion
+  // into one unified continuous collision resolve.
+  const result = resolveSweptMovement(player.vy, scrollSpeed);
 
-  while (totalDist > 0.001) {
-    const stepDist = Math.min(totalDist, MAX_VERTICAL_STEP);
-    player.y += stepDist * vySign;
-    totalDist -= stepDist;
+  // ── Phase 3: Post-resolve checks ─────────────────────
+  const groundY = DESIGN_H - GROUND_H - player.h;
 
-    // Ground collision
-    if (player.y >= groundY) {
-      player.y = groundY;
-      player.vy = 0;
-      player.onGround = true;
-      jumpHoldFrames = 0;
-      break;
-    }
-
-    // ── Falling: check landing on pipe tops / brick tops ──
-    if (vySign > 0) {
-      const standY = checkPipeStanding();
-      if (standY !== null) {
-        player.y = standY - player.h + 2; // +2 to account for hitbox shrink
-        player.vy = 0;
-        player.onGround = true;
-        jumpHoldFrames = 0;
-        break;
-      }
-    }
-
-    // ── Rising: check head-hit bricks ──
-    if (vySign < 0) {
-      if (checkBrickHeadHit()) {
-        // checkBrickHeadHit already reversed vy
-        break;
-      }
-    }
-
-    // ── Ceiling pipe collision — push player down ──
-    const pb = getPlayerHitbox();
-    let hitCeiling = false;
-    for (const pipe of pipes) {
-      if (!pipe.fromTop) continue;
-      const rects = getPipeRects(pipe);
-      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-          rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h)) {
-        const pushTo = rects.lipRect.y + rects.lipRect.h - 2;
-        if (player.y < pushTo) {
-          player.y = pushTo;
-          if (player.vy < 0) player.vy = 0;
-          hitCeiling = true;
-        }
-      }
-      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-          rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
-        const pushTo = rects.bodyRect.y + rects.bodyRect.h - 2;
-        if (player.y < pushTo) {
-          player.y = pushTo;
-          if (player.vy < 0) player.vy = 0;
-          hitCeiling = true;
-        }
-      }
-    }
-    if (hitCeiling) break;
+  // Reset hold counter on landing
+  if (result.landedThisFrame) {
+    jumpHoldFrames = 0;
   }
 
-  // If player is standing on a pipe that has moved, check if still supported
-  if (player.onGround && player.y < groundY - 5) {
-    const stillOnPipe = checkPipeStanding();
-    if (stillOnPipe === null) {
-      player.onGround = false; // fell off pipe edge
-    }
-  }
-
-  // Side collision — initial pre-scroll check
-  let sideOverlap = checkSideCollision();
-  if (sideOverlap > 0) {
-    player.x -= sideOverlap + 1;
-  }
-
-  // Clamp player X (don't go off-screen right)
+  // Clamp player X (don't go off-screen too far left)
   if (player.x < -10) player.x = -10;
 
+  // Animation state machine
+  updateAnimState();
+
+  // Animation frame (run cycle only advances on ground)
+  if (player.animState === 'run') {
+    if (frameCount % 6 === 0) player.frame = (player.frame + 1) % 4;
+  }
+
+  // Update debris fragments
+  updateFragments();
+
+  // Update score popups
+  updateScorePopups();
+
+  // ── Phase 4: Move obstacles in world coords ──────────
+  // The sweep already accounted for scroll in collision detection.
+  // Now actually move obstacle positions for rendering/scoring.
+  for (const pipe of pipes) {
+    pipe.x -= scrollSpeed;
+  }
+  for (const brick of bricks) {
+    brick.x -= scrollSpeed;
+  }
+
+  // Check if player fell off a platform edge (pipe/brick scrolled away)
+  if (player.onGround && player.y < groundY - 5) {
+    const support = checkStandingSupport();
+    if (support === null) {
+      player.onGround = false;
+    }
+  }
+
+  // ── Phase 5: Death checks (after obstacles moved) ────
   // Check crush death
   if (checkCrush()) {
     state = 'dead';
@@ -1411,53 +1742,7 @@ function update() {
     return;
   }
 
-  // Animation state machine
-  updateAnimState();
-
-  // Animation frame (run cycle only advances on ground)
-  if (player.animState === 'run') {
-    if (frameCount % 6 === 0) player.frame = (player.frame + 1) % 4;
-  }
-
-  // Brick head-hit is now checked inside the vertical sub-step loop above.
-
-  // Update debris fragments
-  updateFragments();
-
-  // Update score popups
-  updateScorePopups();
-
-  // ── Sub-stepped horizontal scroll (pipes & bricks) ──
-  // Move obstacles in small increments and check side collision at each step
-  // to prevent tunneling through pipe walls at high scroll speeds.
-  let remainingScroll = scrollSpeed;
-  while (remainingScroll > 0.001) {
-    const hStep = Math.min(remainingScroll, MAX_HORIZONTAL_STEP);
-    remainingScroll -= hStep;
-
-    for (const pipe of pipes) {
-      pipe.x -= hStep;
-    }
-    for (const brick of bricks) {
-      brick.x -= hStep;
-    }
-
-    // Re-check side collision after this sub-step
-    const sideOv = checkSideCollision();
-    if (sideOv > 0) {
-      player.x -= sideOv + 1;
-    }
-
-    // Re-check standing support (pipe moved out from under player)
-    if (player.onGround && player.y < groundY - 5) {
-      const still = checkPipeStanding();
-      if (still === null) {
-        player.onGround = false;
-      }
-    }
-  }
-
-  // Score: passed pipe (only count bottom pipes or solo top pipes)
+  // Score: passed pipe
   for (const pipe of pipes) {
     if (!pipe.scored && pipe.x + LIP_W < player.x) {
       pipe.scored = true;
@@ -1471,7 +1756,7 @@ function update() {
   // Remove off-screen or broken bricks
   bricks = bricks.filter(b => !b.broken && b.x > -BRICK_W - 10);
 
-  // Spawn pipes — check only among the rightmost pipe
+  // Spawn pipes
   if (pipes.length > 0) {
     const rightmost = pipes.reduce((a, b) => a.x > b.x ? a : b);
     if (rightmost.x < DESIGN_W) {
@@ -1482,8 +1767,29 @@ function update() {
   }
 
   // Recover player X towards default position when not being pushed
-  const finalSideOverlap = checkSideCollision();
-  if (finalSideOverlap === 0 && player.x < 120) {
+  const pb = getPlayerHitbox();
+  let beingPushed = false;
+  for (const pipe of pipes) {
+    if (pipe.h <= 0) continue;
+    const rects = getPipeRects(pipe);
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
+        rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+      beingPushed = true;
+      break;
+    }
+  }
+  if (!beingPushed) {
+    for (const brick of bricks) {
+      if (brick.broken) continue;
+      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, brick.x, brick.y, brick.w, brick.h)) {
+        beingPushed = true;
+        break;
+      }
+    }
+  }
+  if (!beingPushed && player.x < 120) {
     player.x += Math.min(1.5, 120 - player.x);
   }
 
@@ -1519,7 +1825,6 @@ function update() {
 
   const fillPct = diffLevel >= DIFFICULTY_LEVELS.length - 1 ? 100 : Math.round(diffProgress * 100);
   hudLevelFill.style.width = fillPct + '%';
-  // Color gradient: green → yellow → orange → red → purple
   const levelColors = ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6'];
   hudLevelFill.style.background = levelColors[diffLevel];
 }
@@ -1613,11 +1918,12 @@ function draw() {
       ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
     }
 
-    // Scroll speed indicator
+    // Scroll speed indicator + swept AABB label
     ctx.globalAlpha = 1;
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
-    ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)}`, 4, DESIGN_H - 4);
+    ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
+    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)}`, 4, DESIGN_H - 14);
 
     ctx.restore();
   }
@@ -1711,6 +2017,17 @@ initClouds();
 initHills();
 showOverlay('Plumber Runner', 'Press SPACE / Tap to Start');
 gameLoop();
+
+// Expose self-test globally for console access
+window.runCollisionSelfTest = runCollisionSelfTest;
+
+// Auto-run self-test in debug mode
+if (DEBUG_MODE) {
+  setTimeout(() => {
+    console.log('%cDebug mode active — running collision self-test...', 'color: #42d4f4');
+    runCollisionSelfTest();
+  }, 500);
+}
 </script>
 </body>
 </html>

@@ -167,27 +167,66 @@ Transitions happen automatically every frame in `updateAnimState()`:
 | Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump |
 | Mobile   | Touch anywhere — tap for small jump, hold for high jump |
 
-## Collision Stability Fix
+## Collision System — Swept AABB (Continuous Collision Detection)
 
-At higher difficulty levels (faster scroll speed + larger vertical velocity), single-frame position updates could cause the player to **tunnel through** thin obstacles like brick blocks (24 px) or pipe lips (16 px).
+The game uses **Swept AABB** (axis-aligned bounding box) continuous collision detection to prevent tunneling at any speed. This replaces the previous sub-stepping approach which could still miss thin obstacles at extreme velocities.
 
-### Sub-step collision detection
+### How It Works
 
-Both vertical and horizontal movement are now split into **sub-steps** capped at a safe maximum distance:
+Instead of moving the player and then checking for overlap (discrete collision), Swept AABB computes the **exact time of first contact** between the player's moving hitbox and each obstacle's AABB along the movement vector. This is mathematically exact and cannot miss any collision regardless of speed.
 
-| Axis | Max step size | Protects against |
-|------|--------------|------------------|
-| Vertical | 8 px/step | Falling through brick tops, jumping through brick bottoms, skipping pipe lips |
-| Horizontal | 6 px/step | Side-tunneling through pipe walls at high scroll speed |
+#### Per-Frame Update Order
 
-After each sub-step, all relevant collision checks are re-evaluated:
-- **Falling sub-steps**: ground, pipe-top landing, brick-top landing
-- **Rising sub-steps**: brick head-hit (break from below), ceiling pipe push-down
-- **Horizontal sub-steps**: pipe/brick side collision, standing-support loss
+1. **Compute desired velocity** — gravity, jump initiation, variable jump hold
+2. **Swept resolve** — `resolveSweptMovement(vy, scrollDX)`:
+   - Fold scroll-induced horizontal motion into the player's relative velocity vs obstacles
+   - Gather all solid AABBs (ground, pipes lip/body, ceiling pipes, bricks)
+   - Depenetrate any pre-existing overlaps (safety net)
+   - Iterate up to `SWEEP_MAX_ITERATIONS` (4):
+     - Call `sweptAABB()` against every obstacle to find earliest collision time `t ∈ [0, 1]`
+     - Move player to contact point (`t - ε`)
+     - Resolve collision normal: zero the normal-axis velocity, keep tangent velocity
+     - Special handling: brick hit from below → break brick, bounce player down
+     - Consume used time fraction, repeat with remaining movement
+   - Convert from obstacle-rest-frame back to world coordinates
+3. **Move obstacles** — apply scroll displacement to pipe/brick positions
+4. **Post-move checks** — standing support loss, crush detection, off-screen death
+5. **Cleanup** — remove off-screen obstacles, spawn new ones, recover player X position
 
-Collision tolerance windows are tied to `MAX_VERTICAL_STEP` so they can never be skipped regardless of velocity.
+#### Key Functions
 
-### Debug hitbox overlay
+| Function | Purpose |
+|----------|---------|
+| `sweptAABB(px,py,pw,ph,dx,dy,ox,oy,ow,oh)` | Compute time-of-impact `t ∈ [0,1]` and collision normal for a moving AABB vs a static AABB |
+| `resolveSweptMovement(vy, scrollDX)` | Full iterative sweep resolver — handles landing, ceiling hits, side blocks, brick breaking |
+| `gatherCollisionRects()` | Collect all solid world AABBs (ground, pipes, bricks) |
+| `depenetratePlayer(rects)` | Push player out of any pre-existing overlaps using minimum penetration vector |
+| `checkStandingSupport()` | Check if player is still supported on a platform after obstacles move |
+
+### Why Swept AABB Cannot Tunnel
+
+The `sweptAABB()` function computes entry/exit times on each axis analytically:
+
+```
+tEntry_x = distToEntry_x / dx    tExit_x = distToExit_x / dx
+tEntry_y = distToEntry_y / dy    tExit_y = distToExit_y / dy
+tEntry = max(tEntry_x, tEntry_y)
+tExit  = min(tExit_x,  tExit_y)
+collision if tEntry <= tExit AND tEntry in [0, 1]
+```
+
+This works for **any velocity magnitude** — even if `dy = 500` pixels/frame, it will find the exact contact time with a 16px-tall pipe lip. No step size or tolerance window is needed.
+
+### Scroll Motion Handling
+
+Horizontal scroll is folded into the swept calculation as relative velocity. In the obstacle-rest-frame, the player moves by `(+scrollDX, vy)` relative to obstacles. After the sweep resolves, `scrollDX` is subtracted from the player's world X to convert back. This means:
+
+- Side collisions from scroll are detected continuously (no tunneling through pipe walls)
+- When blocked horizontally, the remaining scroll pushes the player left in world coords (correct crush behavior)
+
+### Debug Features
+
+#### Hitbox overlay (`?debug=1`)
 
 Append `?debug=1` to the URL to render collision boxes:
 - **Green** outline = player hitbox
@@ -195,7 +234,26 @@ Append `?debug=1` to the URL to render collision boxes:
 - **Orange** outline = pipe body collision rect
 - **Cyan** line = pipe stand-Y surface
 - **Yellow** outline = brick hitbox
-- Bottom-left text shows current scroll speed, vertical velocity, and Y position
+- Bottom-left text shows scroll speed, vertical velocity, Y position, and `[SweptAABB]` label
+
+#### Self-test (`runCollisionSelfTest()`)
+
+In debug mode (`?debug=1`), a collision self-test runs automatically on page load. You can also trigger it manually from the browser console:
+
+```js
+runCollisionSelfTest()
+```
+
+The test simulates 7 extreme scenarios:
+1. **50 px/frame downward** through 24px brick — must detect landing
+2. **60 px/frame upward** through 24px brick — must detect head-hit
+3. **250 px/frame horizontal** through 48px pipe — must detect side block
+4. **Diagonal 80,40 px/frame** through 16px lip — must detect collision
+5. **Moving away** from obstacle — must NOT false-positive
+6. **Scroll-induced** collision — must detect horizontal approach
+7. **Full resolver test** — 80 px/frame fall onto pipe, verify no penetration
+
+Each test reports pass/fail with contact details. All tests must pass for the collision system to be considered valid.
 
 ## Running
 
