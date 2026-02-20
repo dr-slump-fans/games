@@ -146,6 +146,70 @@ const SWEEP_EPSILON = 0.001;      // floating-point tolerance for contact
 // ── Debug Mode ───────────────────────────────────────
 const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === '1';
 
+// ── Sprite Mode ─────────────────────────────────────
+// Render mode: 'sprite' uses sprite.png + sprite.json, 'procedural' uses code-drawn character.
+// Default: attempt sprite mode; fallback to procedural if loading fails.
+let spriteMode = 'sprite'; // 'sprite' | 'procedural'
+let spriteImg = null;       // Image object when loaded
+let spriteData = null;      // Parsed sprite.json data
+let spriteReady = false;    // true when both image + json loaded successfully
+
+function loadSprite() {
+  const basePath = 'assets/';
+
+  // Load JSON first, then use it to determine image path
+  fetch(basePath + 'sprite.json')
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(data => {
+      spriteData = data;
+      // Now load the image using the path from JSON
+      const img = new Image();
+      img.onload = () => {
+        spriteImg = img;
+        onSpriteReady();
+      };
+      img.onerror = () => {
+        console.warn('[Sprite] Failed to load ' + data.meta.image + ', falling back to procedural.');
+        spriteMode = 'procedural';
+      };
+      img.src = basePath + data.meta.image;
+    })
+    .catch(err => {
+      console.warn('[Sprite] Failed to load sprite.json, falling back to procedural:', err.message);
+      spriteMode = 'procedural';
+    });
+}
+
+function onSpriteReady() {
+  spriteReady = true;
+  spriteMode = 'sprite';
+  if (DEBUG_MODE) {
+    console.log('%c[Sprite] Sprite mode active — ' + spriteData.meta.columns + ' frames loaded', 'color: #42d4f4');
+  }
+}
+
+// Resolve the sprite frame index for the current animation state and player frame
+function getSpriteFrame() {
+  if (!spriteData || !spriteData.animations) return 0;
+  const anim = spriteData.animations[player.animState];
+  if (!anim) return 0;
+  if (anim.frames.length === 1) return anim.frames[0];
+  // For multi-frame animations (run), use player.frame to index
+  return anim.frames[player.frame % anim.frames.length];
+}
+
+// Draw player using the sprite sheet
+function drawPlayerSprite(px, py) {
+  if (!spriteReady || !spriteImg || !spriteData) return;
+  const frameIdx = getSpriteFrame();
+  const fw = spriteData.meta.frameWidth;
+  const fh = spriteData.meta.frameHeight;
+  const cols = spriteData.meta.columns;
+  const sx = (frameIdx % cols) * fw;
+  const sy = Math.floor(frameIdx / cols) * fh;
+  ctx.drawImage(spriteImg, sx, sy, fw, fh, Math.round(px), Math.round(py), fw, fh);
+}
+
 // ── Canvas Setup ───────────────────────────────────────
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -288,6 +352,12 @@ function updateAnimState() {
 // 28x36 px, fully original design: spiky-haired explorer with visor & jetpack
 // NOT derived from any Nintendo or copyrighted IP
 function drawPlayer(px, py, frame) {
+  // Sprite mode: use sprite sheet if available
+  if (spriteMode === 'sprite' && spriteReady) {
+    drawPlayerSprite(px, py);
+    return;
+  }
+  // Procedural mode: code-drawn character below
   const x = Math.round(px);
   const y = Math.round(py);
   const st = player.animState;
@@ -2150,6 +2220,7 @@ document.addEventListener('mouseup', () => {
 });
 
 // ── Init ───────────────────────────────────────────────
+loadSprite(); // attempt sprite mode; falls back to procedural on failure
 initClouds();
 initHills();
 showOverlay('Plumber Runner', 'Press SPACE / Tap to Start');

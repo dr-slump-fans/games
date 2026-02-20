@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "description": "Plumber Runner sprite sheet — original 'Bolt' explorer character",
+    "image": "sprite.png",
+    "frameWidth": 28,
+    "frameHeight": 36,
+    "columns": 8,
+    "rows": 1,
+    "format": "Frames arranged left-to-right in a single row. Each frame is 28x36 pixels. Transparent background (RGBA)."
+  },
+  "animations": {
+    "idle": {
+      "frames": [0],
+      "frameRate": 1,
+      "loop": true
+    },
+    "run": {
+      "frames": [1, 2, 3, 4],
+      "frameRate": 10,
+      "loop": true
+    },
+    "jump_up": {
+      "frames": [5],
+      "frameRate": 1,
+      "loop": false
+    },
+    "fall": {
+      "frames": [6],
+      "frameRate": 1,
+      "loop": false
+    },
+    "land": {
+      "frames": [7],
+      "frameRate": 1,
+      "loop": false
+    }
+  }
+}

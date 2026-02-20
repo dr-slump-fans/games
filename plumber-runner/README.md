@@ -280,14 +280,93 @@ Works on GitHub Pages — just push and visit:
 https://<username>.github.io/<repo>/plumber-runner/
 ```
 
+## Custom Sprite Sheet (Sprite Mode)
+
+The game supports two character rendering modes:
+
+1. **Sprite mode** (default) — loads `assets/sprite.png` + `assets/sprite.json`
+2. **Procedural mode** (fallback) — draws the character with code (original behavior)
+
+If sprite loading fails (missing files, network error, corrupt image), the game automatically falls back to procedural rendering. No manual switching is needed.
+
+### Sprite Sheet Format
+
+The default sprite sheet is a **single-row PNG** with transparent background (RGBA):
+
+| Property | Value |
+|----------|-------|
+| Frame size | 28×36 pixels |
+| Layout | Single row, left-to-right |
+| Total frames | 8 (minimum) |
+| Format | PNG with alpha transparency |
+
+**Frame order (column index):**
+
+| Index | Animation | Description |
+|-------|-----------|-------------|
+| 0 | `idle` | Relaxed stance (title screen) |
+| 1 | `run` frame 0 | Left arm forward |
+| 2 | `run` frame 1 | Contact pose (legs together) |
+| 3 | `run` frame 2 | Right arm forward |
+| 4 | `run` frame 3 | Neutral transition |
+| 5 | `jump_up` | Arms raised, legs tucked |
+| 6 | `fall` | Arms spread, legs dangling |
+| 7 | `land` | Squash impact pose |
+
+### How to Replace with Your Own Sprite
+
+1. **Create your sprite sheet** — a PNG file with all animation frames in a single row (or grid), each frame exactly the same size. The default is 28×36 per frame, but you can use any size.
+
+2. **Save as `assets/sprite.png`** — replace the existing file.
+
+3. **Edit `assets/sprite.json`** — update the metadata to match your sprite sheet:
+   ```json
+   {
+     "meta": {
+       "image": "sprite.png",
+       "frameWidth": 28,
+       "frameHeight": 36,
+       "columns": 8,
+       "rows": 1
+     },
+     "animations": {
+       "idle":    { "frames": [0],       "frameRate": 1,  "loop": true },
+       "run":     { "frames": [1,2,3,4], "frameRate": 10, "loop": true },
+       "jump_up": { "frames": [5],       "frameRate": 1,  "loop": false },
+       "fall":    { "frames": [6],       "frameRate": 1,  "loop": false },
+       "land":    { "frames": [7],       "frameRate": 1,  "loop": false }
+     }
+   }
+   ```
+   - `frameWidth` / `frameHeight` — size of each frame in pixels
+   - `columns` — number of frames per row
+   - `rows` — number of rows in the sheet
+   - `animations` — maps each animation state to frame indices (0-based, left-to-right, top-to-bottom)
+   - `frames` array — the frame indices to play for that animation (run needs ≥ 4 frames)
+
+4. **Refresh the browser** — the game will load your custom sprite automatically.
+
+5. **If something looks wrong** — the game will auto-fallback to the code-drawn character. Check the browser console for `[Sprite]` warnings.
+
+> **Important:** The player hitbox (28×36) is separate from the sprite. If your sprite is a different size, update `frameWidth`/`frameHeight` in sprite.json. The collision box is slightly shrunk from the visual size for fairness (20×32 effective hitbox), so minor size differences are fine.
+
+### Copyright Reminder
+
+**Do NOT use copyrighted or unlicensed sprite art.** This includes but is not limited to:
+- Nintendo characters (Mario, Luigi, Link, Kirby, etc.)
+- Sprites ripped from commercial games
+- Fan art that you don't have permission to use
+
+The bundled `assets/sprite.png` is an **original character** ("Bolt" the Explorer) created for this project. If you replace it, ensure you have the right to use your replacement art.
+
 ## Asset & License Information
 
-**All game assets (character, pipes, ground, clouds, hills, breakable bricks, debris fragments) are drawn programmatically on the HTML5 Canvas at runtime.** No external sprite sheets, images, or fonts are used.
+**The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.
 
-- All visual assets are **original pixel art** rendered via JavaScript/Canvas code
+- All visual assets are **original pixel art** — either rendered via JavaScript/Canvas code or provided as the bundled sprite sheet
 - The player character **"Bolt"** is a fully **original pixel art explorer** with visor and jetpack — designed from scratch, not derived from any Nintendo or other copyrighted IP
 - **No Nintendo sprites, Super Mario assets, or any third-party copyrighted materials are used anywhere in this project**
-- All 5 animation states (idle, run, jump_up, fall, land) are hand-crafted procedural pixel art with multi-frame animation
+- All 5 animation states (idle, run, jump_up, fall, land) are hand-crafted with multi-frame animation
 - The game concept (side-scrolling runner with pipe obstacles) is a generic game mechanic not subject to copyright
 
 ### License
