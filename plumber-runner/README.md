@@ -167,6 +167,36 @@ Transitions happen automatically every frame in `updateAnimState()`:
 | Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump |
 | Mobile   | Touch anywhere — tap for small jump, hold for high jump |
 
+## Collision Stability Fix
+
+At higher difficulty levels (faster scroll speed + larger vertical velocity), single-frame position updates could cause the player to **tunnel through** thin obstacles like brick blocks (24 px) or pipe lips (16 px).
+
+### Sub-step collision detection
+
+Both vertical and horizontal movement are now split into **sub-steps** capped at a safe maximum distance:
+
+| Axis | Max step size | Protects against |
+|------|--------------|------------------|
+| Vertical | 8 px/step | Falling through brick tops, jumping through brick bottoms, skipping pipe lips |
+| Horizontal | 6 px/step | Side-tunneling through pipe walls at high scroll speed |
+
+After each sub-step, all relevant collision checks are re-evaluated:
+- **Falling sub-steps**: ground, pipe-top landing, brick-top landing
+- **Rising sub-steps**: brick head-hit (break from below), ceiling pipe push-down
+- **Horizontal sub-steps**: pipe/brick side collision, standing-support loss
+
+Collision tolerance windows are tied to `MAX_VERTICAL_STEP` so they can never be skipped regardless of velocity.
+
+### Debug hitbox overlay
+
+Append `?debug=1` to the URL to render collision boxes:
+- **Green** outline = player hitbox
+- **Red** outline = pipe lip collision rect
+- **Orange** outline = pipe body collision rect
+- **Cyan** line = pipe stand-Y surface
+- **Yellow** outline = brick hitbox
+- Bottom-left text shows current scroll speed, vertical velocity, and Y position
+
 ## Running
 
 Open `index.html` in any modern browser. No build step, no server, no CDN required.

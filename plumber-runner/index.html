@@ -139,6 +139,13 @@ const DIFFICULTY_LEVELS = [
   { name: 'INSANE', time: 240, speedMul: 2.15, gapMin: 175, gapMax: 245, pipeMaxH: 240, topMaxH: 200, pairChance: 0.55, brickReplace: 0.28 },
 ];
 
+// ── Collision Sub-step Settings ───────────────────────
+const MAX_VERTICAL_STEP = 8;    // max px per vertical sub-step (< thinnest obstacle: LIP_H=16)
+const MAX_HORIZONTAL_STEP = 6;  // max px per horizontal sub-step for scroll collision
+
+// ── Debug Mode ───────────────────────────────────────
+const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === '1';
+
 // ── Canvas Setup ───────────────────────────────────────
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -728,9 +735,10 @@ function checkPipeStanding() {
     const rects = getPipeRects(pipe);
     const standY = rects.standY;
     // Player feet must be near the pipe top surface, falling downward
-    // and horizontally overlapping the lip
+    // and horizontally overlapping the lip.
+    // Tolerance is MAX_VERTICAL_STEP + 2 to guarantee sub-step never skips.
     if (player.vy >= 0 &&
-        feetY >= standY && feetY <= standY + 10 &&
+        feetY >= standY && feetY <= standY + MAX_VERTICAL_STEP + 2 &&
         pb.x + pb.w > pipe.x + 4 && pb.x < pipe.x + LIP_W - 4) {
       return standY;
     }
@@ -739,8 +747,9 @@ function checkPipeStanding() {
   // Check standing on intact bricks
   for (const brick of bricks) {
     if (brick.broken) continue;
+    // Tolerance is MAX_VERTICAL_STEP + 2 to guarantee sub-step never skips.
     if (player.vy >= 0 &&
-        feetY >= brick.y && feetY <= brick.y + 8 &&
+        feetY >= brick.y && feetY <= brick.y + MAX_VERTICAL_STEP + 2 &&
         pb.x + pb.w > brick.x + 2 && pb.x < brick.x + brick.w - 2) {
       return brick.y;
     }
@@ -782,6 +791,23 @@ function checkSideCollision() {
       }
     }
   }
+
+  // Also check side collision with intact bricks
+  for (const brick of bricks) {
+    if (brick.broken) continue;
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+        brick.x, brick.y, brick.w, brick.h)) {
+      const playerRight = pb.x + pb.w;
+      const brickLeft = brick.x;
+      const overlapX = playerRight - brickLeft;
+      const playerBottom = pb.y + pb.h;
+      const isAbove = playerBottom <= brick.y + 6;
+      if (!isAbove && overlapX > 0 && overlapX < pb.w) {
+        pushBack = Math.max(pushBack, overlapX);
+      }
+    }
+  }
+
   return pushBack;
 }
 
@@ -863,9 +889,10 @@ function checkBrickHeadHit() {
     const brick = bricks[i];
     if (brick.broken) continue;
     // Check: player head (top edge) is at or just above brick bottom,
-    // and horizontally overlapping
+    // and horizontally overlapping.
+    // Tolerance is MAX_VERTICAL_STEP + 2 to guarantee sub-step never skips.
     const brickBottom = brick.y + brick.h;
-    if (headY <= brickBottom && headY >= brickBottom - 8 &&
+    if (headY <= brickBottom && headY >= brickBottom - (MAX_VERTICAL_STEP + 2) &&
         headCenterX > brick.x && headCenterX < brick.x + brick.w) {
       // Break the brick!
       brick.broken = true;
@@ -1275,25 +1302,74 @@ function update() {
   }
 
   player.vy += GRAVITY;
-  player.y += player.vy;
 
-  // Ground collision
-  if (player.y >= groundY) {
-    player.y = groundY;
-    player.vy = 0;
-    player.onGround = true;
-    jumpHoldFrames = 0;
-  }
+  // ── Sub-stepped vertical movement ──────────────────
+  // Divide vertical displacement into small sub-steps to prevent tunneling
+  // through thin obstacles (bricks=24px, lips=16px).
+  let remainingVY = player.vy;
+  const vySign = remainingVY >= 0 ? 1 : -1;
+  let totalDist = Math.abs(remainingVY);
 
-  // Pipe top standing
-  if (!player.onGround || player.vy > 0) {
-    const standY = checkPipeStanding();
-    if (standY !== null) {
-      player.y = standY - player.h + 2; // +2 to account for hitbox shrink
+  while (totalDist > 0.001) {
+    const stepDist = Math.min(totalDist, MAX_VERTICAL_STEP);
+    player.y += stepDist * vySign;
+    totalDist -= stepDist;
+
+    // Ground collision
+    if (player.y >= groundY) {
+      player.y = groundY;
       player.vy = 0;
       player.onGround = true;
       jumpHoldFrames = 0;
+      break;
     }
+
+    // ── Falling: check landing on pipe tops / brick tops ──
+    if (vySign > 0) {
+      const standY = checkPipeStanding();
+      if (standY !== null) {
+        player.y = standY - player.h + 2; // +2 to account for hitbox shrink
+        player.vy = 0;
+        player.onGround = true;
+        jumpHoldFrames = 0;
+        break;
+      }
+    }
+
+    // ── Rising: check head-hit bricks ──
+    if (vySign < 0) {
+      if (checkBrickHeadHit()) {
+        // checkBrickHeadHit already reversed vy
+        break;
+      }
+    }
+
+    // ── Ceiling pipe collision — push player down ──
+    const pb = getPlayerHitbox();
+    let hitCeiling = false;
+    for (const pipe of pipes) {
+      if (!pipe.fromTop) continue;
+      const rects = getPipeRects(pipe);
+      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+          rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h)) {
+        const pushTo = rects.lipRect.y + rects.lipRect.h - 2;
+        if (player.y < pushTo) {
+          player.y = pushTo;
+          if (player.vy < 0) player.vy = 0;
+          hitCeiling = true;
+        }
+      }
+      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
+          rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+        const pushTo = rects.bodyRect.y + rects.bodyRect.h - 2;
+        if (player.y < pushTo) {
+          player.y = pushTo;
+          if (player.vy < 0) player.vy = 0;
+          hitCeiling = true;
+        }
+      }
+    }
+    if (hitCeiling) break;
   }
 
   // If player is standing on a pipe that has moved, check if still supported
@@ -1304,32 +1380,8 @@ function update() {
     }
   }
 
-  // Ceiling pipe collision — push player down
-  const pb = getPlayerHitbox();
-  for (const pipe of pipes) {
-    if (!pipe.fromTop) continue;
-    const rects = getPipeRects(pipe);
-    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-        rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h)) {
-      // Push player below the lip
-      const pushTo = rects.lipRect.y + rects.lipRect.h - 2;
-      if (player.y < pushTo) {
-        player.y = pushTo;
-        if (player.vy < 0) player.vy = 0;
-      }
-    }
-    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-        rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
-      const pushTo = rects.bodyRect.y + rects.bodyRect.h - 2;
-      if (player.y < pushTo) {
-        player.y = pushTo;
-        if (player.vy < 0) player.vy = 0;
-      }
-    }
-  }
-
-  // Side collision — push player back
-  const sideOverlap = checkSideCollision();
+  // Side collision — initial pre-scroll check
+  let sideOverlap = checkSideCollision();
   if (sideOverlap > 0) {
     player.x -= sideOverlap + 1;
   }
@@ -1367,8 +1419,7 @@ function update() {
     if (frameCount % 6 === 0) player.frame = (player.frame + 1) % 4;
   }
 
-  // Check brick head-hit (must be before moving bricks)
-  checkBrickHeadHit();
+  // Brick head-hit is now checked inside the vertical sub-step loop above.
 
   // Update debris fragments
   updateFragments();
@@ -1376,14 +1427,34 @@ function update() {
   // Update score popups
   updateScorePopups();
 
-  // Move pipes
-  for (const pipe of pipes) {
-    pipe.x -= scrollSpeed;
-  }
+  // ── Sub-stepped horizontal scroll (pipes & bricks) ──
+  // Move obstacles in small increments and check side collision at each step
+  // to prevent tunneling through pipe walls at high scroll speeds.
+  let remainingScroll = scrollSpeed;
+  while (remainingScroll > 0.001) {
+    const hStep = Math.min(remainingScroll, MAX_HORIZONTAL_STEP);
+    remainingScroll -= hStep;
 
-  // Move bricks
-  for (const brick of bricks) {
-    brick.x -= scrollSpeed;
+    for (const pipe of pipes) {
+      pipe.x -= hStep;
+    }
+    for (const brick of bricks) {
+      brick.x -= hStep;
+    }
+
+    // Re-check side collision after this sub-step
+    const sideOv = checkSideCollision();
+    if (sideOv > 0) {
+      player.x -= sideOv + 1;
+    }
+
+    // Re-check standing support (pipe moved out from under player)
+    if (player.onGround && player.y < groundY - 5) {
+      const still = checkPipeStanding();
+      if (still === null) {
+        player.onGround = false;
+      }
+    }
   }
 
   // Score: passed pipe (only count bottom pipes or solo top pipes)
@@ -1411,7 +1482,8 @@ function update() {
   }
 
   // Recover player X towards default position when not being pushed
-  if (sideOverlap === 0 && player.x < 120) {
+  const finalSideOverlap = checkSideCollision();
+  if (finalSideOverlap === 0 && player.x < 120) {
     player.x += Math.min(1.5, 120 - player.x);
   }
 
@@ -1504,6 +1576,51 @@ function draw() {
 
   // Score popups
   drawScorePopups();
+
+  // ── Debug hitbox overlay ──────────────────────────────
+  if (DEBUG_MODE) {
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 1;
+
+    // Player hitbox (green)
+    const dbPb = getPlayerHitbox();
+    ctx.strokeStyle = '#0f0';
+    ctx.strokeRect(dbPb.x, dbPb.y, dbPb.w, dbPb.h);
+
+    // Pipe collision rects (red = lip, orange = body)
+    for (const pipe of pipes) {
+      if (pipe.h <= 0) continue;
+      const rects = getPipeRects(pipe);
+      ctx.strokeStyle = '#f00';
+      ctx.strokeRect(rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h);
+      ctx.strokeStyle = '#f80';
+      ctx.strokeRect(rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h);
+      // Stand-Y line (cyan)
+      if (rects.standY !== null) {
+        ctx.strokeStyle = '#0ff';
+        ctx.beginPath();
+        ctx.moveTo(rects.lipRect.x, rects.standY);
+        ctx.lineTo(rects.lipRect.x + rects.lipRect.w, rects.standY);
+        ctx.stroke();
+      }
+    }
+
+    // Brick hitboxes (yellow)
+    for (const brick of bricks) {
+      if (brick.broken) continue;
+      ctx.strokeStyle = '#ff0';
+      ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
+    }
+
+    // Scroll speed indicator
+    ctx.globalAlpha = 1;
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#0f0';
+    ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)}`, 4, DESIGN_H - 4);
+
+    ctx.restore();
+  }
 }
 
 function gameLoop() {
