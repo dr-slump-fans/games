@@ -126,6 +126,9 @@ let jumpHoldFrames = 0;
 const player = {
   x: 120, y: 0, w: 28, h: 36,
   vy: 0, onGround: true, frame: 0,
+  animState: 'run',   // run | jump_up | fall | land
+  landTimer: 0,       // frames remaining in land animation
+  wasOnGround: true,  // track previous frame for landing detection
 };
 
 // ── Pipes ──────────────────────────────────────────────
@@ -166,43 +169,224 @@ function drawPixelRect(x, y, w, h, color) {
   ctx.fillRect(Math.round(x), Math.round(y), w, h);
 }
 
-// Draw the player character (original pixel plumber)
+// ── Animation State Machine ───────────────────────────
+// States: run, jump_up, fall, land
+const LAND_DURATION = 6; // frames for land squash animation
+
+function updateAnimState() {
+  const prev = player.animState;
+
+  // Landing detection: was airborne, now on ground
+  if (!player.wasOnGround && player.onGround && prev !== 'land') {
+    player.animState = 'land';
+    player.landTimer = LAND_DURATION;
+    player.wasOnGround = player.onGround;
+    return;
+  }
+
+  player.wasOnGround = player.onGround;
+
+  // Land animation countdown
+  if (player.animState === 'land') {
+    player.landTimer--;
+    if (player.landTimer <= 0) {
+      player.animState = 'run';
+    }
+    return;
+  }
+
+  // Airborne states
+  if (!player.onGround) {
+    if (player.vy < -0.5) {
+      player.animState = 'jump_up';
+    } else {
+      player.animState = 'fall';
+    }
+    return;
+  }
+
+  // On ground and not landing
+  player.animState = 'run';
+}
+
+// Draw the player character — original pixel adventurer with goggles
+// 28x36 px, distinct from any Nintendo IP
 function drawPlayer(px, py, frame) {
   const x = Math.round(px);
   const y = Math.round(py);
-  // Hat (red cap)
-  drawPixelRect(x + 4, y, 20, 4, '#e74c3c');
-  drawPixelRect(x + 2, y + 4, 24, 4, '#e74c3c');
-  // Face
-  drawPixelRect(x + 6, y + 8, 16, 10, '#f5cba7');
-  // Eyes
-  drawPixelRect(x + 8, y + 10, 4, 4, '#1a1a2e');
-  drawPixelRect(x + 16, y + 10, 4, 4, '#1a1a2e');
-  // Mustache
-  drawPixelRect(x + 8, y + 15, 12, 2, '#6d4c00');
-  // Overalls (blue)
-  drawPixelRect(x + 4, y + 18, 20, 10, '#2e86c1');
-  // Belt/buttons
-  drawPixelRect(x + 8, y + 18, 4, 2, '#f1c40f');
-  drawPixelRect(x + 16, y + 18, 4, 2, '#f1c40f');
-  // Shirt (under overalls)
-  drawPixelRect(x + 2, y + 20, 4, 6, '#e74c3c');
-  drawPixelRect(x + 22, y + 20, 4, 6, '#e74c3c');
-  // Legs – animate
-  if (frame % 2 === 0) {
-    drawPixelRect(x + 6, y + 28, 6, 8, '#2e86c1');
-    drawPixelRect(x + 16, y + 28, 6, 8, '#2e86c1');
-  } else {
-    drawPixelRect(x + 4, y + 28, 6, 8, '#2e86c1');
-    drawPixelRect(x + 18, y + 28, 6, 8, '#2e86c1');
+  const st = player.animState;
+
+  // ── Color palette ──
+  const HAIR   = '#4a2c0a';   // dark brown hair
+  const SKIN   = '#e8b88a';   // warm skin
+  const GOGGLE = '#42d4f4';   // cyan goggles
+  const GFRAME = '#555';      // goggle frame
+  const VEST   = '#e67e22';   // orange vest
+  const SHIRT  = '#2c3e50';   // dark teal undershirt
+  const PANTS  = '#7f8c8d';   // grey pants
+  const BOOTS  = '#5d4037';   // brown boots
+  const BELT   = '#f1c40f';   // yellow belt buckle
+
+  if (st === 'land') {
+    // ── LAND: squash pose (wider, shorter) ──
+    // Hair (flat)
+    drawPixelRect(x + 4, y + 4, 20, 4, HAIR);
+    // Head
+    drawPixelRect(x + 6, y + 8, 16, 8, SKIN);
+    // Goggles
+    drawPixelRect(x + 6, y + 9, 16, 5, GFRAME);
+    drawPixelRect(x + 7, y + 10, 6, 3, GOGGLE);
+    drawPixelRect(x + 15, y + 10, 6, 3, GOGGLE);
+    // Mouth
+    drawPixelRect(x + 11, y + 14, 6, 1, '#c0392b');
+    // Body — wider squash
+    drawPixelRect(x + 2, y + 16, 24, 4, VEST);
+    drawPixelRect(x + 6, y + 16, 16, 4, SHIRT);
+    // Belt
+    drawPixelRect(x + 10, y + 20, 8, 2, BELT);
+    // Legs — wide bent crouch
+    drawPixelRect(x + 2, y + 22, 8, 6, PANTS);
+    drawPixelRect(x + 18, y + 22, 8, 6, PANTS);
+    // Boots — wide
+    drawPixelRect(x + 0, y + 28, 10, 4, BOOTS);
+    drawPixelRect(x + 18, y + 28, 10, 4, BOOTS);
+    // Dust puff particles
+    if (player.landTimer > 3) {
+      ctx.fillStyle = 'rgba(200,180,150,0.5)';
+      ctx.fillRect(x - 2, y + 31, 4, 3);
+      ctx.fillRect(x + 26, y + 31, 4, 3);
+    }
+    return;
   }
-  // Shoes
-  if (frame % 2 === 0) {
-    drawPixelRect(x + 4, y + 34, 8, 4, '#784212');
-    drawPixelRect(x + 16, y + 34, 8, 4, '#784212');
+
+  if (st === 'jump_up') {
+    // ── JUMP UP: arms raised, legs tucked ──
+    // Hair (spiky upward — wind)
+    drawPixelRect(x + 6, y - 2, 4, 4, HAIR);
+    drawPixelRect(x + 12, y - 3, 4, 5, HAIR);
+    drawPixelRect(x + 18, y - 1, 4, 3, HAIR);
+    drawPixelRect(x + 4, y + 2, 20, 4, HAIR);
+    // Head
+    drawPixelRect(x + 6, y + 6, 16, 8, SKIN);
+    // Goggles
+    drawPixelRect(x + 6, y + 7, 16, 5, GFRAME);
+    drawPixelRect(x + 7, y + 8, 6, 3, GOGGLE);
+    drawPixelRect(x + 15, y + 8, 6, 3, GOGGLE);
+    // Mouth — open excited
+    drawPixelRect(x + 12, y + 13, 4, 2, '#c0392b');
+    // Body
+    drawPixelRect(x + 6, y + 14, 16, 8, VEST);
+    drawPixelRect(x + 8, y + 15, 12, 6, SHIRT);
+    // Arms — raised up!
+    drawPixelRect(x + 0, y + 6, 6, 4, SHIRT);
+    drawPixelRect(x + 0, y + 4, 4, 4, SKIN);
+    drawPixelRect(x + 22, y + 6, 6, 4, SHIRT);
+    drawPixelRect(x + 24, y + 4, 4, 4, SKIN);
+    // Belt
+    drawPixelRect(x + 10, y + 22, 8, 2, BELT);
+    // Legs — tucked up
+    drawPixelRect(x + 6, y + 24, 6, 4, PANTS);
+    drawPixelRect(x + 16, y + 24, 6, 4, PANTS);
+    // Boots — tucked
+    drawPixelRect(x + 5, y + 28, 8, 4, BOOTS);
+    drawPixelRect(x + 15, y + 28, 8, 4, BOOTS);
+    return;
+  }
+
+  if (st === 'fall') {
+    // ── FALL: arms out wide, legs dangling ──
+    // Hair (flat, blown back)
+    drawPixelRect(x + 4, y + 2, 20, 4, HAIR);
+    drawPixelRect(x + 22, y + 3, 4, 3, HAIR);
+    // Head
+    drawPixelRect(x + 6, y + 6, 16, 8, SKIN);
+    // Goggles
+    drawPixelRect(x + 6, y + 7, 16, 5, GFRAME);
+    drawPixelRect(x + 7, y + 8, 6, 3, GOGGLE);
+    drawPixelRect(x + 15, y + 8, 6, 3, GOGGLE);
+    // Mouth — worried O
+    drawPixelRect(x + 12, y + 12, 3, 3, '#c0392b');
+    // Body
+    drawPixelRect(x + 6, y + 14, 16, 8, VEST);
+    drawPixelRect(x + 8, y + 15, 12, 6, SHIRT);
+    // Arms — spread out
+    drawPixelRect(x + 0, y + 14, 6, 4, SHIRT);
+    drawPixelRect(x + 0, y + 14, 4, 2, SKIN);
+    drawPixelRect(x + 22, y + 14, 6, 4, SHIRT);
+    drawPixelRect(x + 24, y + 14, 4, 2, SKIN);
+    // Belt
+    drawPixelRect(x + 10, y + 22, 8, 2, BELT);
+    // Legs — dangling, slightly apart
+    drawPixelRect(x + 6, y + 24, 6, 8, PANTS);
+    drawPixelRect(x + 16, y + 24, 6, 8, PANTS);
+    // Boots — hanging
+    drawPixelRect(x + 5, y + 32, 8, 4, BOOTS);
+    drawPixelRect(x + 15, y + 32, 8, 4, BOOTS);
+    return;
+  }
+
+  // ── RUN: 4-frame running cycle ──
+  // Hair
+  drawPixelRect(x + 4, y, 20, 4, HAIR);
+  drawPixelRect(x + 6, y - 2, 4, 3, HAIR); // tuft
+  // Head
+  drawPixelRect(x + 6, y + 4, 16, 10, SKIN);
+  // Goggles
+  drawPixelRect(x + 6, y + 5, 16, 5, GFRAME);
+  drawPixelRect(x + 7, y + 6, 6, 3, GOGGLE);
+  drawPixelRect(x + 15, y + 6, 6, 3, GOGGLE);
+  // Mouth — grin
+  drawPixelRect(x + 12, y + 11, 5, 2, '#c0392b');
+  // Body
+  drawPixelRect(x + 6, y + 14, 16, 8, VEST);
+  drawPixelRect(x + 8, y + 15, 12, 6, SHIRT);
+  // Belt
+  drawPixelRect(x + 10, y + 22, 8, 2, BELT);
+
+  // Arms & Legs — 4-frame run cycle
+  const phase = frame % 4;
+  if (phase === 0) {
+    // Arms: left forward, right back
+    drawPixelRect(x + 22, y + 14, 6, 4, SHIRT);  // right arm back
+    drawPixelRect(x + 24, y + 14, 4, 2, SKIN);
+    drawPixelRect(x + 0, y + 16, 6, 4, SHIRT);   // left arm forward
+    drawPixelRect(x + 0, y + 16, 4, 2, SKIN);
+    // Legs: left forward, right back
+    drawPixelRect(x + 4, y + 24, 6, 8, PANTS);
+    drawPixelRect(x + 16, y + 26, 6, 6, PANTS);
+    drawPixelRect(x + 2, y + 32, 8, 4, BOOTS);
+    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS);
+  } else if (phase === 1) {
+    // Contact — legs closer together
+    drawPixelRect(x + 0, y + 16, 6, 3, SHIRT);
+    drawPixelRect(x + 0, y + 16, 4, 2, SKIN);
+    drawPixelRect(x + 22, y + 16, 6, 3, SHIRT);
+    drawPixelRect(x + 24, y + 16, 4, 2, SKIN);
+    drawPixelRect(x + 6, y + 24, 6, 8, PANTS);
+    drawPixelRect(x + 16, y + 24, 6, 8, PANTS);
+    drawPixelRect(x + 4, y + 32, 8, 4, BOOTS);
+    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS);
+  } else if (phase === 2) {
+    // Arms: right forward, left back (mirror of 0)
+    drawPixelRect(x + 0, y + 14, 6, 4, SHIRT);   // left arm back
+    drawPixelRect(x + 0, y + 14, 4, 2, SKIN);
+    drawPixelRect(x + 22, y + 16, 6, 4, SHIRT);  // right arm forward
+    drawPixelRect(x + 24, y + 16, 4, 2, SKIN);
+    // Legs: right forward, left back
+    drawPixelRect(x + 16, y + 24, 6, 8, PANTS);
+    drawPixelRect(x + 4, y + 26, 6, 6, PANTS);
+    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS);
+    drawPixelRect(x + 2, y + 32, 8, 4, BOOTS);
   } else {
-    drawPixelRect(x + 2, y + 34, 8, 4, '#784212');
-    drawPixelRect(x + 18, y + 34, 8, 4, '#784212');
+    // phase === 3: passing — legs closer together again
+    drawPixelRect(x + 22, y + 16, 6, 3, SHIRT);
+    drawPixelRect(x + 24, y + 16, 4, 2, SKIN);
+    drawPixelRect(x + 0, y + 16, 6, 3, SHIRT);
+    drawPixelRect(x + 0, y + 16, 4, 2, SKIN);
+    drawPixelRect(x + 8, y + 24, 6, 8, PANTS);
+    drawPixelRect(x + 14, y + 24, 6, 8, PANTS);
+    drawPixelRect(x + 6, y + 32, 8, 4, BOOTS);
+    drawPixelRect(x + 14, y + 32, 8, 4, BOOTS);
   }
 }
 
@@ -474,6 +658,9 @@ function resetGame() {
   player.vy = 0;
   player.onGround = true;
   player.frame = 0;
+  player.animState = 'run';
+  player.landTimer = 0;
+  player.wasOnGround = true;
   pipes = [];
   score = 0;
   frameCount = 0;
@@ -657,8 +844,11 @@ function update() {
     return;
   }
 
-  // Animation frame
-  if (player.onGround) {
+  // Animation state machine
+  updateAnimState();
+
+  // Animation frame (run cycle only advances on ground)
+  if (player.animState === 'run') {
     if (frameCount % 6 === 0) player.frame = (player.frame + 1) % 4;
   }
 

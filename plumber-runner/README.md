@@ -24,6 +24,23 @@ The screen scrolls automatically to the right. Your character runs forward on th
 | Ceiling pipe | Hangs from the top — duck under or time your jump carefully |
 | Pipe pair | Bottom + ceiling pipe together — navigate through the gap |
 
+## Animation States
+
+The player character has a state machine that drives distinct visual poses based on physics:
+
+| State | Trigger | Visual |
+|-------|---------|--------|
+| `run` | On ground, not landing | 4-frame run cycle — arms and legs alternate |
+| `jump_up` | Airborne with upward velocity (`vy < -0.5`) | Arms raised, legs tucked, hair blown upward |
+| `fall` | Airborne with downward velocity (`vy >= -0.5`) | Arms spread wide, legs dangling |
+| `land` | Just touched ground after being airborne | 6-frame squash pose with dust puffs |
+
+Transitions happen automatically every frame in `updateAnimState()`:
+- **Ground → Air**: jump sets `onGround = false` → state becomes `jump_up`
+- **Rising → Falling**: when `vy` crosses the threshold → state becomes `fall`
+- **Air → Ground**: landing detected via `wasOnGround` flag → state becomes `land` for 6 frames
+- **Land → Run**: after land timer expires → state becomes `run`
+
 ## Controls
 
 | Platform | Action |
@@ -45,6 +62,7 @@ https://<username>.github.io/<repo>/plumber-runner/
 **All game assets (character, pipes, ground, clouds, hills) are drawn programmatically on the HTML5 Canvas at runtime.** No external sprite sheets, images, or fonts are used.
 
 - All visual assets are **original pixel art** rendered via JavaScript/Canvas code
+- The player character is an **original goggle-wearing adventurer** — not derived from any Nintendo or other copyrighted IP
 - No Nintendo, Super Mario, or other copyrighted materials are used
 - The game concept (side-scrolling runner with pipe obstacles) is a generic game mechanic not subject to copyright
 
