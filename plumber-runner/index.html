@@ -104,9 +104,10 @@ const DESIGN_W = 800;
 const DESIGN_H = 400;
 const GROUND_H = 60;
 const GRAVITY = 0.55;
-const JUMP_INITIAL = -8.5;
-const JUMP_HOLD_ACCEL = -0.45;
-const JUMP_HOLD_MAX_T = 14;
+const JUMP_INITIAL = -7.0;         // short-tap: small jump
+const JUMP_HOLD_ACCEL = -0.55;     // long-press: stronger boost per frame
+const JUMP_HOLD_MAX_T = 16;        // long-press: more frames of boost
+const TALL_PIPE_THRESHOLD = 140;   // pipes >= this height trigger staircase logic
 const SCROLL_SPEED_BASE = 3.5;
 const SCROLL_ACCEL = 0.0003;
 const PIPE_MIN_GAP = 240;
@@ -768,6 +769,44 @@ function updateDifficultyInfo() {
   }
 }
 
+// Check if the last few bottom pipes already provide a staircase for a tall target
+function needsStaircase(targetH) {
+  if (targetH < TALL_PIPE_THRESHOLD) return false;
+  // Look at recent bottom pipes (last 2) — if any is a mid-height step, no staircase needed
+  const recentBottom = pipes.filter(p => !p.fromTop).slice(-2);
+  for (const p of recentBottom) {
+    if (p.h >= 60 && p.h < targetH - 20) return false; // already has a step
+  }
+  return true;
+}
+
+// Spawn staircase pipes before a tall bottom pipe
+function spawnStaircaseFor(targetH, targetX, gapMin, gapMax) {
+  // Create 1-2 stepping-stone pipes leading up to the tall one
+  const steps = targetH >= 200 ? 2 : 1;
+  let curX = targetX;
+  const stepHeights = [];
+  for (let i = steps; i >= 1; i--) {
+    // Each step is roughly (i / (steps+1)) of the target height, with some variance
+    const ratio = i / (steps + 1);
+    const baseH = Math.round(targetH * ratio);
+    const h = Math.max(50, Math.min(baseH + Math.floor(Math.random() * 20 - 10), targetH - 30));
+    stepHeights.unshift(h);
+  }
+  // Place steps before the target, working backwards
+  for (let i = stepHeights.length - 1; i >= 0; i--) {
+    const stepGap = gapMin * 0.7 + Math.random() * (gapMax - gapMin) * 0.4;
+    curX -= stepGap;
+    pipes.push({
+      x: curX,
+      h: stepHeights[i],
+      fromTop: false,
+      scored: false,
+    });
+  }
+  return curX; // returns leftmost step X so we know where steps start
+}
+
 function spawnPipe() {
   const lastPipe = pipes[pipes.length - 1];
   const gapMin = getDiffParam('gapMin');
@@ -780,9 +819,7 @@ function spawnPipe() {
   const pairChance = getDiffParam('pairChance');
 
   // Build height pools dynamically based on current difficulty
-  // Base heights always available; higher ones unlock with difficulty
   const bottomHeights = PIPE_HEIGHTS_BOTTOM.filter(h => h <= pipeMaxH);
-  // Add taller pipes progressively
   if (pipeMaxH >= 170) bottomHeights.push(170);
   if (pipeMaxH >= 195) bottomHeights.push(195);
   if (pipeMaxH >= 220) bottomHeights.push(220);
@@ -794,19 +831,19 @@ function spawnPipe() {
   if (topMaxH >= 190) topHeights.push(190);
   if (topMaxH >= 200) topHeights.push(200);
 
-  // Decide what to spawn: bottom only, top only, or both (squeeze corridor)
+  // Decide what to spawn
   const roll = Math.random();
   const topOnlyChance = 0.20;
   const bottomOnlyChance = 1 - topOnlyChance - pairChance;
 
   if (roll < bottomOnlyChance) {
     // Bottom pipe only
-    pipes.push({
-      x: newX,
-      h: bottomHeights[Math.floor(Math.random() * bottomHeights.length)],
-      fromTop: false,
-      scored: false,
-    });
+    const h = bottomHeights[Math.floor(Math.random() * bottomHeights.length)];
+    // Staircase: if this pipe is tall and no recent step exists, insert stepping pipes
+    if (needsStaircase(h)) {
+      spawnStaircaseFor(h, newX, gapMin, gapMax);
+    }
+    pipes.push({ x: newX, h, fromTop: false, scored: false });
   } else if (roll < bottomOnlyChance + topOnlyChance) {
     // Top pipe only
     pipes.push({
@@ -819,33 +856,20 @@ function spawnPipe() {
     // Both top and bottom — create a passable gap
     const groundY = DESIGN_H - GROUND_H;
     const bottomH = bottomHeights[Math.floor(Math.random() * bottomHeights.length)];
+    // Staircase for tall bottom in pair
+    if (needsStaircase(bottomH)) {
+      spawnStaircaseFor(bottomH, newX, gapMin, gapMax);
+    }
     const bottomTopY = groundY - bottomH;
-    // Gap narrows smoothly: lerp from generous to tight
     const diffFrac = Math.min(survivalTime / DIFFICULTY_LEVELS[DIFFICULTY_LEVELS.length - 1].time, 1);
     const minGapSize = player.h + 30 + (1 - diffFrac) * 30;
     const maxTopH = bottomTopY - minGapSize;
     if (maxTopH >= 50) {
       const topH = 50 + Math.floor(Math.random() * (Math.min(maxTopH, topMaxH) - 50));
-      pipes.push({
-        x: newX,
-        h: bottomH,
-        fromTop: false,
-        scored: false,
-      });
-      pipes.push({
-        x: newX,
-        h: Math.max(50, topH),
-        fromTop: true,
-        scored: false,
-      });
+      pipes.push({ x: newX, h: bottomH, fromTop: false, scored: false });
+      pipes.push({ x: newX, h: Math.max(50, topH), fromTop: true, scored: false });
     } else {
-      // Not enough room for both, just bottom
-      pipes.push({
-        x: newX,
-        h: bottomH,
-        fromTop: false,
-        scored: false,
-      });
+      pipes.push({ x: newX, h: bottomH, fromTop: false, scored: false });
     }
   }
 }

@@ -6,7 +6,7 @@ A retro-style side-scrolling runner game playable in the browser (desktop & mobi
 
 The screen scrolls automatically to the right. Your character runs forward on their own — your only control is **jumping**.
 
-- **Tap / hold** to jump higher (variable jump height)
+- **Short tap** for a small jump, **long press** for a high jump — two distinct jump heights with clear feel difference
 - You can **stand on top of pipes** — pipe tops are platforms!
 - **Side collisions push you back** instead of killing you instantly
 - You die when you get **crushed/squeezed** between obstacles:
@@ -43,6 +43,28 @@ The difficulty curve is designed so:
 - **140–240s**: Expert territory — requires precise jump timing
 - **240s+**: Maximum difficulty reached, stays constant
 
+## Jump Mechanics
+
+The jump system uses a **short-tap / long-press** design:
+
+| Input | Behavior | Use case |
+|-------|----------|----------|
+| Short tap | Small jump (low initial velocity, no hold boost) | Hop over short pipes, stay low under ceiling pipes |
+| Long press | High jump (hold adds upward acceleration over 16 frames) | Clear tall pipes, reach pipe tops for platforming |
+
+The two jumps feel distinctly different: a quick tap gives a compact hop, while holding the button significantly extends jump height. This lets players make precise, deliberate choices about jump commitment.
+
+## Staircase Pipe Rule
+
+Tall bottom pipes (>= 140 px) are always preceded by 1–2 shorter "stepping-stone" pipes:
+
+- Pipes **140–199 px** tall get **1 step** placed before them
+- Pipes **200+ px** tall get **2 steps** placed before them
+- Step heights are proportional to the target pipe (roughly 1/2 or 1/3 height)
+- Steps serve as platforms the player can land on to build height before the tall obstacle
+
+This prevents unfair situations where a single ultra-tall pipe appears with no way to react. Players can use the stepping pipes as launchpads or simply as visual warning that a tall obstacle is coming.
+
 ## Obstacle Types
 
 | Type | Description |
@@ -72,8 +94,8 @@ Transitions happen automatically every frame in `updateAnimState()`:
 
 | Platform | Action |
 |----------|--------|
-| Desktop  | `Space` or `Arrow Up` — hold for higher jump |
-| Mobile   | Touch & hold anywhere on screen |
+| Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump |
+| Mobile   | Touch anywhere — tap for small jump, hold for high jump |
 
 ## Running
 
