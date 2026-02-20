@@ -72,6 +72,47 @@ This prevents unfair situations where a single ultra-tall pipe appears with no w
 | Bottom pipe | Rises from the ground — you can jump over **or stand on top** |
 | Ceiling pipe | Hangs from the top — duck under or time your jump carefully |
 | Pipe pair | Bottom + ceiling pipe together — navigate through the gap |
+| Breakable brick | Floating sandy brick — **smash it from below** for bonus points! |
+
+## Breakable Brick Rules
+
+Breakable bricks are floating obstacles that spawn near pipes. Unlike pipes and ground, **bricks can be destroyed**.
+
+### How to Break
+
+- Jump so your character's **head hits the bottom** of a brick
+- You must be **moving upward** (rising during a jump) — falling into a brick won't break it
+- On contact, the brick shatters and disappears
+
+### Breaking Effects
+
+1. **Debris animation**: 6 fragments scatter outward with realistic gravity — each piece has a random velocity, size (3–8 px), and color sampled from the brick palette
+2. **Score popup**: A floating `+5` text rises from the break point and fades out
+3. **Physics feedback**: Your upward velocity is immediately reversed and dampened (×0.4 bounce-down), giving a satisfying "bonk" feel
+4. **Score**: Each brick broken awards **+5 points**
+
+### Brick Properties
+
+| Property | Value |
+|----------|-------|
+| Size | 32×24 pixels |
+| Spawn chance | 30% per pipe group (bottom-only or pair without ceiling) |
+| Break condition | Player rising (`vy < 0`) + head overlaps brick bottom |
+| Score | +5 per brick |
+| Fragments | 6 debris pieces with gravity physics |
+| Fragment lifetime | 40–60 frames |
+
+### What Cannot Be Broken
+
+- **Ground** — always solid
+- **Pipes** (bottom and ceiling) — always solid, act as platforms or obstacles
+- Only the dedicated **breakable brick** obstacles can be destroyed
+
+### Brick Interaction
+
+- You can **stand on top** of intact bricks (they act as platforms from above)
+- Bricks scroll with the world at the same speed as pipes
+- Broken bricks are removed immediately — fragments are cosmetic only
 
 ## Animation States
 
@@ -108,7 +149,7 @@ https://<username>.github.io/<repo>/plumber-runner/
 
 ## Asset & License Information
 
-**All game assets (character, pipes, ground, clouds, hills) are drawn programmatically on the HTML5 Canvas at runtime.** No external sprite sheets, images, or fonts are used.
+**All game assets (character, pipes, ground, clouds, hills, breakable bricks, debris fragments) are drawn programmatically on the HTML5 Canvas at runtime.** No external sprite sheets, images, or fonts are used.
 
 - All visual assets are **original pixel art** rendered via JavaScript/Canvas code
 - The player character is an **original goggle-wearing adventurer** — not derived from any Nintendo or other copyrighted IP

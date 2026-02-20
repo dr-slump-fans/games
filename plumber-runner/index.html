@@ -119,6 +119,13 @@ const LIP_W = 56;
 const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
 
+// ── Breakable Brick Constants ─────────────────────────
+const BRICK_W = 32;
+const BRICK_H = 24;
+const BRICK_SCORE = 5;            // points per brick broken
+const BRICK_FRAGMENT_COUNT = 6;   // number of debris fragments
+const BRICK_SPAWN_CHANCE = 0.30;  // chance to spawn brick with pipe group
+
 // ── Difficulty System ─────────────────────────────────
 // 5 levels with smooth interpolation between them
 // Each level defines target values; actual values lerp continuously
@@ -208,6 +215,18 @@ function initHills() {
     });
   }
 }
+
+// ── Breakable Bricks ──────────────────────────────────
+// Each brick: { x, y, w, h, broken }
+let bricks = [];
+
+// ── Brick Fragments (debris particles) ────────────────
+// Each fragment: { x, y, vx, vy, size, color, life }
+let fragments = [];
+
+// ── Score popups (floating +5 text) ───────────────────
+// Each popup: { x, y, text, life }
+let scorePopups = [];
 
 // ── Drawing helpers ────────────────────────────────────
 
@@ -557,6 +576,122 @@ function drawHill(hx, hw, hh) {
   ctx.fill();
 }
 
+// ── Draw breakable brick (original pixel-art style) ───
+// A 32x24 terracotta/sandy brick with cracks and mortar lines
+function drawBrick(bx, by) {
+  const x = Math.round(bx);
+  const y = Math.round(by);
+  // Main brick body — warm sandy brown
+  ctx.fillStyle = '#c8874a';
+  ctx.fillRect(x, y, BRICK_W, BRICK_H);
+  // Lighter highlight strip (top)
+  ctx.fillStyle = '#daa06d';
+  ctx.fillRect(x + 1, y + 1, BRICK_W - 2, 3);
+  // Darker shadow strip (bottom)
+  ctx.fillStyle = '#8b5e3c';
+  ctx.fillRect(x + 1, y + BRICK_H - 3, BRICK_W - 2, 2);
+  // Mortar lines (horizontal center)
+  ctx.fillStyle = '#a07040';
+  ctx.fillRect(x, y + 11, BRICK_W, 2);
+  // Mortar lines (vertical, staggered)
+  ctx.fillRect(x + 15, y, 2, 11);
+  ctx.fillRect(x + 8, y + 13, 2, 11);
+  ctx.fillRect(x + 24, y + 13, 2, 11);
+  // Crack detail — small diagonal scratches
+  ctx.fillStyle = '#6b4226';
+  ctx.fillRect(x + 5, y + 4, 1, 3);
+  ctx.fillRect(x + 6, y + 6, 2, 1);
+  ctx.fillRect(x + 20, y + 15, 1, 3);
+  ctx.fillRect(x + 21, y + 17, 2, 1);
+  // Question mark / sparkle decoration (original, not Mario's ?)
+  ctx.fillStyle = '#f4d03f';
+  // Small diamond sparkle in center
+  ctx.fillRect(x + 15, y + 3, 2, 2);
+  ctx.fillRect(x + 14, y + 4, 1, 1);
+  ctx.fillRect(x + 17, y + 4, 1, 1);
+  ctx.fillRect(x + 15, y + 6, 2, 1);
+  // Outline
+  ctx.strokeStyle = '#5a3a1a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, BRICK_W - 1, BRICK_H - 1);
+}
+
+// Draw a single debris fragment
+function drawFragment(frag) {
+  ctx.fillStyle = frag.color;
+  ctx.fillRect(Math.round(frag.x), Math.round(frag.y), frag.size, frag.size);
+}
+
+// Spawn a floating score popup
+function spawnScorePopup(x, y, points) {
+  scorePopups.push({
+    x: x,
+    y: y,
+    text: `+${points}`,
+    life: 45,
+  });
+}
+
+// Update score popups
+function updateScorePopups() {
+  for (let i = scorePopups.length - 1; i >= 0; i--) {
+    const p = scorePopups[i];
+    p.y -= 1.2; // float upward
+    p.life--;
+    if (p.life <= 0) {
+      scorePopups.splice(i, 1);
+    }
+  }
+}
+
+// Draw score popups
+function drawScorePopups() {
+  for (const p of scorePopups) {
+    const alpha = Math.min(1, p.life / 15);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 14px monospace';
+    ctx.fillStyle = '#f4d03f';
+    ctx.strokeStyle = '#5a3a1a';
+    ctx.lineWidth = 2;
+    ctx.strokeText(p.text, Math.round(p.x), Math.round(p.y));
+    ctx.fillText(p.text, Math.round(p.x), Math.round(p.y));
+    ctx.restore();
+  }
+}
+
+// Spawn debris fragments when a brick breaks
+function spawnBrickFragments(bx, by) {
+  const colors = ['#c8874a', '#daa06d', '#8b5e3c', '#a07040', '#6b4226', '#f4d03f'];
+  for (let i = 0; i < BRICK_FRAGMENT_COUNT; i++) {
+    const angle = (Math.PI * 2 * i) / BRICK_FRAGMENT_COUNT + (Math.random() - 0.5) * 0.5;
+    const speed = 2.5 + Math.random() * 3;
+    fragments.push({
+      x: bx + BRICK_W / 2 + (Math.random() - 0.5) * BRICK_W * 0.6,
+      y: by + BRICK_H / 2 + (Math.random() - 0.5) * BRICK_H * 0.4,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 3 - Math.random() * 2, // bias upward initially
+      size: 3 + Math.floor(Math.random() * 5),
+      color: colors[Math.floor(Math.random() * colors.length)],
+      life: 40 + Math.floor(Math.random() * 20), // frames before despawn
+    });
+  }
+}
+
+// Update all fragments (gravity + movement + lifetime)
+function updateFragments() {
+  for (let i = fragments.length - 1; i >= 0; i--) {
+    const f = fragments[i];
+    f.vy += 0.35; // gravity on fragments
+    f.x += f.vx;
+    f.y += f.vy;
+    f.life--;
+    if (f.life <= 0 || f.y > DESIGN_H + 20) {
+      fragments.splice(i, 1);
+    }
+  }
+}
+
 // ── Collision ──────────────────────────────────────────
 function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
@@ -572,7 +707,7 @@ function getPlayerHitbox() {
   };
 }
 
-// Check if player is standing on any pipe top. Returns standY or null.
+// Check if player is standing on any pipe top or brick top. Returns standY or null.
 function checkPipeStanding() {
   const pb = getPlayerHitbox();
   const feetY = pb.y + pb.h;
@@ -590,6 +725,17 @@ function checkPipeStanding() {
       return standY;
     }
   }
+
+  // Check standing on intact bricks
+  for (const brick of bricks) {
+    if (brick.broken) continue;
+    if (player.vy >= 0 &&
+        feetY >= brick.y && feetY <= brick.y + 8 &&
+        pb.x + pb.w > brick.x + 2 && pb.x < brick.x + brick.w - 2) {
+      return brick.y;
+    }
+  }
+
   return null;
 }
 
@@ -696,6 +842,35 @@ function checkCrush() {
   return false;
 }
 
+// Check if player's head hits a brick from below (rising)
+function checkBrickHeadHit() {
+  if (player.vy >= 0) return; // must be moving upward
+  const pb = getPlayerHitbox();
+  const headY = pb.y; // top of player hitbox
+  const headCenterX = pb.x + pb.w / 2;
+
+  for (let i = bricks.length - 1; i >= 0; i--) {
+    const brick = bricks[i];
+    if (brick.broken) continue;
+    // Check: player head (top edge) is at or just above brick bottom,
+    // and horizontally overlapping
+    const brickBottom = brick.y + brick.h;
+    if (headY <= brickBottom && headY >= brickBottom - 8 &&
+        headCenterX > brick.x && headCenterX < brick.x + brick.w) {
+      // Break the brick!
+      brick.broken = true;
+      spawnBrickFragments(brick.x, brick.y);
+      spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, BRICK_SCORE);
+      // Score
+      score += BRICK_SCORE;
+      // Velocity feedback: reverse/dampen upward velocity
+      player.vy = Math.abs(player.vy) * 0.4; // bounce down gently
+      return true;
+    }
+  }
+  return false;
+}
+
 // ── Game Logic ─────────────────────────────────────────
 let groundOffset = 0;
 
@@ -709,6 +884,9 @@ function resetGame() {
   player.landTimer = 0;
   player.wasOnGround = true;
   pipes = [];
+  bricks = [];
+  fragments = [];
+  scorePopups = [];
   score = 0;
   frameCount = 0;
   survivalTime = 0;
@@ -807,6 +985,30 @@ function spawnStaircaseFor(targetH, targetX, gapMin, gapMax) {
   return curX; // returns leftmost step X so we know where steps start
 }
 
+// Maybe spawn a breakable brick floating above a bottom pipe
+function maybeSpawnBrick(pipeX, pipeH, hasCeiling) {
+  if (hasCeiling) return; // don't spawn bricks under ceiling pipes
+  if (Math.random() > BRICK_SPAWN_CHANCE) return;
+  const groundY = DESIGN_H - GROUND_H;
+  const pipeTopY = groundY - pipeH;
+  // Place brick in the air above the pipe, at a height the player can reach by jumping
+  // Brick bottom should be above pipe top, and reachable from the ground
+  // Player jump apex from ground is roughly: groundY - playerH + JUMP_INITIAL^2/(2*GRAVITY) ≈ about 85 px above ground
+  const minBrickY = 40; // don't place too close to screen top
+  const maxBrickY = pipeTopY - BRICK_H - 20; // leave clearance above pipe
+  if (maxBrickY < minBrickY) return; // not enough space
+  const brickY = minBrickY + Math.random() * (maxBrickY - minBrickY);
+  // Offset brick horizontally a bit (near the pipe, not exactly on it)
+  const brickX = pipeX + (PIPE_W - BRICK_W) / 2 + (Math.random() - 0.5) * 20;
+  bricks.push({
+    x: brickX,
+    y: brickY,
+    w: BRICK_W,
+    h: BRICK_H,
+    broken: false,
+  });
+}
+
 function spawnPipe() {
   const lastPipe = pipes[pipes.length - 1];
   const gapMin = getDiffParam('gapMin');
@@ -844,6 +1046,8 @@ function spawnPipe() {
       spawnStaircaseFor(h, newX, gapMin, gapMax);
     }
     pipes.push({ x: newX, h, fromTop: false, scored: false });
+    // Maybe spawn a breakable brick above this pipe
+    maybeSpawnBrick(newX, h, false);
   } else if (roll < bottomOnlyChance + topOnlyChance) {
     // Top pipe only
     pipes.push({
@@ -870,6 +1074,8 @@ function spawnPipe() {
       pipes.push({ x: newX, h: Math.max(50, topH), fromTop: true, scored: false });
     } else {
       pipes.push({ x: newX, h: bottomH, fromTop: false, scored: false });
+      // Spawn brick in the open space above (no ceiling pipe)
+      maybeSpawnBrick(newX, bottomH, false);
     }
   }
 }
@@ -992,9 +1198,23 @@ function update() {
     if (frameCount % 6 === 0) player.frame = (player.frame + 1) % 4;
   }
 
+  // Check brick head-hit (must be before moving bricks)
+  checkBrickHeadHit();
+
+  // Update debris fragments
+  updateFragments();
+
+  // Update score popups
+  updateScorePopups();
+
   // Move pipes
   for (const pipe of pipes) {
     pipe.x -= scrollSpeed;
+  }
+
+  // Move bricks
+  for (const brick of bricks) {
+    brick.x -= scrollSpeed;
   }
 
   // Score: passed pipe (only count bottom pipes or solo top pipes)
@@ -1007,6 +1227,9 @@ function update() {
 
   // Remove off-screen pipes
   pipes = pipes.filter(p => p.x > -LIP_W - 10);
+
+  // Remove off-screen or broken bricks
+  bricks = bricks.filter(b => !b.broken && b.x > -BRICK_W - 10);
 
   // Spawn pipes — check only among the rightmost pipe
   if (pipes.length > 0) {
@@ -1090,12 +1313,27 @@ function draw() {
     }
   }
 
+  // Breakable bricks
+  for (const brick of bricks) {
+    if (!brick.broken) {
+      drawBrick(brick.x, brick.y);
+    }
+  }
+
   // Player
   if (state === 'playing' || state === 'dead') {
     drawPlayer(player.x, player.y, player.frame);
   } else {
     drawPlayer(player.x, DESIGN_H - GROUND_H - player.h, 0);
   }
+
+  // Debris fragments (drawn on top of everything)
+  for (const frag of fragments) {
+    drawFragment(frag);
+  }
+
+  // Score popups
+  drawScorePopups();
 }
 
 function gameLoop() {
