@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Plumber Runner</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #1a1a2e;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#wrap {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  width: 100%; height: 100%;
+}
+canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #5c94fc;
+}
+#ui {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+#overlay {
+  display: none;
+  flex-direction: column; align-items: center; gap: 16px;
+  pointer-events: auto;
+  background: rgba(0,0,0,0.7);
+  padding: 32px 48px; border-radius: 12px;
+  color: #fff; font-family: monospace; text-align: center;
+}
+#overlay h1 { font-size: 28px; }
+#overlay p { font-size: 18px; }
+#overlay button {
+  font-family: monospace; font-size: 20px;
+  padding: 12px 32px; border: none; border-radius: 8px;
+  background: #e74c3c; color: #fff; cursor: pointer;
+}
+#overlay button:hover { background: #c0392b; }
+#score-display {
+  position: absolute; top: 12px; right: 16px;
+  font-family: monospace; font-size: 22px;
+  color: #fff; text-shadow: 2px 2px 0 #000;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+</div>
+<div id="ui">
+  <div id="score-display">SCORE: 0</div>
+  <div id="overlay">
+    <h1 id="ol-title">Plumber Runner</h1>
+    <p id="ol-msg">Press SPACE / Tap to Start</p>
+    <p id="ol-score"></p>
+    <button id="ol-btn">START</button>
+  </div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────
+const DESIGN_W = 800;
+const DESIGN_H = 400;
+const GROUND_H = 60;
+const GRAVITY = 0.55;
+const JUMP_INITIAL = -8.5;
+const JUMP_HOLD_ACCEL = -0.45;
+const JUMP_HOLD_MAX_T = 14; // frames of hold boost
+const SCROLL_SPEED_BASE = 3.5;
+const SCROLL_ACCEL = 0.0003; // speed increases over time
+const PIPE_MIN_GAP = 220;
+const PIPE_MAX_GAP = 340;
+const PIPE_HEIGHTS = [60, 90, 120, 150, 50, 75, 105]; // multiple heights
+
+// ── Canvas Setup ───────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = DESIGN_W;
+canvas.height = DESIGN_H;
+
+function resizeCanvas() {
+  const ww = window.innerWidth;
+  const wh = window.innerHeight;
+  const scale = Math.min(ww / DESIGN_W, wh / DESIGN_H);
+  canvas.style.width = (DESIGN_W * scale) + 'px';
+  canvas.style.height = (DESIGN_H * scale) + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ── UI refs ────────────────────────────────────────────
+const overlay = document.getElementById('overlay');
+const olTitle = document.getElementById('ol-title');
+const olMsg = document.getElementById('ol-msg');
+const olScore = document.getElementById('ol-score');
+const olBtn = document.getElementById('ol-btn');
+const scoreDisplay = document.getElementById('score-display');
+
+// ── Game State ─────────────────────────────────────────
+let state = 'title'; // title | playing | dead
+let score = 0;
+let highScore = 0;
+let frameCount = 0;
+let scrollSpeed = SCROLL_SPEED_BASE;
+let jumpPressed = false;
+let jumpHoldFrames = 0;
+
+// ── Player ─────────────────────────────────────────────
+const player = {
+  x: 120, y: 0, w: 28, h: 36,
+  vy: 0, onGround: true, frame: 0,
+};
+
+// ── Pipes ──────────────────────────────────────────────
+let pipes = [];
+
+// ── Clouds (decorative) ────────────────────────────────
+let clouds = [];
+function initClouds() {
+  clouds = [];
+  for (let i = 0; i < 6; i++) {
+    clouds.push({
+      x: Math.random() * DESIGN_W,
+      y: 20 + Math.random() * 100,
+      w: 50 + Math.random() * 60,
+      speed: 0.3 + Math.random() * 0.5,
+    });
+  }
+}
+
+// ── Hills (decorative bg) ──────────────────────────────
+let hills = [];
+function initHills() {
+  hills = [];
+  for (let i = 0; i < 4; i++) {
+    hills.push({
+      x: i * 250,
+      w: 180 + Math.random() * 100,
+      h: 40 + Math.random() * 40,
+    });
+  }
+}
+
+// ── Drawing helpers ────────────────────────────────────
+
+function drawPixelRect(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.round(x), Math.round(y), w, h);
+}
+
+// Draw the player character (a little plumber-like pixel guy, original design)
+function drawPlayer(px, py, frame) {
+  const x = Math.round(px);
+  const y = Math.round(py);
+  // Hat (red cap)
+  drawPixelRect(x + 4, y, 20, 4, '#e74c3c');
+  drawPixelRect(x + 2, y + 4, 24, 4, '#e74c3c');
+  // Face
+  drawPixelRect(x + 6, y + 8, 16, 10, '#f5cba7');
+  // Eyes
+  drawPixelRect(x + 8, y + 10, 4, 4, '#1a1a2e');
+  drawPixelRect(x + 16, y + 10, 4, 4, '#1a1a2e');
+  // Mustache
+  drawPixelRect(x + 8, y + 15, 12, 2, '#6d4c00');
+  // Overalls (blue)
+  drawPixelRect(x + 4, y + 18, 20, 10, '#2e86c1');
+  // Belt/buttons
+  drawPixelRect(x + 8, y + 18, 4, 2, '#f1c40f');
+  drawPixelRect(x + 16, y + 18, 4, 2, '#f1c40f');
+  // Shirt (under overalls)
+  drawPixelRect(x + 2, y + 20, 4, 6, '#e74c3c');
+  drawPixelRect(x + 22, y + 20, 4, 6, '#e74c3c');
+  // Legs – animate
+  if (frame % 2 === 0) {
+    drawPixelRect(x + 6, y + 28, 6, 8, '#2e86c1');
+    drawPixelRect(x + 16, y + 28, 6, 8, '#2e86c1');
+  } else {
+    drawPixelRect(x + 4, y + 28, 6, 8, '#2e86c1');
+    drawPixelRect(x + 18, y + 28, 6, 8, '#2e86c1');
+  }
+  // Shoes
+  if (frame % 2 === 0) {
+    drawPixelRect(x + 4, y + 34, 8, 4, '#784212');
+    drawPixelRect(x + 16, y + 34, 8, 4, '#784212');
+  } else {
+    drawPixelRect(x + 2, y + 34, 8, 4, '#784212');
+    drawPixelRect(x + 18, y + 34, 8, 4, '#784212');
+  }
+}
+
+// Draw a pipe (green, with lip)
+function drawPipe(px, ph) {
+  const x = Math.round(px);
+  const groundY = DESIGN_H - GROUND_H;
+  const pipeW = 48;
+  const lipW = 56;
+  const lipH = 16;
+  const bodyY = groundY - ph;
+  const bodyH = ph - lipH;
+  // Pipe body
+  ctx.fillStyle = '#27ae60';
+  ctx.fillRect(x + (lipW - pipeW) / 2, bodyY + lipH, pipeW, bodyH);
+  // Pipe body highlight
+  ctx.fillStyle = '#2ecc71';
+  ctx.fillRect(x + (lipW - pipeW) / 2 + 4, bodyY + lipH, 8, bodyH);
+  // Pipe body shadow
+  ctx.fillStyle = '#1e8449';
+  ctx.fillRect(x + (lipW - pipeW) / 2 + pipeW - 8, bodyY + lipH, 8, bodyH);
+  // Lip
+  ctx.fillStyle = '#27ae60';
+  ctx.fillRect(x, bodyY, lipW, lipH);
+  // Lip highlight
+  ctx.fillStyle = '#2ecc71';
+  ctx.fillRect(x + 4, bodyY + 2, 8, lipH - 4);
+  // Lip shadow
+  ctx.fillStyle = '#1e8449';
+  ctx.fillRect(x + lipW - 8, bodyY + 2, 6, lipH - 4);
+  // Lip top line
+  ctx.fillStyle = '#196f3d';
+  ctx.fillRect(x, bodyY, lipW, 2);
+
+  return { x: x + (lipW - pipeW) / 2, y: bodyY, w: pipeW, h: ph, lipX: x, lipW: lipW, lipH: lipH };
+}
+
+// Draw ground with brick pattern
+function drawGround(offset) {
+  const groundY = DESIGN_H - GROUND_H;
+  // Base
+  ctx.fillStyle = '#c0784a';
+  ctx.fillRect(0, groundY, DESIGN_W, GROUND_H);
+  // Brick pattern
+  const brickW = 32;
+  const brickH = 16;
+  const startX = -(offset % brickW);
+  ctx.fillStyle = '#a0603a';
+  for (let row = 0; row < Math.ceil(GROUND_H / brickH); row++) {
+    const rowOffset = (row % 2) * (brickW / 2);
+    for (let col = -1; col < Math.ceil(DESIGN_W / brickW) + 2; col++) {
+      const bx = startX + col * brickW + rowOffset;
+      const by = groundY + row * brickH;
+      // horizontal mortar
+      ctx.fillRect(bx, by, brickW, 1);
+      // vertical mortar
+      ctx.fillRect(bx, by, 1, brickH);
+    }
+  }
+  // Top line
+  ctx.fillStyle = '#8B4513';
+  ctx.fillRect(0, groundY, DESIGN_W, 3);
+}
+
+function drawCloud(cx, cy, cw) {
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  const h = cw * 0.4;
+  ctx.beginPath();
+  ctx.ellipse(cx + cw * 0.3, cy + h * 0.5, cw * 0.3, h * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx + cw * 0.6, cy + h * 0.35, cw * 0.25, h * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx + cw * 0.5, cy + h * 0.6, cw * 0.35, h * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawHill(hx, hw, hh) {
+  const groundY = DESIGN_H - GROUND_H;
+  ctx.fillStyle = '#3a9d5c';
+  ctx.beginPath();
+  ctx.moveTo(hx, groundY);
+  ctx.quadraticCurveTo(hx + hw / 2, groundY - hh, hx + hw, groundY);
+  ctx.fill();
+}
+
+// ── Collision ──────────────────────────────────────────
+function boxCollide(ax, ay, aw, ah, bx, by, bw, bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+function checkCollision() {
+  const groundY = DESIGN_H - GROUND_H;
+  const px = player.x + 4; // shrink hitbox a bit
+  const py = player.y + 2;
+  const pw = player.w - 8;
+  const ph = player.h - 4;
+
+  for (const pipe of pipes) {
+    const lipW = 56;
+    const pipeW = 48;
+    const lipH = 16;
+    const pipeBodyX = pipe.x + (lipW - pipeW) / 2;
+    const pipeTopY = groundY - pipe.h;
+
+    // Lip collision
+    if (boxCollide(px, py, pw, ph, pipe.x, pipeTopY, lipW, lipH)) return true;
+    // Body collision
+    if (boxCollide(px, py, pw, ph, pipeBodyX, pipeTopY + lipH, pipeW, pipe.h - lipH)) return true;
+  }
+  return false;
+}
+
+// ── Game Logic ─────────────────────────────────────────
+let groundOffset = 0;
+
+function resetGame() {
+  player.y = DESIGN_H - GROUND_H - player.h;
+  player.vy = 0;
+  player.onGround = true;
+  player.frame = 0;
+  pipes = [];
+  score = 0;
+  frameCount = 0;
+  scrollSpeed = SCROLL_SPEED_BASE;
+  groundOffset = 0;
+  jumpHoldFrames = 0;
+  initClouds();
+  initHills();
+  // Seed first pipe far away
+  pipes.push({
+    x: DESIGN_W + 100,
+    h: PIPE_HEIGHTS[Math.floor(Math.random() * PIPE_HEIGHTS.length)],
+    scored: false,
+  });
+}
+
+function spawnPipe() {
+  const lastPipe = pipes[pipes.length - 1];
+  const gap = PIPE_MIN_GAP + Math.random() * (PIPE_MAX_GAP - PIPE_MIN_GAP);
+  pipes.push({
+    x: lastPipe.x + gap,
+    h: PIPE_HEIGHTS[Math.floor(Math.random() * PIPE_HEIGHTS.length)],
+    scored: false,
+  });
+}
+
+function update() {
+  if (state !== 'playing') return;
+
+  frameCount++;
+  scrollSpeed = SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL;
+  groundOffset += scrollSpeed;
+
+  // Player physics
+  const groundY = DESIGN_H - GROUND_H - player.h;
+
+  if (jumpPressed && player.onGround) {
+    player.vy = JUMP_INITIAL;
+    player.onGround = false;
+    jumpHoldFrames = 0;
+  }
+
+  // Variable jump: hold to go higher
+  if (jumpPressed && !player.onGround && jumpHoldFrames < JUMP_HOLD_MAX_T && player.vy < 0) {
+    player.vy += JUMP_HOLD_ACCEL;
+    jumpHoldFrames++;
+  }
+
+  player.vy += GRAVITY;
+  player.y += player.vy;
+
+  if (player.y >= groundY) {
+    player.y = groundY;
+    player.vy = 0;
+    player.onGround = true;
+    jumpHoldFrames = 0;
+  }
+
+  // Animation frame
+  if (player.onGround) {
+    if (frameCount % 6 === 0) player.frame = (player.frame + 1) % 4;
+  }
+
+  // Move pipes
+  for (const pipe of pipes) {
+    pipe.x -= scrollSpeed;
+  }
+
+  // Score: passed pipe
+  for (const pipe of pipes) {
+    if (!pipe.scored && pipe.x + 56 < player.x) {
+      pipe.scored = true;
+      score++;
+    }
+  }
+
+  // Remove off-screen pipes
+  pipes = pipes.filter(p => p.x > -60);
+
+  // Spawn pipes
+  const lastPipe = pipes[pipes.length - 1];
+  if (lastPipe && lastPipe.x < DESIGN_W) {
+    spawnPipe();
+  }
+
+  // Collision
+  if (checkCollision()) {
+    state = 'dead';
+    if (score > highScore) highScore = score;
+    showOverlay('Game Over', `Score: ${score}`, score);
+  }
+
+  // Update clouds
+  for (const c of clouds) {
+    c.x -= c.speed;
+    if (c.x + c.w < 0) {
+      c.x = DESIGN_W + Math.random() * 100;
+      c.y = 20 + Math.random() * 100;
+    }
+  }
+
+  // Update hills
+  for (const h of hills) {
+    h.x -= scrollSpeed * 0.3;
+    if (h.x + h.w < 0) {
+      const last = hills.reduce((a, b) => a.x > b.x ? a : b);
+      h.x = last.x + 200 + Math.random() * 100;
+      h.w = 180 + Math.random() * 100;
+      h.h = 40 + Math.random() * 40;
+    }
+  }
+
+  scoreDisplay.textContent = `SCORE: ${score}`;
+}
+
+function draw() {
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, DESIGN_H - GROUND_H);
+  grad.addColorStop(0, '#5c94fc');
+  grad.addColorStop(1, '#92c4f8');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+
+  // Clouds
+  for (const c of clouds) {
+    drawCloud(c.x, c.y, c.w);
+  }
+
+  // Hills
+  for (const h of hills) {
+    drawHill(h.x, h.w, h.h);
+  }
+
+  // Ground
+  drawGround(groundOffset);
+
+  // Pipes
+  for (const pipe of pipes) {
+    drawPipe(pipe.x, pipe.h);
+  }
+
+  // Player
+  if (state === 'playing' || state === 'dead') {
+    drawPlayer(player.x, player.y, player.frame);
+  } else {
+    // Title screen: show player standing on ground
+    drawPlayer(player.x, DESIGN_H - GROUND_H - player.h, 0);
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// ── Overlay ────────────────────────────────────────────
+function showOverlay(title, msg, sc) {
+  olTitle.textContent = title;
+  olMsg.textContent = msg;
+  if (sc !== undefined) {
+    olScore.textContent = `High Score: ${highScore}`;
+    olScore.style.display = 'block';
+  } else {
+    olScore.style.display = 'none';
+  }
+  olBtn.textContent = state === 'title' ? 'START' : 'RESTART';
+  overlay.style.display = 'flex';
+}
+
+function hideOverlay() {
+  overlay.style.display = 'none';
+}
+
+olBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  startGame();
+});
+
+function startGame() {
+  hideOverlay();
+  resetGame();
+  state = 'playing';
+}
+
+// ── Input ──────────────────────────────────────────────
+function onInputDown(e) {
+  if (state === 'dead') {
+    startGame();
+    return;
+  }
+  if (state === 'title') {
+    startGame();
+    jumpPressed = true;
+    return;
+  }
+  jumpPressed = true;
+}
+function onInputUp() {
+  jumpPressed = false;
+}
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') {
+    e.preventDefault();
+    onInputDown(e);
+  }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') {
+    onInputUp();
+  }
+});
+
+// Touch
+document.addEventListener('touchstart', (e) => {
+  // Don't intercept button taps
+  if (e.target === olBtn) return;
+  e.preventDefault();
+  onInputDown(e);
+}, { passive: false });
+document.addEventListener('touchend', (e) => {
+  onInputUp();
+}, { passive: false });
+
+// Mouse (for desktop testing)
+canvas.addEventListener('mousedown', (e) => {
+  onInputDown(e);
+});
+document.addEventListener('mouseup', () => {
+  onInputUp();
+});
+
+// ── Init ───────────────────────────────────────────────
+initClouds();
+initHills();
+showOverlay('Plumber Runner', 'Press SPACE / Tap to Start');
+gameLoop();
+</script>
+</body>
+</html>
