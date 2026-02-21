@@ -324,6 +324,7 @@ Hold the run button/key to boost the character's **running ability** — this do
 - **Faster recenter**: when pushed back by obstacles, the character returns to position up to **55%** faster at full boost
 - **Forward dash**: while RUN is held, the recenter target shifts forward by up to **+10% screen width** (from 40% to 50%), making the character dash ahead. The shift ramps smoothly with the boost level and returns to 40% on release.
 - **Fixed base recenter target**: the base recenter target X is fixed at 40% of screen width (`RECENTER_TARGET_X`) and does not drift over time
+- **Bidirectional convergence**: recenter works in both directions — if the player is left of the target they recover rightward, and if they are right of the target (e.g. after releasing RUN) they smoothly converge leftward back to 40%. Both directions include collision safety checks.
 - **Jump height boost**: jumping while boosting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost.
 - Run animation speed scales smoothly with the boost level
 - Displays a **"RUN XX%"** indicator at the bottom of the screen showing current boost level

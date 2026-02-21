@@ -2726,8 +2726,10 @@ function update() {
       }
     }
   }
-  if (!beingPushed && player.x < dynamicTargetX) {
-    const diff = dynamicTargetX - player.x;
+  if (!beingPushed && Math.abs(player.x - dynamicTargetX) > 0.5) {
+    const diff = dynamicTargetX - player.x; // positive = need right, negative = need left
+    const absDiff = Math.abs(diff);
+    const sign = diff > 0 ? 1 : -1;
     // Lerp-based recovery scaled with scrollSpeed so high-speed play can still recenter.
     // At base speed (3.5) uses factor 0.12; at higher speeds, factor scales up proportionally.
     // Min speed also scales with scrollSpeed to prevent Zeno crawl at high difficulty.
@@ -2736,7 +2738,7 @@ function update() {
     const runMul = 1.0 + runBoostFactor * (RUN_BOOST_MULTIPLIER - 1.0); // 1.0 ~ 1.55
     const lerpFactor = Math.min(0.45, 0.12 * speedRatio * runMul);
     const minRecoverSpeed = 0.5 * speedRatio * runMul;
-    const recoverDX = Math.min(diff, Math.max(minRecoverSpeed, diff * lerpFactor));
+    const recoverDX = sign * Math.min(absDiff, Math.max(minRecoverSpeed, absDiff * lerpFactor));
     // Safety: verify recovery doesn't push into an obstacle
     const testPB = { x: player.x + recoverDX + 4, y: player.y + 2, w: player.w - 8, h: player.h - 4 };
     let recoverBlocked = false;
