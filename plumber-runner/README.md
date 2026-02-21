@@ -235,19 +235,44 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 - Bricks scroll with the world at the same speed as pipes
 - Broken bricks are removed immediately — fragments are cosmetic only
 
-## Player Character — "Bolt" the Explorer
+## Player Character — "Pippo" the Plumber
 
-The player character is a fully **original pixel art creation** named "Bolt" — a spiky-haired explorer with a cyan visor and mini jetpack. The character is rendered procedurally on the HTML5 Canvas using filled rectangles (no sprite sheets or external images).
+The player character is a fully **original pixel art creation** named "Pippo" — a stout plumber with a red cap, big mustache, and navy work overalls. The character is rendered procedurally on the HTML5 Canvas using filled rectangles, with an optional pre-generated sprite sheet.
 
 **Design features:**
-- Deep indigo spiky hair with highlights
-- Cyan tech visor (not goggles) with glint effects
-- Burnt orange explorer jacket with shading
-- Grey-blue jetpack on back with animated thrust glow
-- Dark cargo pants with pocket details
-- Utility belt with yellow buckle
+- Deep red cap with brim and yellow hexagonal badge (original geometric symbol)
+- Big round nose and prominent dark brown mustache
+- Expressive dot eyes with white sclera
+- Red work shirt with matching cap
+- Deep navy blue overalls with shoulder straps and yellow buttons
+- Off-white work gloves
+- Dark brown work boots
 
-**This character is 100% original and is NOT derived from any Nintendo, Super Mario, or other copyrighted IP.** No external sprite sheets, images, or third-party assets are used.
+**This character is 100% original and is NOT derived from any Nintendo, Super Mario, or other copyrighted IP.** The proportions, badge design, color ratios, and facial details are intentionally distinct from any existing franchise characters. No external sprite sheets, images, or third-party assets are used.
+
+### Character Art Revision (v2 — Original Plumber Style)
+
+The character was redesigned from the previous "Bolt" explorer to a classic **plumber archetype** with higher visual recognizability:
+
+**What changed:**
+- **Color scheme**: Burnt orange jacket + cyan visor → **red cap + deep navy overalls** (classic plumber identity)
+- **Head**: Spiky hair + tech visor → **rounded red cap with brim, hex badge, big nose, dark mustache**
+- **Body**: Explorer jacket + jetpack → **red shirt + navy overalls with straps & yellow buttons**
+- **Hands**: Bare skin → **off-white work gloves**
+- **Run animation**: Added **body bob** (up/down oscillation per stride), more pronounced **arm swing** (arms reach further forward/back), clearer **leg stride alternation**
+- **Jump animation**: Single pose → distinct **launch frame** (fist raised, determined look) vs **fall frame** (arms spread, worried face, cap blown back)
+- **Landing**: Updated to match new costume with squash pose
+
+**What stayed the same:**
+- 28×36 pixel hitbox and collision box — zero gameplay change
+- 5-state animation machine (idle, run, jump_up, fall, land)
+- 4-frame run cycle timing
+- All physics, controls, and difficulty unchanged
+
+**Originality safeguards:**
+- Hexagonal geometric badge (not letters/initials)
+- Distinct color ratios and proportions from any Nintendo IP
+- No copyrighted design elements referenced
 
 ## Animation States
 
@@ -257,7 +282,7 @@ The player character has a 5-state animation machine that drives distinct visual
 |-------|---------|--------|
 | `idle` | Title screen / pre-game | Relaxed stance with subtle breathing bob animation |
 | `run` | On ground, not landing | 4-frame run cycle — arms and legs alternate, hair bounces |
-| `jump_up` | Airborne with upward velocity (`vy < -0.5`) | Arms raised, legs tucked, hair streaming up, jetpack thrust glow |
+| `jump_up` | Airborne with upward velocity (`vy < -0.5`) | Fist raised, legs tucked, cap tilted, determined expression |
 | `fall` | Airborne with downward velocity (`vy >= -0.5`) | Arms spread for balance, legs dangling, worried expression |
 | `land` | Just touched ground after being airborne | 6-frame squash impact pose with dual dust puffs |
 
@@ -553,14 +578,14 @@ The default sprite sheet is a **single-row PNG** with transparent background (RG
 - Sprites ripped from commercial games
 - Fan art that you don't have permission to use
 
-The bundled `assets/sprite.png` is an **original character** ("Bolt" the Explorer) created for this project. If you replace it, ensure you have the right to use your replacement art.
+The bundled `assets/sprite.png` is an **original character** ("Pippo" the Plumber) created for this project. If you replace it, ensure you have the right to use your replacement art.
 
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.
 
 - All visual assets are **original pixel art** — either rendered via JavaScript/Canvas code or provided as the bundled sprite sheet
-- The player character **"Bolt"** is a fully **original pixel art explorer** with visor and jetpack — designed from scratch, not derived from any Nintendo or other copyrighted IP
+- The player character **"Pippo"** is a fully **original pixel art plumber** with red cap, mustache, and overalls — designed from scratch, not derived from any Nintendo or other copyrighted IP
 - **No Nintendo sprites, Super Mario assets, or any third-party copyrighted materials are used anywhere in this project**
 - All 5 animation states (idle, run, jump_up, fall, land) are hand-crafted with multi-frame animation
 - The game concept (side-scrolling runner with pipe obstacles) is a generic game mechanic not subject to copyright

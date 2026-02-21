@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate sprite.png for Plumber Runner — original "Bolt" explorer character.
+"""Generate sprite.png for Plumber Runner — original "Pippo" plumber character.
 
 Produces a sprite sheet with 8 frames in a single row, each 28x36 pixels.
 Frame layout: idle, run0, run1, run2, run3, jump_up, fall, land
@@ -13,27 +13,30 @@ FRAME_W = 28
 FRAME_H = 36
 FRAMES = 8  # idle, run0-3, jump_up, fall, land
 
-# Color palette — matches the in-game "Bolt" explorer
+# Color palette — matches the in-game "Pippo" the Plumber
 COLORS = {
-    'hair':     (45, 27, 105),
-    'hair_hi':  (91, 63, 191),
-    'skin':     (240, 192, 144),
-    'skin_sh':  (200, 144, 96),
-    'visor':    (0, 229, 255),
-    'visor_d':  (0, 151, 167),
-    'jacket':   (216, 67, 21),
-    'jack_hi':  (255, 112, 67),
-    'jack_sh':  (191, 54, 12),
-    'cargo':    (55, 71, 79),
-    'cargo_l':  (96, 125, 139),
-    'boots':    (78, 52, 46),
-    'boots_h':  (109, 76, 65),
-    'buckle':   (255, 214, 0),
-    'mouth':    (230, 74, 25),
-    'pack':     (84, 110, 122),
-    'pack_lt':  (120, 144, 156),
-    'vent':     (255, 109, 0),
-    'eye_white':(255, 255, 255),
+    'cap':      (198, 40, 40),    # deep red cap
+    'cap_hi':   (239, 83, 80),    # cap highlight
+    'cap_sh':   (142, 0, 0),      # cap shadow/brim
+    'badge':    (253, 216, 53),   # yellow hexagonal badge
+    'skin':     (255, 204, 170),  # warm light skin
+    'skin_sh':  (212, 149, 106),  # skin shadow
+    'stache':   (62, 39, 35),     # dark brown mustache
+    'eyes':     (26, 26, 26),     # near-black eyes
+    'eye_w':    (255, 255, 255),  # eye whites
+    'nose':     (232, 160, 112),  # round nose
+    'shirt':    (198, 40, 40),    # red shirt (matches cap)
+    'shirt_hi': (239, 83, 80),    # shirt highlight
+    'overall':  (26, 58, 110),    # deep navy overalls
+    'over_hi':  (46, 94, 160),    # overalls highlight
+    'over_sh':  (13, 31, 60),     # overalls shadow
+    'strap':    (26, 58, 110),    # overall strap
+    'button':   (253, 216, 53),   # yellow buttons
+    'glove':    (238, 238, 238),  # off-white work gloves
+    'glove_sh': (189, 189, 189),  # glove shadow
+    'boots':    (78, 52, 46),     # dark brown work boots
+    'boots_h':  (121, 85, 72),    # boot highlight
+    'mouth':    (93, 20, 20),     # mouth (dark)
     'trans':    (0, 0, 0, 0),
 }
 
@@ -43,267 +46,303 @@ def px(draw, fx, x, y, w, h, color_name):
     ox = fx * FRAME_W
     draw.rectangle([ox + x, y, ox + x + w - 1, y + h - 1], fill=c)
 
-def draw_head(draw, fx, head_y, hair_style='normal'):
-    """Draw the head (hair + face + visor) at given Y offset."""
-    # Hair base
-    px(draw, fx, 8, head_y, 14, 4, 'hair')
-    # Hair spikes
-    if hair_style == 'normal':
-        px(draw, fx, 8, head_y - 3, 3, 3, 'hair')
-        px(draw, fx, 13, head_y - 4, 3, 4, 'hair')
-        px(draw, fx, 18, head_y - 2, 3, 2, 'hair')
-        px(draw, fx, 10, head_y - 2, 2, 2, 'hair_hi')
-        px(draw, fx, 15, head_y - 3, 2, 3, 'hair_hi')
-    elif hair_style == 'wind_up':
-        px(draw, fx, 8, head_y - 5, 3, 5, 'hair')
-        px(draw, fx, 13, head_y - 6, 3, 6, 'hair')
-        px(draw, fx, 18, head_y - 4, 3, 4, 'hair')
-        px(draw, fx, 10, head_y - 4, 2, 4, 'hair_hi')
-        px(draw, fx, 15, head_y - 5, 2, 5, 'hair_hi')
-    elif hair_style == 'flat':
-        px(draw, fx, 8, head_y - 1, 3, 1, 'hair')
-        px(draw, fx, 13, head_y - 2, 3, 2, 'hair')
-        px(draw, fx, 18, head_y - 1, 3, 1, 'hair')
-        px(draw, fx, 10, head_y - 1, 2, 1, 'hair_hi')
-        px(draw, fx, 15, head_y - 1, 2, 1, 'hair_hi')
-    elif hair_style == 'squash':
-        px(draw, fx, 6, head_y - 1, 4, 1, 'hair')
-        px(draw, fx, 12, head_y - 2, 4, 2, 'hair')
-        px(draw, fx, 18, head_y - 1, 4, 1, 'hair')
-        px(draw, fx, 10, head_y - 1, 2, 1, 'hair_hi')
+def draw_cap(draw, fx, cap_y, style='normal'):
+    """Draw the red cap with brim and hex badge."""
+    if style == 'normal':
+        px(draw, fx, 5, cap_y, 18, 3, 'cap')
+        px(draw, fx, 7, cap_y - 2, 14, 3, 'cap')
+        px(draw, fx, 9, cap_y - 3, 8, 2, 'cap_hi')
+        px(draw, fx, 3, cap_y + 3, 22, 2, 'cap_sh')
+        px(draw, fx, 12, cap_y - 1, 4, 2, 'badge')
+    elif style == 'wind_up':
+        px(draw, fx, 5, cap_y, 18, 3, 'cap')
+        px(draw, fx, 7, cap_y - 3, 14, 3, 'cap')
+        px(draw, fx, 9, cap_y - 4, 8, 2, 'cap_hi')
+        px(draw, fx, 3, cap_y + 3, 22, 2, 'cap_sh')
+        px(draw, fx, 12, cap_y - 2, 4, 2, 'badge')
+    elif style == 'wind_back':
+        px(draw, fx, 7, cap_y, 18, 3, 'cap')
+        px(draw, fx, 9, cap_y - 2, 14, 3, 'cap')
+        px(draw, fx, 11, cap_y - 3, 8, 2, 'cap_hi')
+        px(draw, fx, 5, cap_y + 3, 20, 2, 'cap_sh')
+        px(draw, fx, 14, cap_y - 1, 4, 2, 'badge')
+    elif style == 'squash':
+        px(draw, fx, 3, cap_y, 22, 2, 'cap')
+        px(draw, fx, 5, cap_y - 2, 16, 3, 'cap')
+        px(draw, fx, 7, cap_y - 2, 8, 1, 'cap_hi')
+        px(draw, fx, 2, cap_y + 2, 24, 2, 'cap_sh')
+        px(draw, fx, 12, cap_y - 1, 4, 2, 'badge')
 
+def draw_head(draw, fx, head_y, cap_style='normal'):
+    """Draw the head (cap + face + eyes + nose + mustache)."""
+    # Cap
+    draw_cap(draw, fx, head_y - 3, cap_style)
     # Face
-    px(draw, fx, 8, head_y + 4, 14, 6, 'skin')
-    px(draw, fx, 8, head_y + 4, 2, 6, 'skin_sh')  # shadow
-
-    # Visor
-    px(draw, fx, 10, head_y + 5, 10, 3, 'visor_d')
-    px(draw, fx, 11, head_y + 5, 8, 2, 'visor')
-
-    return head_y + 10  # return Y after head
+    px(draw, fx, 6, head_y + 2, 16, 11, 'skin')
+    px(draw, fx, 6, head_y + 9, 3, 4, 'skin_sh')
+    # Eyes
+    px(draw, fx, 8, head_y + 4, 3, 3, 'eye_w')
+    px(draw, fx, 17, head_y + 4, 3, 3, 'eye_w')
+    px(draw, fx, 9, head_y + 5, 2, 2, 'eyes')
+    px(draw, fx, 18, head_y + 5, 2, 2, 'eyes')
+    # Nose
+    px(draw, fx, 12, head_y + 6, 5, 4, 'nose')
+    px(draw, fx, 13, head_y + 5, 3, 1, 'nose')
+    # Mustache
+    px(draw, fx, 8, head_y + 9, 12, 2, 'stache')
+    px(draw, fx, 7, head_y + 9, 2, 1, 'stache')
+    px(draw, fx, 19, head_y + 9, 2, 1, 'stache')
+    return head_y + 13  # Y after head
 
 
 def draw_body_idle(draw, fx):
     """Idle stance — relaxed, arms at sides."""
-    head_y = 4
+    head_y = 3
     body_top = draw_head(draw, fx, head_y, 'normal')
 
     # Mouth
-    px(draw, fx, 14, head_y + 8, 4, 1, 'mouth')
+    px(draw, fx, 12, head_y + 11, 4, 1, 'mouth')
 
-    # Jacket (torso)
-    px(draw, fx, 6, body_top, 16, 10, 'jacket')
-    px(draw, fx, 7, body_top, 2, 10, 'jack_hi')  # highlight
-    px(draw, fx, 19, body_top, 3, 10, 'jack_sh')  # shadow
+    # Shirt (collar area)
+    px(draw, fx, 7, body_top, 14, 3, 'shirt')
+    px(draw, fx, 7, body_top, 4, 2, 'shirt_hi')
 
-    # Buckle
-    px(draw, fx, 12, body_top + 8, 4, 2, 'buckle')
+    # Overalls
+    px(draw, fx, 6, body_top + 2, 16, 8, 'overall')
+    px(draw, fx, 6, body_top + 2, 3, 6, 'over_hi')
+    px(draw, fx, 19, body_top + 4, 3, 4, 'over_sh')
+    # Straps
+    px(draw, fx, 8, body_top, 3, 3, 'strap')
+    px(draw, fx, 17, body_top, 3, 3, 'strap')
+    px(draw, fx, 9, body_top, 1, 1, 'button')
+    px(draw, fx, 18, body_top, 1, 1, 'button')
 
-    # Jetpack on back
-    px(draw, fx, 3, body_top + 1, 4, 7, 'pack')
-    px(draw, fx, 4, body_top + 2, 2, 3, 'pack_lt')
+    # Arms (shirt sleeves + gloves)
+    px(draw, fx, 2, body_top + 1, 4, 5, 'shirt')
+    px(draw, fx, 2, body_top + 6, 4, 3, 'glove')
+    px(draw, fx, 22, body_top + 1, 4, 5, 'shirt')
+    px(draw, fx, 22, body_top + 6, 4, 3, 'glove')
 
-    # Arms at sides
-    px(draw, fx, 3, body_top + 2, 3, 6, 'jacket')
-    px(draw, fx, 22, body_top + 2, 3, 6, 'jacket')
-    # Hands
-    px(draw, fx, 3, body_top + 7, 3, 2, 'skin')
-    px(draw, fx, 22, body_top + 7, 3, 2, 'skin')
-
-    # Cargo pants
+    # Legs (overalls)
     legs_y = body_top + 10
-    px(draw, fx, 8, legs_y, 6, 8, 'cargo')
-    px(draw, fx, 10, legs_y + 2, 2, 2, 'cargo_l')
-    px(draw, fx, 14, legs_y, 6, 8, 'cargo')
-    px(draw, fx, 16, legs_y + 2, 2, 2, 'cargo_l')
+    px(draw, fx, 7, legs_y, 6, 8, 'overall')
+    px(draw, fx, 9, legs_y + 2, 2, 2, 'over_hi')
+    px(draw, fx, 15, legs_y, 6, 8, 'overall')
+    px(draw, fx, 17, legs_y + 2, 2, 2, 'over_hi')
 
     # Boots
-    px(draw, fx, 6, legs_y + 8, 8, 4, 'boots')
-    px(draw, fx, 7, legs_y + 8, 3, 1, 'boots_h')
-    px(draw, fx, 14, legs_y + 8, 8, 4, 'boots')
-    px(draw, fx, 15, legs_y + 8, 3, 1, 'boots_h')
+    px(draw, fx, 5, legs_y + 8, 8, 4, 'boots')
+    px(draw, fx, 6, legs_y + 8, 3, 1, 'boots_h')
+    px(draw, fx, 15, legs_y + 8, 8, 4, 'boots')
+    px(draw, fx, 16, legs_y + 8, 3, 1, 'boots_h')
 
 
 def draw_body_run(draw, fx, phase):
-    """Run cycle — 4 phases with alternating arms/legs."""
-    head_y = 3 + (1 if phase in (0, 2) else 0)  # bob
+    """Run cycle — 4 phases with bob, arm swing, leg stride."""
+    # Body bob: stride phases (0,2) bob up, contact phases (1,3) sit down
+    bob = -1 if phase in (0, 2) else 1
+    head_y = 3 + bob
     body_top = draw_head(draw, fx, head_y, 'normal')
 
     # Determined mouth
-    px(draw, fx, 14, head_y + 8, 4, 1, 'mouth')
+    px(draw, fx, 12, head_y + 11, 5, 1, 'mouth')
 
-    # Jacket
-    px(draw, fx, 6, body_top, 16, 10, 'jacket')
-    px(draw, fx, 7, body_top, 2, 10, 'jack_hi')
-    px(draw, fx, 19, body_top, 3, 10, 'jack_sh')
-    px(draw, fx, 12, body_top + 8, 4, 2, 'buckle')
+    # Shirt
+    px(draw, fx, 7, body_top, 14, 3, 'shirt')
+    px(draw, fx, 7, body_top, 4, 2, 'shirt_hi')
 
-    # Jetpack
-    px(draw, fx, 3, body_top + 1, 4, 7, 'pack')
-    px(draw, fx, 4, body_top + 2, 2, 3, 'pack_lt')
+    # Overalls
+    px(draw, fx, 6, body_top + 2, 16, 8, 'overall')
+    px(draw, fx, 6, body_top + 2, 3, 6, 'over_hi')
+    px(draw, fx, 19, body_top + 4, 3, 4, 'over_sh')
+    # Straps
+    px(draw, fx, 8, body_top, 3, 3, 'strap')
+    px(draw, fx, 17, body_top, 3, 3, 'strap')
+    px(draw, fx, 9, body_top, 1, 1, 'button')
+    px(draw, fx, 18, body_top, 1, 1, 'button')
 
-    legs_y = body_top + 10
+    # Fixed base for legs/boots (no bob — feet stay on ground)
+    legs_y = 24  # fixed Y so boots always at y=32
 
     if phase == 0:
-        # Left arm forward, right back
-        px(draw, fx, 22, body_top + 1, 4, 5, 'jacket')
-        px(draw, fx, 23, body_top + 5, 3, 2, 'skin')
-        px(draw, fx, 2, body_top + 4, 4, 5, 'jacket')
-        px(draw, fx, 2, body_top + 8, 3, 2, 'skin')
-        # Left leg forward, right back
-        px(draw, fx, 6, legs_y, 6, 8, 'cargo')
-        px(draw, fx, 8, legs_y + 2, 2, 2, 'cargo_l')
-        px(draw, fx, 16, legs_y + 2, 5, 6, 'cargo')
-        px(draw, fx, 4, legs_y + 8, 8, 4, 'boots')
-        px(draw, fx, 5, legs_y + 8, 3, 1, 'boots_h')
-        px(draw, fx, 16, legs_y + 8, 6, 4, 'boots')
+        # Left arm far forward-down, right arm far back-up
+        px(draw, fx, 0, 14, 5, 6, 'shirt')
+        px(draw, fx, 0, 20, 4, 3, 'glove')
+        px(draw, fx, 23, 11, 4, 5, 'shirt')
+        px(draw, fx, 24, 10, 3, 2, 'glove')
+        # Left leg forward (extended), right back
+        px(draw, fx, 3, legs_y, 7, 8, 'overall')
+        px(draw, fx, 5, legs_y + 2, 2, 2, 'over_hi')
+        px(draw, fx, 17, legs_y + 2, 5, 6, 'overall')
+        px(draw, fx, 1, legs_y + 8, 9, 4, 'boots')
+        px(draw, fx, 2, legs_y + 8, 3, 1, 'boots_h')
+        px(draw, fx, 17, legs_y + 8, 7, 4, 'boots')
     elif phase == 1:
-        # Arms neutral, legs together (contact)
-        px(draw, fx, 3, body_top + 2, 3, 6, 'jacket')
-        px(draw, fx, 22, body_top + 2, 3, 6, 'jacket')
-        px(draw, fx, 3, body_top + 7, 3, 2, 'skin')
-        px(draw, fx, 22, body_top + 7, 3, 2, 'skin')
-        px(draw, fx, 9, legs_y, 5, 8, 'cargo')
-        px(draw, fx, 11, legs_y + 2, 2, 2, 'cargo_l')
-        px(draw, fx, 14, legs_y, 5, 8, 'cargo')
-        px(draw, fx, 8, legs_y + 8, 6, 4, 'boots')
-        px(draw, fx, 9, legs_y + 8, 3, 1, 'boots_h')
-        px(draw, fx, 14, legs_y + 8, 6, 4, 'boots')
-    elif phase == 2:
-        # Right arm forward, left back (mirror of phase 0)
-        px(draw, fx, 2, body_top + 1, 4, 5, 'jacket')
-        px(draw, fx, 2, body_top + 5, 3, 2, 'skin')
-        px(draw, fx, 22, body_top + 4, 4, 5, 'jacket')
-        px(draw, fx, 23, body_top + 8, 3, 2, 'skin')
-        # Right leg forward, left back
-        px(draw, fx, 14, legs_y, 6, 8, 'cargo')
-        px(draw, fx, 16, legs_y + 2, 2, 2, 'cargo_l')
-        px(draw, fx, 6, legs_y + 2, 5, 6, 'cargo')
-        px(draw, fx, 14, legs_y + 8, 8, 4, 'boots')
-        px(draw, fx, 15, legs_y + 8, 3, 1, 'boots_h')
-        px(draw, fx, 6, legs_y + 8, 6, 4, 'boots')
-    else:  # phase 3
-        # Arms half, legs close
-        px(draw, fx, 3, body_top + 3, 3, 5, 'jacket')
-        px(draw, fx, 3, body_top + 7, 3, 2, 'skin')
-        px(draw, fx, 22, body_top + 3, 3, 5, 'jacket')
-        px(draw, fx, 22, body_top + 7, 3, 2, 'skin')
-        px(draw, fx, 8, legs_y, 6, 8, 'cargo')
-        px(draw, fx, 10, legs_y + 2, 2, 2, 'cargo_l')
-        px(draw, fx, 14, legs_y, 6, 8, 'cargo')
-        px(draw, fx, 16, legs_y + 2, 2, 2, 'cargo_l')
-        px(draw, fx, 7, legs_y + 8, 7, 4, 'boots')
-        px(draw, fx, 8, legs_y + 8, 3, 1, 'boots_h')
+        # Arms mid-swing
+        px(draw, fx, 1, 16, 5, 4, 'shirt')
+        px(draw, fx, 1, 20, 4, 2, 'glove')
+        px(draw, fx, 22, 16, 5, 4, 'shirt')
+        px(draw, fx, 22, 20, 4, 2, 'glove')
+        # Legs passing — together
+        px(draw, fx, 8, legs_y, 5, 8, 'overall')
+        px(draw, fx, 10, legs_y + 2, 2, 2, 'over_hi')
+        px(draw, fx, 14, legs_y, 5, 8, 'overall')
+        px(draw, fx, 16, legs_y + 2, 2, 2, 'over_hi')
+        px(draw, fx, 6, legs_y + 8, 7, 4, 'boots')
+        px(draw, fx, 7, legs_y + 8, 3, 1, 'boots_h')
         px(draw, fx, 14, legs_y + 8, 7, 4, 'boots')
         px(draw, fx, 15, legs_y + 8, 3, 1, 'boots_h')
+    elif phase == 2:
+        # Right arm far forward-down, left arm far back-up (mirror)
+        px(draw, fx, 23, 14, 5, 6, 'shirt')
+        px(draw, fx, 24, 20, 4, 3, 'glove')
+        px(draw, fx, 1, 11, 4, 5, 'shirt')
+        px(draw, fx, 1, 10, 3, 2, 'glove')
+        # Right leg forward, left back
+        px(draw, fx, 16, legs_y, 7, 8, 'overall')
+        px(draw, fx, 18, legs_y + 2, 2, 2, 'over_hi')
+        px(draw, fx, 6, legs_y + 2, 5, 6, 'overall')
+        px(draw, fx, 16, legs_y + 8, 9, 4, 'boots')
+        px(draw, fx, 17, legs_y + 8, 3, 1, 'boots_h')
+        px(draw, fx, 4, legs_y + 8, 7, 4, 'boots')
+    else:  # phase 3
+        # Arms mid-swing returning
+        px(draw, fx, 22, 16, 5, 4, 'shirt')
+        px(draw, fx, 22, 20, 4, 2, 'glove')
+        px(draw, fx, 1, 16, 5, 4, 'shirt')
+        px(draw, fx, 1, 20, 4, 2, 'glove')
+        # Legs close
+        px(draw, fx, 7, legs_y, 6, 8, 'overall')
+        px(draw, fx, 9, legs_y + 2, 2, 2, 'over_hi')
+        px(draw, fx, 15, legs_y, 6, 8, 'overall')
+        px(draw, fx, 17, legs_y + 2, 2, 2, 'over_hi')
+        px(draw, fx, 5, legs_y + 8, 8, 4, 'boots')
+        px(draw, fx, 6, legs_y + 8, 3, 1, 'boots_h')
+        px(draw, fx, 15, legs_y + 8, 8, 4, 'boots')
+        px(draw, fx, 16, legs_y + 8, 3, 1, 'boots_h')
 
 
 def draw_body_jump_up(draw, fx):
-    """Jump up — arms raised, legs tucked, hair streaming up."""
+    """Jump up — fist raised, legs tucked, determined look."""
     head_y = 2
     body_top = draw_head(draw, fx, head_y, 'wind_up')
 
-    # Excited mouth
-    px(draw, fx, 14, head_y + 8, 3, 2, 'mouth')
+    # Determined open mouth
+    px(draw, fx, 12, head_y + 10, 4, 2, 'mouth')
 
-    # Jacket
-    px(draw, fx, 6, body_top, 16, 10, 'jacket')
-    px(draw, fx, 7, body_top, 2, 10, 'jack_hi')
-    px(draw, fx, 19, body_top, 3, 10, 'jack_sh')
-    px(draw, fx, 12, body_top + 8, 4, 2, 'buckle')
+    # Shirt
+    px(draw, fx, 7, body_top, 14, 3, 'shirt')
+    px(draw, fx, 7, body_top, 4, 2, 'shirt_hi')
 
-    # Jetpack with thrust
-    px(draw, fx, 3, body_top + 1, 4, 7, 'pack')
-    px(draw, fx, 4, body_top + 2, 2, 3, 'pack_lt')
-    px(draw, fx, 3, body_top + 8, 4, 3, 'vent')  # thrust glow
+    # Overalls
+    px(draw, fx, 6, body_top + 2, 16, 8, 'overall')
+    px(draw, fx, 6, body_top + 2, 3, 6, 'over_hi')
+    px(draw, fx, 19, body_top + 4, 3, 4, 'over_sh')
+    # Straps
+    px(draw, fx, 8, body_top, 3, 3, 'strap')
+    px(draw, fx, 17, body_top, 3, 3, 'strap')
+    px(draw, fx, 9, body_top, 1, 1, 'button')
+    px(draw, fx, 18, body_top, 1, 1, 'button')
 
-    # Arms raised up
-    px(draw, fx, 2, body_top - 3, 4, 6, 'jacket')
-    px(draw, fx, 2, body_top - 4, 3, 2, 'skin')
-    px(draw, fx, 22, body_top - 3, 4, 6, 'jacket')
-    px(draw, fx, 23, body_top - 4, 3, 2, 'skin')
+    # Right arm raised fist
+    px(draw, fx, 22, body_top - 3, 4, 6, 'shirt')
+    px(draw, fx, 23, body_top - 5, 4, 3, 'shirt')
+    px(draw, fx, 23, body_top - 7, 4, 3, 'glove')
+    # Left arm down behind
+    px(draw, fx, 1, body_top + 1, 5, 5, 'shirt')
+    px(draw, fx, 1, body_top + 6, 4, 2, 'glove')
 
-    # Legs tucked up
+    # Legs tucked
     legs_y = body_top + 10
-    px(draw, fx, 8, legs_y, 5, 6, 'cargo')
-    px(draw, fx, 15, legs_y, 5, 6, 'cargo')
-    px(draw, fx, 8, legs_y + 6, 5, 3, 'boots')
-    px(draw, fx, 15, legs_y + 6, 5, 3, 'boots')
+    px(draw, fx, 7, legs_y, 6, 5, 'overall')
+    px(draw, fx, 15, legs_y, 6, 5, 'overall')
+    px(draw, fx, 6, legs_y + 5, 7, 4, 'boots')
+    px(draw, fx, 7, legs_y + 5, 3, 1, 'boots_h')
+    px(draw, fx, 15, legs_y + 5, 7, 4, 'boots')
+    px(draw, fx, 16, legs_y + 5, 3, 1, 'boots_h')
 
 
 def draw_body_fall(draw, fx):
     """Falling — arms spread, legs dangling, worried face."""
     head_y = 4
-    body_top = draw_head(draw, fx, head_y, 'flat')
+    body_top = draw_head(draw, fx, head_y, 'wind_back')
 
     # Worried O mouth
-    px(draw, fx, 15, head_y + 7, 3, 3, 'mouth')
-    px(draw, fx, 16, head_y + 8, 1, 1, 'skin')  # O hole
+    px(draw, fx, 12, head_y + 11, 4, 2, 'mouth')
+    px(draw, fx, 13, head_y + 11, 2, 1, 'skin')
 
-    # Jacket
-    px(draw, fx, 6, body_top, 16, 10, 'jacket')
-    px(draw, fx, 7, body_top, 2, 10, 'jack_hi')
-    px(draw, fx, 19, body_top, 3, 10, 'jack_sh')
-    px(draw, fx, 12, body_top + 8, 4, 2, 'buckle')
+    # Shirt
+    px(draw, fx, 7, body_top, 14, 3, 'shirt')
 
-    # Jetpack (no thrust)
-    px(draw, fx, 3, body_top + 1, 4, 7, 'pack')
-    px(draw, fx, 4, body_top + 2, 2, 3, 'pack_lt')
+    # Overalls
+    px(draw, fx, 6, body_top + 2, 16, 7, 'overall')
+    px(draw, fx, 6, body_top + 2, 3, 5, 'over_hi')
+    px(draw, fx, 19, body_top + 4, 3, 3, 'over_sh')
+    # Straps
+    px(draw, fx, 8, body_top, 3, 3, 'strap')
+    px(draw, fx, 17, body_top, 3, 3, 'strap')
+    px(draw, fx, 9, body_top, 1, 1, 'button')
+    px(draw, fx, 18, body_top, 1, 1, 'button')
 
     # Arms spread wide
-    px(draw, fx, 0, body_top + 2, 6, 4, 'jacket')
-    px(draw, fx, 0, body_top + 5, 3, 2, 'skin')
-    px(draw, fx, 22, body_top + 2, 6, 4, 'jacket')
-    px(draw, fx, 25, body_top + 5, 3, 2, 'skin')
+    px(draw, fx, 0, body_top, 6, 4, 'shirt')
+    px(draw, fx, 0, body_top - 1, 4, 3, 'shirt')
+    px(draw, fx, 0, body_top - 2, 3, 2, 'glove')
+    px(draw, fx, 22, body_top + 1, 6, 4, 'shirt')
+    px(draw, fx, 25, body_top - 1, 3, 3, 'shirt')
+    px(draw, fx, 25, body_top - 2, 3, 2, 'glove')
 
-    # Legs dangling apart
-    legs_y = body_top + 10
-    px(draw, fx, 6, legs_y, 6, 8, 'cargo')
-    px(draw, fx, 8, legs_y + 2, 2, 2, 'cargo_l')
-    px(draw, fx, 16, legs_y, 6, 8, 'cargo')
-    px(draw, fx, 18, legs_y + 2, 2, 2, 'cargo_l')
-    px(draw, fx, 5, legs_y + 8, 7, 4, 'boots')
-    px(draw, fx, 6, legs_y + 8, 3, 1, 'boots_h')
-    px(draw, fx, 16, legs_y + 8, 7, 4, 'boots')
-    px(draw, fx, 17, legs_y + 8, 3, 1, 'boots_h')
+    # Legs dangling
+    legs_y = body_top + 9
+    px(draw, fx, 6, legs_y, 6, 7, 'overall')
+    px(draw, fx, 8, legs_y + 2, 2, 2, 'over_hi')
+    px(draw, fx, 16, legs_y, 6, 7, 'overall')
+    px(draw, fx, 18, legs_y + 2, 2, 2, 'over_hi')
+    px(draw, fx, 5, legs_y + 7, 8, 4, 'boots')
+    px(draw, fx, 6, legs_y + 7, 3, 1, 'boots_h')
+    px(draw, fx, 15, legs_y + 7, 8, 4, 'boots')
+    px(draw, fx, 16, legs_y + 7, 3, 1, 'boots_h')
 
 
 def draw_body_land(draw, fx):
     """Landing squash — compressed body, wide stance."""
-    head_y = 6  # lower due to squash
+    head_y = 6
     body_top = draw_head(draw, fx, head_y, 'squash')
 
     # Strained mouth
-    px(draw, fx, 13, head_y + 8, 5, 1, 'mouth')
+    px(draw, fx, 11, head_y + 11, 6, 1, 'mouth')
 
-    # Squashed jacket (wider, shorter)
-    px(draw, fx, 4, body_top, 20, 8, 'jacket')
-    px(draw, fx, 5, body_top, 2, 8, 'jack_hi')
-    px(draw, fx, 21, body_top, 3, 8, 'jack_sh')
-    px(draw, fx, 12, body_top + 6, 4, 2, 'buckle')
+    # Shirt squashed
+    px(draw, fx, 3, body_top, 22, 2, 'shirt')
 
-    # Jetpack
-    px(draw, fx, 1, body_top + 1, 4, 6, 'pack')
-    px(draw, fx, 2, body_top + 2, 2, 3, 'pack_lt')
+    # Overalls squashed wide
+    px(draw, fx, 2, body_top + 2, 24, 5, 'overall')
+    px(draw, fx, 2, body_top + 2, 4, 3, 'over_hi')
+    px(draw, fx, 22, body_top + 3, 4, 3, 'over_sh')
+    # Straps
+    px(draw, fx, 7, body_top, 3, 3, 'strap')
+    px(draw, fx, 18, body_top, 3, 3, 'strap')
+    px(draw, fx, 8, body_top, 1, 1, 'button')
+    px(draw, fx, 19, body_top, 1, 1, 'button')
 
     # Arms bracing
-    px(draw, fx, 1, body_top + 2, 3, 5, 'jacket')
-    px(draw, fx, 1, body_top + 6, 3, 2, 'skin')
-    px(draw, fx, 24, body_top + 2, 3, 5, 'jacket')
-    px(draw, fx, 24, body_top + 6, 3, 2, 'skin')
+    px(draw, fx, 0, body_top + 1, 4, 4, 'shirt')
+    px(draw, fx, 0, body_top + 5, 3, 2, 'glove')
+    px(draw, fx, 24, body_top + 1, 4, 4, 'shirt')
+    px(draw, fx, 25, body_top + 5, 3, 2, 'glove')
 
     # Wide stance legs
-    legs_y = body_top + 8
-    px(draw, fx, 4, legs_y, 7, 6, 'cargo')
-    px(draw, fx, 6, legs_y + 1, 2, 2, 'cargo_l')
-    px(draw, fx, 17, legs_y, 7, 6, 'cargo')
-    px(draw, fx, 19, legs_y + 1, 2, 2, 'cargo_l')
+    legs_y = body_top + 7
+    px(draw, fx, 2, legs_y, 8, 5, 'overall')
+    px(draw, fx, 4, legs_y + 1, 2, 2, 'over_hi')
+    px(draw, fx, 18, legs_y, 8, 5, 'overall')
+    px(draw, fx, 20, legs_y + 1, 2, 2, 'over_hi')
 
     # Wide boots
-    px(draw, fx, 2, legs_y + 6, 9, 4, 'boots')
-    px(draw, fx, 3, legs_y + 6, 3, 1, 'boots_h')
-    px(draw, fx, 17, legs_y + 6, 9, 4, 'boots')
-    px(draw, fx, 18, legs_y + 6, 3, 1, 'boots_h')
+    px(draw, fx, 0, legs_y + 5, 10, 4, 'boots')
+    px(draw, fx, 1, legs_y + 5, 3, 1, 'boots_h')
+    px(draw, fx, 18, legs_y + 5, 10, 4, 'boots')
+    px(draw, fx, 19, legs_y + 5, 3, 1, 'boots_h')
 
 
 def main():
