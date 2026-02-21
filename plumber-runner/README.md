@@ -4,16 +4,18 @@ A retro-style side-scrolling platformer game playable in the browser (desktop & 
 
 ## How to Play
 
-**The character does NOT auto-run.** You manually move left and right through a procedurally generated world of pipes, bricks, and mushrooms. The camera follows you.
+**The world auto-scrolls** — obstacles continuously move from right to left. You control the character's left/right movement and jumping while the world advances.
 
-- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to walk through the world
+- **The map keeps moving**: pipes, bricks, and obstacles scroll left automatically at increasing speed
+- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles within the screen
 - **Hold RUN** (Shift/Z or mobile RUN button) to sprint — movement speed increases with gradual acceleration
 - **Short tap JUMP** for a small jump, **long press** for a high jump — two distinct jump heights
 - **Must release before jumping again** — holding the button after landing will NOT auto-repeat the jump
 - You can **stand on top of pipes** — pipe tops are platforms!
 - **Side collisions block you** — you stop when walking into a pipe
-- You die when you get **crushed/squeezed** between obstacles or walk too far off the left edge of the screen
-- Your score increases each time you pass a pipe
+- **Standing on pipes/bricks does NOT give score** — score only comes from passing pipes, breaking bricks, completing missions, and clearing boss waves
+- You die when you get **crushed/squeezed** between a scrolling obstacle and the left screen edge, or pushed off-screen
+- Your score increases each time a pipe scrolls past you
 - Obstacles get harder over time (difficulty scales with survival time)
 - **HUD** shows survival time, current difficulty level (Lv.1~Lv.5), and progress bar
 
@@ -30,7 +32,7 @@ Difficulty scales **smoothly** over survival time across 5 levels. All transitio
 | Lv.5 | INSANE | 240s | 2.15x | 175–245 px | 240 px | 55% | 28% |
 
 **What changes with difficulty:**
-- **Obstacle density**: Speed factor affects how closely obstacles spawn
+- **Scroll speed**: Speed factor increases auto-scroll speed and obstacle density
 - **Pipe spacing**: Horizontal gap between obstacles shrinks, making the world denser
 - **Pipe height cap**: Later levels unlock taller bottom/ceiling pipes that require more precise jumping
 - **Pair frequency**: More top+bottom pipe combinations appear, creating tighter squeeze corridors
@@ -158,7 +160,7 @@ When a special brick is broken, a **red mushroom** pops out and moves through th
 - Mushroom moves **horizontally** at 1.8 px/frame
 - Affected by **gravity** (0.4 px/frame²) — falls and lands on ground/pipe surfaces
 - **Bounces off pipe walls AND unbroken bricks** (reverses horizontal direction on side collision, lands on top surfaces)
-- Stays in world position (obstacles are static)
+- Scrolls left with the world (auto-scroll)
 - **Unstuck logic**: if a mushroom remains embedded in a solid for 30+ frames, it teleports to ground level
 - Removed when off-screen
 
@@ -230,7 +232,7 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 
 - You can **stand on top** of intact bricks (they act as platforms from above)
 - Bricks are placed before pipes as launch platforms — use them to reach tall pipe tops
-- Bricks are static in the world like pipes
+- Bricks scroll left with the world like pipes
 - Broken bricks are removed immediately — fragments are cosmetic only
 
 ## Player Character — "Pippo" the Plumber
@@ -293,12 +295,12 @@ Transitions happen automatically every frame in `updateAnimState()`:
 
 ## Player Position & Camera
 
-The player starts at world position X=320 on each new game. The camera follows the player, keeping them at **40% from the left edge** of the screen (CAMERA_LEAD). This gives the player a clear view of upcoming obstacles to the right while still being able to see what's behind.
+The player starts at screen position X=320 on each new game. The camera is fixed — the world auto-scrolls left instead of the camera following the player.
 
-- The player moves freely in world coordinates — no auto-scrolling
-- The camera smoothly tracks the player's X position
-- The camera never goes below X=0 (world origin)
-- Obstacles are static in the world — the player walks through them
+- **Auto-scroll**: obstacles (pipes, bricks, mushrooms) move left each frame at increasing speed
+- The player moves within screen bounds using left/right controls
+- If a scrolling obstacle pushes the player to the left screen edge and overlaps them, the player is **crushed and dies**
+- Player is clamped to the visible screen area (cannot walk off-screen)
 
 ## Minimum Brick Height Rule
 
@@ -364,7 +366,7 @@ Instead of moving the player and then checking for overlap (discrete collision),
 
 1. **Compute desired velocity** — gravity, jump initiation, variable jump hold, manual horizontal movement
 2. **Swept resolve** — `resolveSweptMovement(vy, playerDX)`:
-   - Player moves by `(playerDX, vy)` in world coords against static obstacles
+   - Player moves by `(playerDX, vy)` against obstacles
    - Gather all solid AABBs (ground, pipes lip/body, ceiling pipes, bricks)
    - Depenetrate any pre-existing overlaps (safety net)
    - Iterate up to `SWEEP_MAX_ITERATIONS` (4):
@@ -373,8 +375,9 @@ Instead of moving the player and then checking for overlap (discrete collision),
      - Resolve collision normal: zero the normal-axis velocity, keep tangent velocity
      - Special handling: brick hit from below → break brick, bounce player down
      - Consume used time fraction, repeat with remaining movement
-3. **Post-move checks** — standing support loss, crush detection, off-screen death, camera follow
-4. **Cleanup** — remove off-screen obstacles, spawn new ones
+3. **Auto-scroll** — move all obstacles left by `scrollSpeed`; push player left if overlapping
+4. **Post-move checks** — standing support loss, crush detection, off-screen death
+5. **Cleanup** — remove off-screen obstacles, spawn new ones
 
 #### Key Functions
 
@@ -402,7 +405,7 @@ This works for **any velocity magnitude** — even if `dy = 500` pixels/frame, i
 
 ### Player Movement Handling
 
-The player's manual horizontal velocity (`playerVX`) is passed directly to the swept collision resolver along with vertical velocity. Obstacles are static in world coords — no frame conversion is needed. When the player hits a wall, their horizontal velocity is zeroed.
+The player's manual horizontal velocity (`playerVX`) is passed directly to the swept collision resolver along with vertical velocity. Obstacles auto-scroll left each frame; after scrolling, any resulting overlap pushes the player left. When the player hits a wall, their horizontal velocity is zeroed.
 
 ### Edge-Jump Protection (Lip Forgiveness + Wall-Kick Nudge + Head-Center Rule)
 
@@ -603,7 +606,6 @@ Chain events within a short time window to build a combo multiplier for bonus po
 
 **Combo Events:**
 - **Break a brick** — base 5 points, triggers combo
-- **Perfect landing** — land on a pipe top or brick top with low vertical speed (`|vy| ≤ 4.0`), base 2 points
 
 **Rules:**
 - Each event resets a **2.5-second combo window**; chain events before it expires to build the multiplier
@@ -629,8 +631,7 @@ The internal difficulty speed factor oscillates smoothly, creating rhythm variat
 **How it works:**
 - A sine wave with **20-second period** modulates the difficulty speed factor by **±10%**
 - The wave ramps in gently over the first 30 seconds (intro fade)
-- Affects obstacle spawn pacing — creates natural "push" and "breathe" phases
-- Note: in manual movement mode, the player controls their own speed, so the wave primarily affects difficulty timing
+- Affects auto-scroll speed and obstacle spawn pacing — creates natural "push" and "breathe" phases
 
 **Debug (`?debug=1`):**
 - Bottom status line shows `SPEED_WAVE:X.XXX` — the current wave multiplier (1.0 = no effect, 1.10 = +10%, 0.90 = −10%)

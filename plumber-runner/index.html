@@ -3063,9 +3063,8 @@ function update() {
   if (bossWaveActive) {
     waveFactor = 1.0 + (waveFactor - 1.0) * BOSS_WAVE_SPEED_WAVE_DAMP;
   }
-  // scrollSpeed kept for difficulty reference / boss wave spawning, but world doesn't auto-scroll
+  // scrollSpeed drives auto-scroll: obstacles move left each frame by this amount
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * waveFactor;
-  // Ground offset no longer needed — ground is drawn in world coords with camera transform
 
   // ── Phase 1: Compute desired velocity vector ──────────
   justJumped = false; // reset each frame; set below if a jump initiates
@@ -3182,15 +3181,10 @@ function update() {
     airJumpsUsed = 0; // reset air jump count on landing
     isAirJump = false; // reset air jump flag on landing
 
-    // ── Fun Pack v1: Perfect Landing combo + platform mission ──
+    // ── Fun Pack v1: Platform mission (no score for landing) ──
     // Check if landed on pipe top or brick top (not ground)
     const landedOnPlatform = player.y < groundY - 2;
     if (landedOnPlatform) {
-      // Perfect landing: vy was within threshold when we hit surface
-      if (Math.abs(preResolveVY) <= COMBO_PERFECT_LAND_VY) {
-        triggerCombo(2); // 2 base points for perfect landing
-        if (DEBUG_MODE) edgeDebugMsgs.push({ text: 'PERFECT LAND', ttl: 60 });
-      }
       // Mission: consecutive platform landings
       missionPlatformLandCount++;
       advanceMission('land_platforms');
@@ -3203,8 +3197,9 @@ function update() {
     }
   }
 
-  // Clamp player X (don't go left of world origin)
+  // Clamp player X within screen bounds
   if (player.x < 0) player.x = 0;
+  if (player.x + player.w > DESIGN_W) player.x = DESIGN_W - player.w;
 
   // Animation state machine
   updateAnimState();
@@ -3246,8 +3241,38 @@ function update() {
   if (comboPopupTimer > 0) comboPopupTimer--;
   if (missionCompleteTimer > 0) missionCompleteTimer--;
 
-  // ── Phase 4: Obstacles are static in world coords ────
-  // (No auto-scroll; player moves manually through the world.)
+  // ── Phase 4: Auto-scroll — move obstacles left ───────
+  for (const pipe of pipes) pipe.x -= scrollSpeed;
+  for (const brick of bricks) brick.x -= scrollSpeed;
+  for (const m of mushrooms) m.x -= scrollSpeed;
+  for (const f of fragments) f.x -= scrollSpeed;
+  for (const sp of scorePopups) sp.x -= scrollSpeed;
+  for (const tp of timeBonusPopups) tp.x -= scrollSpeed;
+
+  // After scroll, push player left if an obstacle scrolled into them
+  {
+    const pb = getPlayerHitbox();
+    const rects = gatherCollisionRects();
+    for (const r of rects) {
+      if (r.type === 'ground') continue;
+      if (!rectsOverlap(pb.x, pb.y, pb.w, pb.h, r.x, r.y, r.w, r.h)) continue;
+      // Compute minimum penetration on each axis
+      const overlapL = (pb.x + pb.w) - r.x;   // how far player extends into obstacle from left
+      const overlapR = (r.x + r.w) - pb.x;     // how far obstacle extends past player from right
+      const overlapT = (pb.y + pb.h) - r.y;
+      const overlapB = (r.y + r.h) - pb.y;
+      const minH = Math.min(overlapL, overlapR);
+      const minV = Math.min(overlapT, overlapB);
+      // Only push horizontally if horizontal overlap is the smaller axis (side hit)
+      if (minH <= minV && overlapL < overlapR) {
+        // Obstacle is to player's right — push player left
+        player.x -= overlapL;
+        playerVX = Math.min(playerVX, 0);
+      }
+    }
+    // Re-clamp after push
+    if (player.x < 0) player.x = 0;
+  }
 
   // Check if player fell off a platform edge (pipe/brick scrolled away)
   if (player.onGround && player.y < groundY - 5) {
@@ -3269,8 +3294,8 @@ function update() {
     return;
   }
 
-  // If player goes too far left off screen, also die
-  if (player.x + player.w < cameraX - 20) {
+  // If player goes off left edge of screen, die
+  if (player.x + player.w < -20) {
     state = 'dead';
     if (score > highScore) highScore = score;
     const tMins = Math.floor(survivalTime / 60);
@@ -3316,13 +3341,8 @@ function update() {
     }
   }
 
-  // ── Camera follow: keep player on screen ───────────────
-  // Camera X tracks player so player stays near CAMERA_LEAD from left edge
-  {
-    const targetCamX = player.x - CAMERA_LEAD;
-    // Don't let camera go left of world origin
-    cameraX = Math.max(0, targetCamX);
-  }
+  // ── Camera: fixed at 0 (auto-scroll moves obstacles instead) ──
+  cameraX = 0;
 
   // ── Frame-End Depenetration Fallback ───────────────────
   // After all movement (obstacles moved, X-recovery applied), run a final
@@ -3358,6 +3378,9 @@ function update() {
       }
       if (!fixed) break;
     }
+    // Re-clamp after depenetration
+    if (player.x < 0) player.x = 0;
+    if (player.x + player.w > DESIGN_W) player.x = DESIGN_W - player.w;
   }
 
   // Update clouds
@@ -3369,10 +3392,10 @@ function update() {
     }
   }
 
-  // Hills are drawn with parallax in draw(), just recycle when off-screen
+  // Hills auto-scroll at 30% of obstacle speed for parallax effect
   for (const h of hills) {
-    const screenX = h.x - cameraX * 0.3;
-    if (screenX + h.w < -100) {
+    h.x -= scrollSpeed * 0.3;
+    if (h.x + h.w < -100) {
       const last = hills.reduce((a, b) => a.x > b.x ? a : b);
       h.x = last.x + 200 + Math.random() * 100;
       h.w = 180 + Math.random() * 100;
@@ -3497,9 +3520,9 @@ function draw() {
     drawCloud(c.x, c.y, c.w);
   }
 
-  // Hills (parallax — slow camera follow)
+  // Hills (parallax — scroll at 30% speed, handled in update)
   for (const h of hills) {
-    drawHill(h.x - cameraX * 0.3, h.w, h.h);
+    drawHill(h.x, h.w, h.h);
   }
 
   // ── Camera transform for world objects ──────────────────
