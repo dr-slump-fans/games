@@ -324,6 +324,7 @@ Hold the run button/key to boost the character's **running ability** — this do
 - **Faster recenter**: when pushed back by obstacles, the character returns to position up to **55%** faster at full boost
 - **Forward dash**: while RUN is held, the recenter target shifts forward by up to **+10% screen width** (from 40% to 50%), making the character dash ahead. The shift ramps smoothly with the boost level and returns to 40% on release.
 - **Fixed base recenter target**: the base recenter target X is fixed at 40% of screen width (`RECENTER_TARGET_X`) and does not drift over time
+- **Collision-constrained movement**: all RUN-induced horizontal displacement (forward dash, recenter, snap-to-target) is routed through swept AABB collision detection (`collisionSafeMoveX`). The player can never tunnel through a pipe body or lip, even at full boost. The frame-end depenetration fallback remains as a final safety net.
 - **Bidirectional convergence**: recenter works in both directions — if the player is left of the target they recover rightward, and if they are right of the target (e.g. after releasing RUN) they smoothly converge leftward back to 40%. Both directions include collision safety checks.
 - **Guaranteed return to 40%**: releasing RUN will always bring the player back to the 40% target. The recenter logic is never gated by "currently overlapping an obstacle" — it always attempts recovery, with per-direction collision safety. If recovery stalls for 20+ consecutive frames (error not decreasing), a forced micro-nudge (0.5–1.0 px/frame, collision-safe) kicks in to break deadlocks.
 - **Jump height boost**: jumping while boosting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost.
@@ -474,7 +475,7 @@ In debug mode (`?debug=1`), a collision self-test runs automatically on page loa
 runCollisionSelfTest()
 ```
 
-The test simulates 7 extreme scenarios:
+The test simulates 9 extreme scenarios:
 1. **50 px/frame downward** through 24px brick — must detect landing
 2. **60 px/frame upward** through 24px brick — must detect head-hit
 3. **250 px/frame horizontal** through 48px pipe — must detect side block
@@ -482,6 +483,8 @@ The test simulates 7 extreme scenarios:
 5. **Moving away** from obstacle — must NOT false-positive
 6. **Scroll-induced** collision — must detect horizontal approach
 7. **Full resolver test** — 80 px/frame fall onto pipe, verify no penetration
+8. **RUN boost 80px shift** blocked by adjacent pipe — must not penetrate pipe body
+9. **RUN boost 60-frame repeated collision** — sustained boost pushing into pipe must never penetrate
 
 Each test reports pass/fail with contact details. All tests must pass for the collision system to be considered valid.
 

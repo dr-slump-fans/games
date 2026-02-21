@@ -1408,6 +1408,36 @@ function getPlayerHitbox() {
   };
 }
 
+// ── Collision-Safe Horizontal Move ──────────────────────
+// Moves player.x by dx while respecting pipe/brick collision.
+// Uses swept AABB on the horizontal axis to find the maximum safe displacement.
+// Returns the actual dx applied.
+function collisionSafeMoveX(dx) {
+  if (Math.abs(dx) < 0.01) return 0;
+  const HB_OX = 4, HB_OY = 2, HB_W = player.w - 8, HB_H = player.h - 4;
+  const hx = player.x + HB_OX;
+  const hy = player.y + HB_OY;
+
+  // Gather all collision rects (pipes + bricks + ground)
+  const rects = gatherCollisionRects();
+
+  // Swept AABB: move hitbox by (dx, 0), find earliest collision
+  let bestT = 1.0;
+  for (const r of rects) {
+    if (r.type === 'ground') continue; // ground doesn't block horizontal
+    const result = sweptAABB(hx, hy, HB_W, HB_H, dx, 0, r.x, r.y, r.w, r.h);
+    if (result.t < bestT) {
+      bestT = result.t;
+    }
+  }
+
+  // Apply safe displacement with small epsilon pullback
+  const safeT = Math.max(0, bestT - 0.001);
+  const safeDX = dx * safeT;
+  player.x += safeDX;
+  return safeDX;
+}
+
 // Gather all solid collision AABBs in the world.
 // Each rect: { x, y, w, h, type }
 // type: 'ground' | 'pipe_lip' | 'pipe_body' | 'brick' | 'ceiling_pipe_lip' | 'ceiling_pipe_body'
@@ -2070,6 +2100,85 @@ function runCollisionSelfTest() {
     bricks = savedBricks;
   }
 
+  // Test 8: RUN boost forward shift must not penetrate pipe
+  // Simulates player at x=250, pipe body at x=270, RUN boost tries to push
+  // player forward via collisionSafeMoveX — must stop before pipe.
+  {
+    const savedX = player.x, savedY = player.y, savedVY = player.vy;
+    const savedOnGround = player.onGround;
+    const savedPipes = [...pipes];
+    const savedBricks = [...bricks];
+
+    const groundY = DESIGN_H - GROUND_H;
+    player.x = 250;
+    player.y = groundY - player.h; // standing on ground
+    player.vy = 0;
+    player.onGround = true;
+    // Pipe right next to player — body starts at x=270
+    pipes = [{ x: 270, h: 100, fromTop: false, scored: false }];
+    bricks = [];
+
+    // Try to move forward by 80px (extreme RUN boost shift)
+    const actualDX = collisionSafeMoveX(80);
+    const pb = getPlayerHitbox();
+    const pipeRects = getPipeRects(pipes[0]);
+    const bodyLeft = pipeRects.bodyRect.x;
+    const hbRight = pb.x + pb.w;
+    const penetrated = hbRight > bodyLeft + 1;
+    results.push({
+      name: 'RUN boost 80px shift blocked by pipe',
+      playerRight: hbRight.toFixed(1),
+      pipeBodyLeft: bodyLeft,
+      actualDX: actualDX.toFixed(1),
+      penetrated,
+      passed: !penetrated
+    });
+
+    player.x = savedX; player.y = savedY; player.vy = savedVY;
+    player.onGround = savedOnGround;
+    pipes = savedPipes;
+    bricks = savedBricks;
+  }
+
+  // Test 9: Repeated RUN boost collisions (hold RUN, keep hitting same pipe)
+  {
+    const savedX = player.x, savedY = player.y, savedVY = player.vy;
+    const savedOnGround = player.onGround;
+    const savedPipes = [...pipes];
+    const savedBricks = [...bricks];
+
+    const groundY = DESIGN_H - GROUND_H;
+    player.y = groundY - player.h;
+    player.vy = 0;
+    player.onGround = true;
+    pipes = [{ x: 300, h: 100, fromTop: false, scored: false }];
+    bricks = [];
+
+    let everPenetrated = false;
+    // Simulate 60 frames of RUN boost pushing toward pipe
+    for (let i = 0; i < 60; i++) {
+      player.x = 250 + i * 2; // approach pipe from left
+      if (player.x > 350) player.x = 350; // cap beyond pipe
+      collisionSafeMoveX(10); // try to push forward 10px each frame
+      const pb = getPlayerHitbox();
+      const pipeRects = getPipeRects(pipes[0]);
+      if (pb.x + pb.w > pipeRects.bodyRect.x + 1) {
+        everPenetrated = true;
+        break;
+      }
+    }
+    results.push({
+      name: 'RUN boost 60-frame repeated pipe collision',
+      penetrated: everPenetrated,
+      passed: !everPenetrated
+    });
+
+    player.x = savedX; player.y = savedY; player.vy = savedVY;
+    player.onGround = savedOnGround;
+    pipes = savedPipes;
+    bricks = savedBricks;
+  }
+
   // Print results
   let allPassed = true;
   console.log('%c=== Swept AABB Collision Self-Test ===', 'color: #42d4f4; font-weight: bold');
@@ -2709,7 +2818,7 @@ function update() {
 
   // ── Recover player X towards dynamicTargetX ───────────────────
   // No longer gated by "beingPushed" — always attempt recenter.
-  // Bidirectional: separate collision checks for moving right vs left.
+  // All moves use swept AABB via collisionSafeMoveX to prevent pipe penetration.
   // Stall detection: if error doesn't shrink for 20 frames, force small step.
   {
     const curErr = player.x - dynamicTargetX; // positive = player too far right
@@ -2737,73 +2846,24 @@ function update() {
       // If stalled for 20+ frames, add a small forced nudge toward target
       if (recoverStallFrames >= 20) {
         recoverDX = sign * Math.max(Math.abs(recoverDX), 1.0);
+        if (DEBUG_MODE) edgeDebugMsgs.push({ text: 'RECOVER_STALL', ttl: 30 });
       }
 
-      // ── Collision-safe test (direction-aware) ──────────
-      // Build testPB at the proposed destination and check obstacles.
-      // Key fix: when moving LEFT (sign < 0), we only block if an obstacle
-      // is actually at the destination; we never block leftward movement
-      // just because we're currently overlapping something on the right.
-      const HB_OX = 4, HB_OY = 2, HB_W = player.w - 8, HB_H = player.h - 4;
-      const destX = player.x + recoverDX;
-      const testPB = { x: destX + HB_OX, y: player.y + HB_OY, w: HB_W, h: HB_H };
+      // ── Swept collision-safe move (direction-aware) ──────────
+      // Uses swept AABB along the path to prevent tunneling through pipes.
+      const actualDX = collisionSafeMoveX(recoverDX);
 
-      let recoverBlocked = false;
-      for (const pipe of pipes) {
-        if (pipe.h <= 0) continue;
-        const rects = getPipeRects(pipe);
-        if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
-            rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
-            rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
-            rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
-          recoverBlocked = true;
-          break;
-        }
-      }
-      if (!recoverBlocked) {
-        for (const brick of bricks) {
-          if (brick.broken) continue;
-          if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h, brick.x, brick.y, brick.w, brick.h)) {
-            recoverBlocked = true;
-            break;
-          }
-        }
-      }
-
-      if (!recoverBlocked) {
-        player.x += recoverDX;
-      } else if (recoverStallFrames >= 20) {
-        // Forced convergence fallback: try half-pixel nudge toward target
-        const microDX = sign * 0.5;
-        const microPB = { x: player.x + microDX + HB_OX, y: player.y + HB_OY, w: HB_W, h: HB_H };
-        let microBlocked = false;
-        for (const pipe of pipes) {
-          if (pipe.h <= 0) continue;
-          const rects = getPipeRects(pipe);
-          if (rectsOverlap(microPB.x, microPB.y, microPB.w, microPB.h,
-              rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
-              rectsOverlap(microPB.x, microPB.y, microPB.w, microPB.h,
-              rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
-            microBlocked = true;
-            break;
-          }
-        }
-        if (!microBlocked) {
-          for (const brick of bricks) {
-            if (brick.broken) continue;
-            if (rectsOverlap(microPB.x, microPB.y, microPB.w, microPB.h, brick.x, brick.y, brick.w, brick.h)) {
-              microBlocked = true;
-              break;
-            }
-          }
-        }
-        if (!microBlocked) {
-          player.x += microDX;
+      // If swept move was significantly clipped, count as stall
+      if (Math.abs(actualDX) < Math.abs(recoverDX) * 0.1) {
+        // Blocked — try micro-step if stalled long enough
+        if (recoverStallFrames >= 20) {
+          collisionSafeMoveX(sign * 0.5);
         }
       }
     } else {
-      // Close enough — snap and reset stall counter
-      player.x = dynamicTargetX;
+      // Close enough — collision-safe snap to target
+      const snapDX = dynamicTargetX - player.x;
+      collisionSafeMoveX(snapDX);
       recoverStallFrames = 0;
       lastRecoverAbsErr = 0;
     }
@@ -3058,7 +3118,7 @@ function draw() {
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
-    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
+    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount} RECOVER_STALL:${recoverStallFrames}`, 4, DESIGN_H - 14);
     ctx.fillText(`TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)} STALL:${recoverStallFrames}`, 4, DESIGN_H - 24);
 
     ctx.restore();
