@@ -337,6 +337,8 @@ let justJumped = false;    // true during the frame a jump was initiated; preven
 let runBoostPressed = false; // true when run/boost key or left button is held
 let runBoostFactor = 0;       // 0..1 gradual boost level (ramps up while held, ramps down on release)
 let dynamicTargetX = RECENTER_TARGET_X; // current recenter target — shifts forward with runBoostFactor
+let recoverStallFrames = 0;   // consecutive frames where recenter error hasn't decreased
+let lastRecoverAbsErr = 0;    // previous frame's |player.x - dynamicTargetX|
 
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
@@ -2120,6 +2122,8 @@ function resetGame() {
   runBoostPressed = false;
   runBoostFactor = 0;
   dynamicTargetX = RECENTER_TARGET_X;
+  recoverStallFrames = 0;
+  lastRecoverAbsErr = 0;
   edgeDebugMsgs = [];
   depenFixCount = 0;
   initClouds();
@@ -2703,67 +2707,105 @@ function update() {
     spawnInitialPipes();
   }
 
-  // Recover player X towards default position when not being pushed
-  const pb = getPlayerHitbox();
-  let beingPushed = false;
-  for (const pipe of pipes) {
-    if (pipe.h <= 0) continue;
-    const rects = getPipeRects(pipe);
-    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-        rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
-        rectsOverlap(pb.x, pb.y, pb.w, pb.h,
-        rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
-      beingPushed = true;
-      break;
-    }
-  }
-  if (!beingPushed) {
-    for (const brick of bricks) {
-      if (brick.broken) continue;
-      if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, brick.x, brick.y, brick.w, brick.h)) {
-        beingPushed = true;
-        break;
+  // ── Recover player X towards dynamicTargetX ───────────────────
+  // No longer gated by "beingPushed" — always attempt recenter.
+  // Bidirectional: separate collision checks for moving right vs left.
+  // Stall detection: if error doesn't shrink for 20 frames, force small step.
+  {
+    const curErr = player.x - dynamicTargetX; // positive = player too far right
+    const absErr = Math.abs(curErr);
+
+    if (absErr > 0.5) {
+      const diff = dynamicTargetX - player.x; // positive = need right, negative = need left
+      const sign = diff > 0 ? 1 : -1;
+
+      // Lerp-based recovery scaled with scrollSpeed and runBoostFactor
+      const speedRatio = scrollSpeed / SCROLL_SPEED_BASE;
+      const runMul = 1.0 + runBoostFactor * (RUN_BOOST_MULTIPLIER - 1.0);
+      const lerpFactor = Math.min(0.45, 0.12 * speedRatio * runMul);
+      const minRecoverSpeed = 0.5 * speedRatio * runMul;
+      let recoverDX = sign * Math.min(absErr, Math.max(minRecoverSpeed, absErr * lerpFactor));
+
+      // Stall detection: if error didn't shrink, count stall frames
+      if (absErr >= lastRecoverAbsErr - 0.1) {
+        recoverStallFrames++;
+      } else {
+        recoverStallFrames = 0;
       }
-    }
-  }
-  if (!beingPushed && Math.abs(player.x - dynamicTargetX) > 0.5) {
-    const diff = dynamicTargetX - player.x; // positive = need right, negative = need left
-    const absDiff = Math.abs(diff);
-    const sign = diff > 0 ? 1 : -1;
-    // Lerp-based recovery scaled with scrollSpeed so high-speed play can still recenter.
-    // At base speed (3.5) uses factor 0.12; at higher speeds, factor scales up proportionally.
-    // Min speed also scales with scrollSpeed to prevent Zeno crawl at high difficulty.
-    // RUN BOOST further increases recenter speed (up to RUN_BOOST_MULTIPLIER).
-    const speedRatio = scrollSpeed / SCROLL_SPEED_BASE; // ≥1.0
-    const runMul = 1.0 + runBoostFactor * (RUN_BOOST_MULTIPLIER - 1.0); // 1.0 ~ 1.55
-    const lerpFactor = Math.min(0.45, 0.12 * speedRatio * runMul);
-    const minRecoverSpeed = 0.5 * speedRatio * runMul;
-    const recoverDX = sign * Math.min(absDiff, Math.max(minRecoverSpeed, absDiff * lerpFactor));
-    // Safety: verify recovery doesn't push into an obstacle
-    const testPB = { x: player.x + recoverDX + 4, y: player.y + 2, w: player.w - 8, h: player.h - 4 };
-    let recoverBlocked = false;
-    for (const pipe of pipes) {
-      if (pipe.h <= 0) continue;
-      const rects = getPipeRects(pipe);
-      if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
-          rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
-          rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
-          rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
-        recoverBlocked = true;
-        break;
+      lastRecoverAbsErr = absErr;
+
+      // If stalled for 20+ frames, add a small forced nudge toward target
+      if (recoverStallFrames >= 20) {
+        recoverDX = sign * Math.max(Math.abs(recoverDX), 1.0);
       }
-    }
-    if (!recoverBlocked) {
-      for (const brick of bricks) {
-        if (brick.broken) continue;
-        if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h, brick.x, brick.y, brick.w, brick.h)) {
+
+      // ── Collision-safe test (direction-aware) ──────────
+      // Build testPB at the proposed destination and check obstacles.
+      // Key fix: when moving LEFT (sign < 0), we only block if an obstacle
+      // is actually at the destination; we never block leftward movement
+      // just because we're currently overlapping something on the right.
+      const HB_OX = 4, HB_OY = 2, HB_W = player.w - 8, HB_H = player.h - 4;
+      const destX = player.x + recoverDX;
+      const testPB = { x: destX + HB_OX, y: player.y + HB_OY, w: HB_W, h: HB_H };
+
+      let recoverBlocked = false;
+      for (const pipe of pipes) {
+        if (pipe.h <= 0) continue;
+        const rects = getPipeRects(pipe);
+        if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
+            rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
+            rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
+            rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
           recoverBlocked = true;
           break;
         }
       }
-    }
-    if (!recoverBlocked) {
-      player.x += recoverDX;
+      if (!recoverBlocked) {
+        for (const brick of bricks) {
+          if (brick.broken) continue;
+          if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h, brick.x, brick.y, brick.w, brick.h)) {
+            recoverBlocked = true;
+            break;
+          }
+        }
+      }
+
+      if (!recoverBlocked) {
+        player.x += recoverDX;
+      } else if (recoverStallFrames >= 20) {
+        // Forced convergence fallback: try half-pixel nudge toward target
+        const microDX = sign * 0.5;
+        const microPB = { x: player.x + microDX + HB_OX, y: player.y + HB_OY, w: HB_W, h: HB_H };
+        let microBlocked = false;
+        for (const pipe of pipes) {
+          if (pipe.h <= 0) continue;
+          const rects = getPipeRects(pipe);
+          if (rectsOverlap(microPB.x, microPB.y, microPB.w, microPB.h,
+              rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
+              rectsOverlap(microPB.x, microPB.y, microPB.w, microPB.h,
+              rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+            microBlocked = true;
+            break;
+          }
+        }
+        if (!microBlocked) {
+          for (const brick of bricks) {
+            if (brick.broken) continue;
+            if (rectsOverlap(microPB.x, microPB.y, microPB.w, microPB.h, brick.x, brick.y, brick.w, brick.h)) {
+              microBlocked = true;
+              break;
+            }
+          }
+        }
+        if (!microBlocked) {
+          player.x += microDX;
+        }
+      }
+    } else {
+      // Close enough — snap and reset stall counter
+      player.x = dynamicTargetX;
+      recoverStallFrames = 0;
+      lastRecoverAbsErr = 0;
     }
   }
 
@@ -3017,7 +3059,7 @@ function draw() {
     ctx.fillStyle = '#0f0';
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
     ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
-    ctx.fillText(`TARGET_X:${RECENTER_TARGET_X} TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)}`, 4, DESIGN_H - 24);
+    ctx.fillText(`TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)} STALL:${recoverStallFrames}`, 4, DESIGN_H - 24);
 
     ctx.restore();
   }

@@ -325,6 +325,7 @@ Hold the run button/key to boost the character's **running ability** — this do
 - **Forward dash**: while RUN is held, the recenter target shifts forward by up to **+10% screen width** (from 40% to 50%), making the character dash ahead. The shift ramps smoothly with the boost level and returns to 40% on release.
 - **Fixed base recenter target**: the base recenter target X is fixed at 40% of screen width (`RECENTER_TARGET_X`) and does not drift over time
 - **Bidirectional convergence**: recenter works in both directions — if the player is left of the target they recover rightward, and if they are right of the target (e.g. after releasing RUN) they smoothly converge leftward back to 40%. Both directions include collision safety checks.
+- **Guaranteed return to 40%**: releasing RUN will always bring the player back to the 40% target. The recenter logic is never gated by "currently overlapping an obstacle" — it always attempts recovery, with per-direction collision safety. If recovery stalls for 20+ consecutive frames (error not decreasing), a forced micro-nudge (0.5–1.0 px/frame, collision-safe) kicks in to break deadlocks.
 - **Jump height boost**: jumping while boosting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost.
 - Run animation speed scales smoothly with the boost level
 - Displays a **"RUN XX%"** indicator at the bottom of the screen showing current boost level
@@ -337,6 +338,17 @@ Hold the run button/key to boost the character's **running ability** — this do
 | `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Max jump initial velocity multiplier at full boost |
 | `RUN_BOOST_RAMP_UP` | `0.028` | Per-frame boost increment (~0.6s to full at 60fps) |
 | `RUN_BOOST_RAMP_DOWN` | `0.045` | Per-frame boost decrement (~0.37s to zero at 60fps) |
+
+### Self-Test: Verify RUN Release Returns to 40%
+
+1. Open the game with `?debug=1` in the URL.
+2. Start a run and hold RUN until `PLAYER_X` reaches ~400 (≈50%).
+3. Release RUN. Watch the debug overlay:
+   - `TARGET_X_DYNAMIC` should decay back toward 320 (40%).
+   - `RECOVER_ERR` should shrink steadily toward 0.
+   - `STALL` should stay 0 (or briefly spike then reset as error shrinks).
+4. Within 2–3 seconds, `RECOVER_ERR` should be ≈0 and `PLAYER_X` ≈ 320.
+5. If `STALL` reaches 20+, the anti-stall forced nudge is active — error should still converge, just slower.
 
 ## Collision System — Swept AABB (Continuous Collision Detection)
 
