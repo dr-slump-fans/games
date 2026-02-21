@@ -1156,12 +1156,12 @@ function drawGround() {
   ctx.fillRect(drawLeft, groundY, drawW, GROUND_H);
   const brickW = 32;
   const brickH = 16;
-  // Align bricks to world grid
-  const startX = Math.floor(drawLeft / brickW) * brickW;
+  // Align bricks to world grid, offset by groundOffset to scroll with scene
+  const startX = Math.floor(drawLeft / brickW) * brickW - groundOffset;
   ctx.fillStyle = '#a0603a';
   for (let row = 0; row < Math.ceil(GROUND_H / brickH); row++) {
     const rowOffset = (row % 2) * (brickW / 2);
-    for (let col = 0; col < Math.ceil(drawW / brickW) + 3; col++) {
+    for (let col = 0; col < Math.ceil(drawW / brickW) + 4; col++) {
       const bx = startX + col * brickW + rowOffset;
       const by = groundY + row * brickH;
       ctx.fillRect(bx, by, brickW, 1);
@@ -3211,6 +3211,12 @@ function update() {
   for (const f of fragments) f.x -= scrollSpeed;
   for (const sp of scorePopups) sp.x -= scrollSpeed;
   for (const tp of timeBonusPopups) tp.x -= scrollSpeed;
+
+  // Scroll ground texture in sync with obstacles
+  groundOffset = (groundOffset + scrollSpeed) % 32;
+
+  // Floor drift: player is carried left by the scrolling ground
+  player.x -= scrollSpeed;
 
   // After scroll, push player left if an obstacle scrolled into them
   {

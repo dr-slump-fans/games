@@ -4,10 +4,11 @@ A retro-style side-scrolling platformer game playable in the browser (desktop & 
 
 ## How to Play
 
-**The character does NOT auto-advance** — the player only moves when you press left/right. The world auto-scrolls at a fixed slow speed (obstacles move right to left) but **never speeds up**.
+The world auto-scrolls at a fixed slow speed (obstacles move right to left) but **never speeds up**. **The player is carried by the scrolling ground** — standing idle causes the player to drift left with the floor. Press right to counteract the drift and move forward.
 
 - **The map scrolls at a fixed slow pace**: pipes, bricks, and obstacles scroll left automatically at a constant speed that does not increase over time
-- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles — holding a direction automatically accelerates to max speed
+- **Floor drift**: the ground scrolls with the scene; when the player is not pressing left/right, they are carried leftward by the floor (like standing on a conveyor belt)
+- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles — holding a direction automatically accelerates to max speed; final horizontal displacement = player input speed + floor drift
 - **Short tap JUMP** for a small jump, **long press** for a high jump — two distinct jump heights
 - **Must release before jumping again** — holding the button after landing will NOT auto-repeat the jump
 - You can **stand on top of pipes** — pipe tops are platforms!
@@ -152,14 +153,14 @@ Special bricks follow the same break rules as normal bricks (hit from below whil
 
 ### Mushroom Power-Up
 
-When a special brick is broken, a **red mushroom** pops out and moves through the world (香菇為「掉落到地面後移動」行為):
+When a special brick is broken, a **red mushroom** pops out, **drops to the ground under gravity, then walks along the ground** (掉落到地面後沿地面移動):
 
 - Mushroom spawns centered on the broken brick, **direction biased toward the player** for reachability
 - If the spawn position overlaps another unbroken brick, the mushroom is pushed above it
-- Mushroom moves **horizontally** at 1.8 px/frame
-- Affected by **gravity** (0.4 px/frame²) — falls and lands on ground/pipe surfaces
+- Mushroom **pops upward** briefly then **falls under gravity** (0.4 px/frame²) until landing on the ground or a solid surface
+- After landing, the mushroom **walks horizontally along the ground** at 1.8 px/frame (relative to the ground)
 - **Bounces off pipe walls AND unbroken bricks** (reverses horizontal direction on side collision, lands on top surfaces)
-- Scrolls left with the world (auto-scroll)
+- Scrolls left with the world (auto-scroll) — the mushroom's walking speed is relative to the scrolling ground
 - **Unstuck logic**: if a mushroom remains embedded in a solid for 30+ frames, it teleports to ground level
 - Removed when off-screen
 
@@ -294,9 +295,12 @@ Transitions happen automatically every frame in `updateAnimState()`:
 
 ## Player Position & Camera
 
-The player starts at screen position X=320 on each new game. The camera is fixed — the world auto-scrolls left instead of the camera following the player. The character does **not** auto-advance; the player only moves when left/right input is given.
+The player starts at screen position X=320 on each new game. The camera is fixed — the world auto-scrolls left instead of the camera following the player.
 
 - **Auto-scroll**: obstacles (pipes, bricks, mushrooms) move left each frame at a fixed slow constant speed (does not increase over time)
+- **Ground scrolls with the scene**: the floor brick pattern visually scrolls left in sync with obstacles
+- **Floor drift**: the player is carried left by the scrolling ground when not pressing any movement keys — standing idle means drifting left with the world
+- When pressing left/right, the player's final screen velocity = input velocity + floor drift (−scrollSpeed)
 - The player moves within screen bounds using left/right controls
 - If a scrolling obstacle pushes the player to the left screen edge and overlaps them, the player is **crushed and dies**
 - Player is clamped to the visible screen area (cannot walk off-screen)
