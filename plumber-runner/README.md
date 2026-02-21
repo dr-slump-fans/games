@@ -7,6 +7,7 @@ A retro-style side-scrolling runner game playable in the browser (desktop & mobi
 The screen scrolls automatically to the right. Your character runs forward on their own — your only control is **jumping**.
 
 - **Short tap** for a small jump, **long press** for a high jump — two distinct jump heights with clear feel difference
+- **Must release before jumping again** — holding the button/screen after landing will NOT auto-repeat the jump; you must lift your finger (or release the key) and press again
 - You can **stand on top of pipes** — pipe tops are platforms!
 - **Side collisions push you back** instead of killing you instantly
 - You die when you get **crushed/squeezed** between obstacles:

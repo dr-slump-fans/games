@@ -244,6 +244,7 @@ let highScore = 0;
 let frameCount = 0;
 let scrollSpeed = SCROLL_SPEED_BASE;
 let jumpPressed = false;
+let jumpConsumed = false;  // true after jump initiated; must release to jump again
 let jumpHoldFrames = 0;
 let survivalTime = 0;       // seconds survived
 let diffLevel = 0;          // current difficulty level index (0-4)
@@ -1502,6 +1503,7 @@ function resetGame() {
   scrollSpeed = SCROLL_SPEED_BASE;
   groundOffset = 0;
   jumpHoldFrames = 0;
+  jumpConsumed = false;
   initClouds();
   initHills();
   // Seed first pipe pair far away
@@ -1857,11 +1859,12 @@ function update() {
   groundOffset += scrollSpeed;
 
   // ── Phase 1: Compute desired velocity vector ──────────
-  // Jump initiation
-  if (jumpPressed && player.onGround) {
+  // Jump initiation (requires fresh press — must release before next jump)
+  if (jumpPressed && !jumpConsumed && player.onGround) {
     player.vy = JUMP_INITIAL;
     player.onGround = false;
     jumpHoldFrames = 0;
+    jumpConsumed = true;
   }
 
   // Variable jump: hold to go higher
@@ -2186,6 +2189,7 @@ function onInputDown(e) {
 }
 function onInputUp() {
   jumpPressed = false;
+  jumpConsumed = false;
 }
 
 // Keyboard
