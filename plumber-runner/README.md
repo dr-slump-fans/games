@@ -4,10 +4,10 @@ A retro-style side-scrolling runner game playable in the browser (desktop & mobi
 
 ## How to Play
 
-The screen scrolls automatically to the right. Your character runs forward on their own — you control **jumping** and **run boost** (speed up).
+The screen scrolls automatically to the right. Your character runs forward on their own — you control **jumping** and **run boost** (faster running). RUN affects the character's running ability (faster recenter + jump boost), **not** the world scroll speed.
 
 - **Short tap** for a small jump, **long press** for a high jump — two distinct jump heights with clear feel difference
-- **Hold RUN** (Shift/Z or left mobile button) to boost forward speed by 55% — combine with jump for longer distances
+- **Hold RUN** (Shift/Z or left mobile button) to boost character running ability — ramps up smoothly over ~0.6s, decelerates on release. Does **not** change world scroll speed
 - **Must release before jumping again** — holding the button/screen after landing will NOT auto-repeat the jump; you must lift your finger (or release the key) and press again
 - You can **stand on top of pipes** — pipe tops are platforms!
 - **Side collisions push you back** instead of killing you instantly
@@ -286,25 +286,27 @@ This rule applies to both stepping-stone bricks (placed before pipes) and standa
 
 | Platform | Jump | Run Boost |
 |----------|------|-----------|
-| Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump | `Shift` or `Z` — hold to boost speed |
-| Mobile   | Right button (JUMP) — tap for small jump, hold for high jump | Left button (RUN) — hold to boost speed |
+| Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump | `Shift` or `Z` — hold to boost running |
+| Mobile   | Right button (JUMP) — tap for small jump, hold for high jump | Left button (RUN) — hold to boost running |
 | Mobile (fallback) | Tap anywhere on screen = jump | — |
 
-### Run Boost
+### Run Boost (Character Running Ability)
 
-Hold the run button/key to increase scroll speed by **55%** (`RUN_BOOST_MULTIPLIER = 1.55`). The boost:
+Hold the run button/key to boost the character's **running ability** — this does **not** change the world scroll speed (background/obstacle scroll rate stays on the difficulty curve). Instead, RUN makes the character recover to the target X position faster after being pushed back, and grants a jump height bonus:
 
-- Takes effect **immediately** while held, reverts instantly on release
-- Works simultaneously with jump — hold RUN + tap JUMP for boosted jump distances
-- **Jump height boost**: jumping while RUN is held multiplies the jump's initial velocity by **1.18×**, resulting in a noticeably higher jump. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost, with air jumps remaining lower than ground jumps as usual.
-- Speeds up the run animation cycle to match the faster movement
-- Displays a **"RUN BOOST"** indicator at the bottom of the screen while active
-- Stacks with the natural difficulty speed scaling
+- **Ramps up smoothly** over ~0.6 seconds to full boost while held — no jarring snap
+- **Decelerates smoothly** over ~0.37 seconds back to normal on release — no abrupt change
+- **Faster recenter**: when pushed back by obstacles, the character returns to position up to **55%** faster at full boost
+- **Jump height boost**: jumping while boosting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost.
+- Run animation speed scales smoothly with the boost level
+- Displays a **"RUN XX%"** indicator at the bottom of the screen showing current boost level
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `RUN_BOOST_MULTIPLIER` | `1.55` | Speed multiplier when run button is held |
-| `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Jump initial velocity multiplier when run boost active at jump start |
+| `RUN_BOOST_MULTIPLIER` | `1.55` | Max recenter speed multiplier at full boost |
+| `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Max jump initial velocity multiplier at full boost |
+| `RUN_BOOST_RAMP_UP` | `0.028` | Per-frame boost increment (~0.6s to full at 60fps) |
+| `RUN_BOOST_RAMP_DOWN` | `0.045` | Per-frame boost decrement (~0.37s to zero at 60fps) |
 
 ## Collision System — Swept AABB (Continuous Collision Detection)
 

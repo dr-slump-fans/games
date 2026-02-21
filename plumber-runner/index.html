@@ -2435,8 +2435,8 @@ function update() {
   } else {
     runBoostFactor = Math.max(0, runBoostFactor - RUN_BOOST_RAMP_DOWN);
   }
-  const boostMul = 1.0 + runBoostFactor * (RUN_BOOST_MULTIPLIER - 1.0);
-  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * boostMul;
+  // RUN BOOST affects player run ability only, NOT world scroll speed.
+  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
   groundOffset += scrollSpeed;
 
   // ── Phase 1: Compute desired velocity vector ──────────
@@ -2513,7 +2513,7 @@ function update() {
   // ── Double Jump (air jump) — requires active mushroom power ──
   // Air jump uses half initial velocity and half hold frames for ~50% height
   if (jumpPressed && !jumpConsumed && !player.onGround && doubleJumpTimer > 0 && airJumpsUsed < MAX_AIR_JUMPS) {
-    const airJumpBoost = (runBoostPressed && state === 'playing') ? RUN_BOOST_JUMP_MULTIPLIER : 1.0;
+    const airJumpBoost = 1.0 + runBoostFactor * (RUN_BOOST_JUMP_MULTIPLIER - 1.0);
     player.vy = AIR_JUMP_INITIAL * airJumpBoost;
     jumpHoldFrames = 0;
     jumpConsumed = true;
@@ -2680,9 +2680,11 @@ function update() {
     // Lerp-based recovery scaled with scrollSpeed so high-speed play can still recenter.
     // At base speed (3.5) uses factor 0.12; at higher speeds, factor scales up proportionally.
     // Min speed also scales with scrollSpeed to prevent Zeno crawl at high difficulty.
+    // RUN BOOST further increases recenter speed (up to RUN_BOOST_MULTIPLIER).
     const speedRatio = scrollSpeed / SCROLL_SPEED_BASE; // ≥1.0
-    const lerpFactor = Math.min(0.45, 0.12 * speedRatio);
-    const minRecoverSpeed = 0.5 * speedRatio;
+    const runMul = 1.0 + runBoostFactor * (RUN_BOOST_MULTIPLIER - 1.0); // 1.0 ~ 1.55
+    const lerpFactor = Math.min(0.45, 0.12 * speedRatio * runMul);
+    const minRecoverSpeed = 0.5 * speedRatio * runMul;
     const recoverDX = Math.min(diff, Math.max(minRecoverSpeed, diff * lerpFactor));
     // Safety: verify recovery doesn't push into an obstacle
     const testPB = { x: player.x + recoverDX + 4, y: player.y + 2, w: player.w - 8, h: player.h - 4 };
@@ -2799,9 +2801,12 @@ function update() {
     hudMushroom.style.display = 'none';
   }
 
-  // Run Boost HUD
-  if (runBoostPressed && state === 'playing') {
+  // Run Boost HUD — show boost percentage while ramping or active
+  if (runBoostFactor > 0.01 && state === 'playing') {
+    const pct = Math.round(runBoostFactor * 100);
+    hudBoost.textContent = `RUN ${pct}%`;
     hudBoost.style.display = 'block';
+    hudBoost.style.opacity = 0.5 + 0.5 * runBoostFactor;
   } else {
     hudBoost.style.display = 'none';
   }
