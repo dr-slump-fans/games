@@ -284,6 +284,7 @@ let jumpPressed = false;
 let jumpConsumed = false;  // true after jump initiated; must release to jump again
 let jumpHoldFrames = 0;
 let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
+let justJumped = false;    // true during the frame a jump was initiated; prevents swept movement from re-grounding
 
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
@@ -1481,8 +1482,8 @@ function depenetratePlayer(collisionRects) {
         player.x += minX;
       } else {
         player.y += minY;
-        if (minY < 0 && player.vy > 0) {
-          // Pushed up = landed on surface
+        if (minY < 0 && player.vy > 0 && !justJumped) {
+          // Pushed up = landed on surface (skip if just jumped to preserve airborne state)
           player.vy = 0;
           player.onGround = true;
         }
@@ -1590,12 +1591,15 @@ function resolveSweptMovement(playerVY, scrollDX) {
 
     if (bestNY === -1) {
       // Hit top of obstacle (landed on surface)
-      // Check if this is a brick hit from below... no, normalY=-1 means
-      // player was moving down and hit the top = landing
-      landedThisFrame = true;
-      relDY = 0;
-      player.vy = 0;
-      player.onGround = true;
+      // If justJumped is true, the player initiated a jump this frame and is
+      // still touching the surface they jumped from — skip re-grounding so
+      // the airborne state is preserved for double jump eligibility.
+      if (!justJumped) {
+        landedThisFrame = true;
+        relDY = 0;
+        player.vy = 0;
+        player.onGround = true;
+      }
     } else if (bestNY === 1) {
       // Hit bottom of obstacle (ceiling/brick from below)
 
@@ -1963,6 +1967,7 @@ function resetGame() {
   groundOffset = 0;
   jumpHoldFrames = 0;
   jumpConsumed = false;
+  justJumped = false;
   wallNudgeUsed = false;
   edgeDebugMsgs = [];
   initClouds();
@@ -2325,12 +2330,14 @@ function update() {
   groundOffset += scrollSpeed;
 
   // ── Phase 1: Compute desired velocity vector ──────────
+  justJumped = false; // reset each frame; set below if a jump initiates
   // Jump initiation (requires fresh press — must release before next jump)
   if (jumpPressed && !jumpConsumed && player.onGround) {
     player.vy = JUMP_INITIAL;
     player.onGround = false;
     jumpHoldFrames = 0;
     jumpConsumed = true;
+    justJumped = true;    // prevent swept movement from re-grounding this frame
     isAirJump = false;    // ground jump uses full height
     wallNudgeUsed = false; // allow one wall-kick nudge this jump
 
@@ -2530,9 +2537,13 @@ function update() {
   }
   if (!beingPushed && player.x < 120) {
     const diff = 120 - player.x;
-    // Lerp-based recovery: fast when far, smooth deceleration near target
-    // Min speed of 0.5 prevents Zeno crawl at the end
-    player.x += Math.min(diff, Math.max(0.5, diff * 0.12));
+    // Lerp-based recovery scaled with scrollSpeed so high-speed play can still recenter.
+    // At base speed (3.5) uses factor 0.12; at higher speeds, factor scales up proportionally.
+    // Min speed also scales with scrollSpeed to prevent Zeno crawl at high difficulty.
+    const speedRatio = scrollSpeed / SCROLL_SPEED_BASE; // ≥1.0
+    const lerpFactor = Math.min(0.45, 0.12 * speedRatio);
+    const minRecoverSpeed = 0.5 * speedRatio;
+    player.x += Math.min(diff, Math.max(minRecoverSpeed, diff * lerpFactor));
   }
 
   // Update clouds
