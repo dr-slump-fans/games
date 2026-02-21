@@ -144,6 +144,7 @@ const HEAD_CENTER_RATIO = 0.45; // fraction of player width that counts as "cent
 const BRICK_W = 32;
 const BRICK_H = 24;
 const BRICK_SCORE = 5;            // points per brick broken
+const BRICK_TIME_BONUS = 30;      // seconds added to survival timer per brick broken
 const BRICK_FRAGMENT_COUNT = 6;   // number of debris fragments
 const BRICK_SPAWN_CHANCE = 0.30;  // chance to spawn brick with pipe group
 const STANDALONE_BRICK_MIN_COUNT = 1;
@@ -275,7 +276,8 @@ let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
 let edgeDebugMsgs = []; // { text, ttl (frames remaining) }
-let survivalTime = 0;       // seconds survived
+let survivalTime = 0;       // seconds survived (includes bonus time)
+let bonusTime = 0;          // accumulated bonus seconds from breaking bricks
 let diffLevel = 0;          // current difficulty level index (0-4)
 let diffProgress = 0;       // 0..1 progress within current level toward next
 
@@ -909,6 +911,37 @@ function drawScorePopups() {
   }
 }
 
+// ── Time Bonus Popup ──────────────────────────────────
+let timeBonusPopups = []; // { x, y, life }
+
+function spawnTimeBonusPopup(x, y) {
+  timeBonusPopups.push({ x: x, y: y, life: 60 });
+}
+
+function updateTimeBonusPopups() {
+  for (let i = timeBonusPopups.length - 1; i >= 0; i--) {
+    const p = timeBonusPopups[i];
+    p.y -= 0.8;
+    p.life--;
+    if (p.life <= 0) timeBonusPopups.splice(i, 1);
+  }
+}
+
+function drawTimeBonusPopups() {
+  for (const p of timeBonusPopups) {
+    const alpha = Math.min(1, p.life / 20);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 13px monospace';
+    ctx.fillStyle = '#2ecc71';
+    ctx.strokeStyle = '#145a2a';
+    ctx.lineWidth = 2;
+    ctx.strokeText(`+${BRICK_TIME_BONUS}s`, Math.round(p.x), Math.round(p.y));
+    ctx.fillText(`+${BRICK_TIME_BONUS}s`, Math.round(p.x), Math.round(p.y));
+    ctx.restore();
+  }
+}
+
 // Spawn debris fragments when a brick breaks
 function spawnBrickFragments(bx, by) {
   const colors = ['#c8874a', '#daa06d', '#8b5e3c', '#a07040', '#6b4226', '#f4d03f'];
@@ -1303,6 +1336,9 @@ function resolveSweptMovement(playerVY, scrollDX) {
           spawnBrickFragments(brick.x, brick.y);
           spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, BRICK_SCORE);
           score += BRICK_SCORE;
+          // Time bonus: add seconds to survival timer
+          bonusTime += BRICK_TIME_BONUS;
+          spawnTimeBonusPopup(brick.x + BRICK_W / 2 - 12, brick.y - 20);
           // Bounce down
           player.vy = Math.abs(player.vy) * 0.4;
           relDY = player.vy;
@@ -1588,9 +1624,11 @@ function resetGame() {
   bricks = [];
   fragments = [];
   scorePopups = [];
+  timeBonusPopups = [];
   score = 0;
   frameCount = 0;
   survivalTime = 0;
+  bonusTime = 0;
   diffLevel = 0;
   diffProgress = 0;
   scrollSpeed = SCROLL_SPEED_BASE;
@@ -1949,7 +1987,7 @@ function update() {
   if (state !== 'playing') return;
 
   frameCount++;
-  survivalTime = frameCount / 60; // assume ~60fps
+  survivalTime = frameCount / 60 + bonusTime; // assume ~60fps + brick bonus
   updateDifficultyInfo();
   const speedMul = getDiffParam('speedMul');
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
@@ -2034,6 +2072,7 @@ function update() {
 
   // Update score popups
   updateScorePopups();
+  updateTimeBonusPopups();
 
   // ── Phase 4: Move obstacles in world coords ──────────
   // The sweep already accounted for scroll in collision detection.
@@ -2219,6 +2258,7 @@ function draw() {
 
   // Score popups
   drawScorePopups();
+  drawTimeBonusPopups();
 
   // ── Edge-Protection Debug Overlay (always visible) ────
   // Show EDGE-FORGIVE / WALL-NUDGE messages at top-left when triggered

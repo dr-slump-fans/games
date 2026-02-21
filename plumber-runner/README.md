@@ -115,8 +115,10 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 
 1. **Debris animation**: 6 fragments scatter outward with realistic gravity — each piece has a random velocity, size (3–8 px), and color sampled from the brick palette
 2. **Score popup**: A floating `+5` text rises from the break point and fades out
-3. **Physics feedback**: Your upward velocity is immediately reversed and dampened (×0.4 bounce-down), giving a satisfying "bonk" feel
-4. **Score**: Each brick broken awards **+5 points**
+3. **Time bonus popup**: A green `+30s` text floats up from the brick, indicating the survival timer increase
+4. **Physics feedback**: Your upward velocity is immediately reversed and dampened (×0.4 bounce-down), giving a satisfying "bonk" feel
+5. **Score**: Each brick broken awards **+5 points**
+6. **Time bonus**: Each brick broken adds **+30 seconds** to the survival timer — the HUD clock and game-over Time reflect the total including all bonuses
 
 ### Brick Properties
 
@@ -128,6 +130,7 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 | Horizontal distance | 40–140 px in front of the pipe |
 | Break condition | Player rising (`vy < 0`) + head overlaps brick bottom |
 | Score | +5 per brick |
+| Time bonus | +30 seconds per brick |
 | Fragments | 6 debris pieces with gravity physics |
 | Fragment lifetime | 40–60 frames |
 
