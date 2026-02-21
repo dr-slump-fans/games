@@ -269,7 +269,7 @@ Transitions happen automatically every frame in `updateAnimState()`:
 
 ## Player Default Position
 
-The player's default horizontal position is set to **40% of the canvas width** (320 px on an 800 px canvas). This places the character near the center of the screen rather than far left, giving players better reaction time and a clearer view of upcoming obstacles. The position resets to 40% on each game restart.
+The player's default horizontal position is set to **40% of the canvas width** (320 px on an 800 px canvas). This places the character near the center of the screen rather than far left, giving players better reaction time and a clearer view of upcoming obstacles. The position resets to 40% on each game restart. After being pushed back by obstacles, the player recovers to the default X position using **lerp-based smooth tracking** (12% per frame with 0.5 px minimum speed), providing a noticeably fast return without jarring teleportation.
 
 ## Minimum Brick Height Rule
 

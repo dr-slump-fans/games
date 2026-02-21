@@ -2529,7 +2529,10 @@ function update() {
     }
   }
   if (!beingPushed && player.x < 120) {
-    player.x += Math.min(1.5, 120 - player.x);
+    const diff = 120 - player.x;
+    // Lerp-based recovery: fast when far, smooth deceleration near target
+    // Min speed of 0.5 prevents Zeno crawl at the end
+    player.x += Math.min(diff, Math.max(0.5, diff * 0.12));
   }
 
   // Update clouds
