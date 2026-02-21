@@ -108,6 +108,8 @@ const GRAVITY = 0.55;
 const JUMP_INITIAL = -7.0;         // short-tap: small jump
 const JUMP_HOLD_ACCEL = -0.55;     // long-press: stronger boost per frame
 const JUMP_HOLD_MAX_T = 16;        // long-press: more frames of boost
+const AIR_JUMP_INITIAL = JUMP_INITIAL * 0.5;   // air jump: half initial velocity
+const AIR_JUMP_HOLD_MAX_T = Math.floor(JUMP_HOLD_MAX_T * 0.5); // air jump: half hold frames
 const TALL_PIPE_THRESHOLD = 140;   // pipes >= this height trigger staircase logic
 const SCROLL_SPEED_BASE = 3.5;
 const SCROLL_ACCEL = 0.0003;
@@ -145,7 +147,7 @@ const HEAD_CENTER_RATIO = 0.45; // fraction of player width that counts as "cent
 const BRICK_W = 32;
 const BRICK_H = 24;
 const BRICK_SCORE = 5;            // points per brick broken
-const BRICK_TIME_BONUS = 30;      // seconds added to survival timer per brick broken
+const BRICK_TIME_BONUS = 5;       // seconds added to survival timer per brick broken
 const BRICK_FRAGMENT_COUNT = 6;   // number of debris fragments
 const BRICK_SPAWN_CHANCE = 0.30;  // chance to spawn brick with pipe group
 const STANDALONE_BRICK_MIN_COUNT = 1;
@@ -295,6 +297,7 @@ let diffProgress = 0;       // 0..1 progress within current level toward next
 let mushrooms = [];           // active mushroom items: { x, y, vx, vy, onGround }
 let doubleJumpTimer = 0;      // remaining seconds of double jump ability (0 = inactive)
 let airJumpsUsed = 0;         // number of air jumps used this airborne session
+let isAirJump = false;        // true when current jump is an air jump (half-height)
 const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is active
 
 // ── Player ─────────────────────────────────────────────
@@ -1953,6 +1956,7 @@ function resetGame() {
   bonusTime = 0;
   doubleJumpTimer = 0;
   airJumpsUsed = 0;
+  isAirJump = false;
   diffLevel = 0;
   diffProgress = 0;
   scrollSpeed = SCROLL_SPEED_BASE;
@@ -2327,6 +2331,7 @@ function update() {
     player.onGround = false;
     jumpHoldFrames = 0;
     jumpConsumed = true;
+    isAirJump = false;    // ground jump uses full height
     wallNudgeUsed = false; // allow one wall-kick nudge this jump
 
     // ── Wall-Kick Nudge ──────────────────────────────────
@@ -2361,18 +2366,21 @@ function update() {
   }
 
   // ── Double Jump (air jump) — requires active mushroom power ──
+  // Air jump uses half initial velocity and half hold frames for ~50% height
   if (jumpPressed && !jumpConsumed && !player.onGround && doubleJumpTimer > 0 && airJumpsUsed < MAX_AIR_JUMPS) {
-    player.vy = JUMP_INITIAL;
+    player.vy = AIR_JUMP_INITIAL;
     jumpHoldFrames = 0;
     jumpConsumed = true;
+    isAirJump = true;
     airJumpsUsed++;
     if (DEBUG_MODE) {
       console.log(`%c[DoubleJump] Air jump used (${airJumpsUsed}/${MAX_AIR_JUMPS}), timer=${doubleJumpTimer.toFixed(1)}s`, 'color: #e53935');
     }
   }
 
-  // Variable jump: hold to go higher
-  if (jumpPressed && !player.onGround && jumpHoldFrames < JUMP_HOLD_MAX_T && player.vy < 0) {
+  // Variable jump: hold to go higher (air jumps use reduced hold limit)
+  const holdLimit = isAirJump ? AIR_JUMP_HOLD_MAX_T : JUMP_HOLD_MAX_T;
+  if (jumpPressed && !player.onGround && jumpHoldFrames < holdLimit && player.vy < 0) {
     player.vy += JUMP_HOLD_ACCEL;
     jumpHoldFrames++;
   }
@@ -2397,6 +2405,7 @@ function update() {
     jumpHoldFrames = 0;
     wallNudgeUsed = false;
     airJumpsUsed = 0; // reset air jump count on landing
+    isAirJump = false; // reset air jump flag on landing
   }
 
   // Clamp player X (don't go off-screen too far left)

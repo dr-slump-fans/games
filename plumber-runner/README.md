@@ -117,10 +117,10 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 
 1. **Debris animation**: 6 fragments scatter outward with realistic gravity — each piece has a random velocity, size (3–8 px), and color sampled from the brick palette
 2. **Score popup**: A floating `+5` text rises from the break point and fades out
-3. **Time bonus popup**: A green `+30s` text floats up from the brick, indicating the survival timer increase
+3. **Time bonus popup**: A green `+5s` text floats up from the brick, indicating the survival timer increase
 4. **Physics feedback**: Your upward velocity is immediately reversed and dampened (×0.4 bounce-down), giving a satisfying "bonk" feel
 5. **Score**: Each brick broken awards **+5 points**
-6. **Time bonus**: Each brick broken adds **+30 seconds** to the survival timer — the bonus is applied **immediately** after the brick breaks (same frame), and the HUD clock and game-over Time reflect the total including all bonuses. In debug mode (`?debug=1`), each brick break logs the accumulated bonus time to the console.
+6. **Time bonus**: Each brick broken adds **+5 seconds** to the survival timer — the bonus is applied **immediately** after the brick breaks (same frame), and the HUD clock and game-over Time reflect the total including all bonuses. In debug mode (`?debug=1`), each brick break logs the accumulated bonus time to the console.
 
 ### Brick Properties
 
@@ -132,7 +132,7 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 | Horizontal distance | 40–140 px in front of the pipe |
 | Break condition | Player rising (`vy < 0`) + head overlaps brick bottom |
 | Score | +5 per brick |
-| Time bonus | +30 seconds per brick |
+| Time bonus | +5 seconds per brick |
 | Fragments | 6 debris pieces with gravity physics |
 | Fragment lifetime | 40–60 frames |
 
@@ -147,7 +147,7 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 - **Mushroom icon** in the center
 
 Special bricks follow the same break rules as normal bricks (hit from below while rising). Breaking a special brick:
-1. Awards the same **+5 score** and **+30s time bonus** as a normal brick
+1. Awards the same **+5 score** and **+5s time bonus** as a normal brick
 2. **Spawns a mushroom item** at the brick's position
 
 ### Mushroom Power-Up
@@ -202,9 +202,9 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 
 **How it works:**
 - After collecting a mushroom, a **25-second countdown** begins
-- While airborne, pressing jump again (after releasing from the first jump) triggers an **air jump** with the same initial velocity as a ground jump
+- While airborne, pressing jump again (after releasing from the first jump) triggers an **air jump** with **half the height** of a ground jump (half initial velocity and half hold frames)
 - Only **1 air jump per airborne session** — landing resets the counter
-- Variable jump hold works on air jumps too (short tap = small air jump, long press = high air jump)
+- Variable jump hold works on air jumps too (short tap = small air jump, long press = higher air jump), but the maximum height is capped at ~50% of the ground jump
 
 **HUD indicator:**
 - `MUSHROOM: ON [Xs]` — mushroom active, on ground or air jump already used
@@ -218,6 +218,8 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 | `MUSHROOM_GRAVITY` | `0.4` | Mushroom gravity (px/frame²) |
 | `DOUBLE_JUMP_DURATION` | `25` | Seconds of double jump ability after eating mushroom |
 | `MAX_AIR_JUMPS` | `1` | Maximum air jumps per airborne session |
+| `AIR_JUMP_INITIAL` | `-3.5` | Air jump initial velocity (50% of ground jump) |
+| `AIR_JUMP_HOLD_MAX_T` | `8` | Air jump hold frames (50% of ground jump) |
 
 ### What Cannot Be Broken
 
