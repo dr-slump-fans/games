@@ -4,9 +4,9 @@ A retro-style side-scrolling platformer game playable in the browser (desktop & 
 
 ## How to Play
 
-**The world auto-scrolls** — obstacles continuously move from right to left. You control the character's left/right movement and jumping while the world advances.
+**The character does NOT auto-advance** — the player only moves when you press left/right. The world auto-scrolls at a fixed slow speed (obstacles move right to left) but **never speeds up**.
 
-- **The map keeps moving**: pipes, bricks, and obstacles scroll left automatically at increasing speed
+- **The map scrolls at a fixed slow pace**: pipes, bricks, and obstacles scroll left automatically at a constant speed that does not increase over time
 - **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles — holding a direction automatically accelerates to max speed
 - **Short tap JUMP** for a small jump, **long press** for a high jump — two distinct jump heights
 - **Must release before jumping again** — holding the button after landing will NOT auto-repeat the jump
@@ -31,7 +31,7 @@ Difficulty scales **smoothly** over survival time across 5 levels. All transitio
 | Lv.5 | INSANE | 240s | 2.15x | 175–245 px | 240 px | 55% | 28% |
 
 **What changes with difficulty:**
-- **Scroll speed**: Speed factor increases auto-scroll speed and obstacle density
+- **Scroll speed**: Fixed slow constant — does not change with difficulty (difficulty only affects obstacle layout)
 - **Pipe spacing**: Horizontal gap between obstacles shrinks, making the world denser
 - **Pipe height cap**: Later levels unlock taller bottom/ceiling pipes that require more precise jumping
 - **Pair frequency**: More top+bottom pipe combinations appear, creating tighter squeeze corridors
@@ -294,9 +294,9 @@ Transitions happen automatically every frame in `updateAnimState()`:
 
 ## Player Position & Camera
 
-The player starts at screen position X=320 on each new game. The camera is fixed — the world auto-scrolls left instead of the camera following the player.
+The player starts at screen position X=320 on each new game. The camera is fixed — the world auto-scrolls left instead of the camera following the player. The character does **not** auto-advance; the player only moves when left/right input is given.
 
-- **Auto-scroll**: obstacles (pipes, bricks, mushrooms) move left each frame at increasing speed
+- **Auto-scroll**: obstacles (pipes, bricks, mushrooms) move left each frame at a fixed slow constant speed (does not increase over time)
 - The player moves within screen bounds using left/right controls
 - If a scrolling obstacle pushes the player to the left screen edge and overlaps them, the player is **crushed and dies**
 - Player is clamped to the visible screen area (cannot walk off-screen)
@@ -622,7 +622,7 @@ The internal difficulty speed factor oscillates smoothly, creating rhythm variat
 **How it works:**
 - A sine wave with **20-second period** modulates the difficulty speed factor by **±10%**
 - The wave ramps in gently over the first 30 seconds (intro fade)
-- Affects auto-scroll speed and obstacle spawn pacing — creates natural "push" and "breathe" phases
+- **No longer affects scroll speed** (scroll is fixed constant); retained for obstacle spawn pacing variation
 
 **Debug (`?debug=1`):**
 - Bottom status line shows `SPEED_WAVE:X.XXX` — the current wave multiplier (1.0 = no effect, 1.10 = +10%, 0.90 = −10%)

@@ -236,8 +236,8 @@ const JUMP_HOLD_MAX_T = 16;        // long-press: more frames of boost
 const AIR_JUMP_INITIAL = JUMP_INITIAL * 0.6;   // air jump: 60% initial velocity (slightly stronger than half)
 const AIR_JUMP_HOLD_MAX_T = Math.floor(JUMP_HOLD_MAX_T * 0.55); // air jump: 55% hold frames
 const TALL_PIPE_THRESHOLD = 140;   // pipes >= this height trigger staircase logic
-const SCROLL_SPEED_BASE = 3.5;
-const SCROLL_ACCEL = 0.0003;
+const SCROLL_SPEED_BASE = 1.8;      // fixed slow scroll — no acceleration
+const SCROLL_ACCEL = 0;              // disabled: scroll speed no longer increases
 const PIPE_MIN_GAP = 240;
 const PIPE_MAX_GAP = 360;
 const PIPE_HEIGHTS_BOTTOM = [60, 90, 120, 150, 75, 105];
@@ -2979,7 +2979,6 @@ function update() {
   // Compute base elapsed time; bonusTime is added after sweep resolves bricks
   survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
-  const speedMul = getDiffParam('speedMul');
   // ── Manual horizontal movement (auto-acceleration) ─────
   // Compute desired move direction from input
   let moveDir = 0;
@@ -3026,15 +3025,10 @@ function update() {
   // Boss clear popup countdown
   if (bossWaveClearTimer > 0) bossWaveClearTimer--;
 
-  // Fun Pack v1: Speed wave — smooth oscillation around base speed
+  // Fun Pack v1: Speed wave phase (kept for HUD/debug display)
   speedWavePhase = (survivalTime / SPEED_WAVE_PERIOD) * Math.PI * 2;
-  let waveFactor = getSpeedWaveFactor();
-  // Fun Pack v2: Dampen speed wave during boss wave to avoid unfair spikes
-  if (bossWaveActive) {
-    waveFactor = 1.0 + (waveFactor - 1.0) * BOSS_WAVE_SPEED_WAVE_DAMP;
-  }
-  // scrollSpeed drives auto-scroll: obstacles move left each frame by this amount
-  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * waveFactor;
+  // scrollSpeed drives auto-scroll: fixed slow constant (no acceleration, no difficulty/wave scaling)
+  scrollSpeed = SCROLL_SPEED_BASE;
 
   // ── Phase 1: Compute desired velocity vector ──────────
   justJumped = false; // reset each frame; set below if a jump initiates
