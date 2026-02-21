@@ -75,6 +75,8 @@ This prevents unfair situations where a single ultra-tall pipe appears with no w
 | Ceiling pipe | Hangs from the top — duck under or time your jump carefully |
 | Pipe pair | Bottom + ceiling pipe together — navigate through the gap |
 | Breakable brick | Stepping-stone brick placed before pipes — **stand on it or smash it from below** for bonus points! |
+| Special brick | Purple brick with mushroom icon — break it from below to spawn a **mushroom power-up** |
+| Mushroom | Red mushroom item — collect it to gain **double jump** ability for 25 seconds |
 | Standalone brick group | 1–3 brick obstacle cluster that **replaces a pipe** entirely — a lighter challenge with breakable targets |
 
 ## Breakable Brick Rules — Stepping Stones & Standalone Obstacles
@@ -118,7 +120,7 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 3. **Time bonus popup**: A green `+30s` text floats up from the brick, indicating the survival timer increase
 4. **Physics feedback**: Your upward velocity is immediately reversed and dampened (×0.4 bounce-down), giving a satisfying "bonk" feel
 5. **Score**: Each brick broken awards **+5 points**
-6. **Time bonus**: Each brick broken adds **+30 seconds** to the survival timer — the HUD clock and game-over Time reflect the total including all bonuses
+6. **Time bonus**: Each brick broken adds **+30 seconds** to the survival timer — the bonus is applied **immediately** after the brick breaks (same frame), and the HUD clock and game-over Time reflect the total including all bonuses. In debug mode (`?debug=1`), each brick break logs the accumulated bonus time to the console.
 
 ### Brick Properties
 
@@ -133,6 +135,63 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 | Time bonus | +30 seconds per brick |
 | Fragments | 6 debris pieces with gravity physics |
 | Fragment lifetime | 40–60 frames |
+
+## Special Bricks, Mushrooms & Double Jump
+
+### Special Bricks
+
+**25% of all spawned bricks** (both stepping-stone and standalone) are randomly upgraded to **special bricks**. Special bricks are visually distinct:
+
+- **Purple/magical color scheme** instead of brown/terracotta
+- **Animated gold sparkles** that shimmer
+- **Mushroom icon** in the center
+
+Special bricks follow the same break rules as normal bricks (hit from below while rising). Breaking a special brick:
+1. Awards the same **+5 score** and **+30s time bonus** as a normal brick
+2. **Spawns a mushroom item** at the brick's position
+
+### Mushroom Power-Up
+
+When a special brick is broken, a **red mushroom** pops out and moves through the world:
+
+- Mushroom moves **horizontally** at 1.8 px/frame (random left or right direction)
+- Affected by **gravity** (0.4 px/frame²) — falls and lands on ground/pipe surfaces
+- **Bounces off pipe walls** (reverses horizontal direction on side collision)
+- **Scrolls with the world** like all other objects
+- Removed when off-screen
+
+**Collecting:** Walk into the mushroom to pick it up. On pickup:
+- The **double jump** ability activates for **25 seconds**
+- A `MUSHROOM!` popup appears
+- Picking up another mushroom while the timer is active **resets the timer** to 25 seconds
+
+### Double Jump Rules
+
+| Condition | Behavior |
+|-----------|----------|
+| No mushroom collected | Normal single jump only |
+| Mushroom active | Can perform **1 additional air jump** per airborne session |
+| After landing | Air jump count resets — can air jump again next time |
+| Timer expires | Returns to normal single jump |
+
+**How it works:**
+- After collecting a mushroom, a **25-second countdown** begins
+- While airborne, pressing jump again (after releasing from the first jump) triggers an **air jump** with the same initial velocity as a ground jump
+- Only **1 air jump per airborne session** — landing resets the counter
+- Variable jump hold works on air jumps too (short tap = small air jump, long press = high air jump)
+
+**HUD indicator:**
+- `MUSHROOM: ON [Xs]` — mushroom active, on ground or air jump already used
+- `DOUBLE JUMP READY [Xs]` — mushroom active, air jump available (shown while airborne)
+- Hidden when mushroom is not active
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `SPECIAL_BRICK_CHANCE` | `0.25` | Chance a brick spawns as a special brick |
+| `MUSHROOM_SPEED` | `1.8` | Mushroom horizontal speed (px/frame) |
+| `MUSHROOM_GRAVITY` | `0.4` | Mushroom gravity (px/frame²) |
+| `DOUBLE_JUMP_DURATION` | `25` | Seconds of double jump ability after eating mushroom |
+| `MAX_AIR_JUMPS` | `1` | Maximum air jumps per airborne session |
 
 ### What Cannot Be Broken
 

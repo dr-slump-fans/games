@@ -86,6 +86,7 @@ canvas {
     </div>
     <div id="hud-right">
       <div id="score-display">SCORE: 0</div>
+      <div id="hud-mushroom" style="font-size:14px;margin-top:4px;display:none;"></div>
     </div>
   </div>
 </div>
@@ -152,6 +153,14 @@ const STANDALONE_BRICK_MAX_COUNT = 3;
 // Minimum brick height above ground: brick top must be at least 2× player height from ground.
 // This prevents bricks from appearing too close to ground level.
 const BRICK_MIN_HEIGHT_ABOVE_GROUND = 36 * 2; // 72px (2× player.h)
+
+// ── Special Brick & Mushroom Constants ───────────────
+const SPECIAL_BRICK_CHANCE = 0.25;   // chance a stepping-stone brick becomes a special brick
+const MUSHROOM_W = 20;
+const MUSHROOM_H = 20;
+const MUSHROOM_SPEED = 1.8;          // horizontal movement speed
+const MUSHROOM_GRAVITY = 0.4;        // gravity for mushroom
+const DOUBLE_JUMP_DURATION = 25;     // seconds of double jump power after eating mushroom
 
 // ── Difficulty System ─────────────────────────────────
 // 5 levels with smooth interpolation between them
@@ -261,6 +270,7 @@ const scoreDisplay = document.getElementById('score-display');
 const hudTime = document.getElementById('hud-time');
 const hudLevel = document.getElementById('hud-level');
 const hudLevelFill = document.getElementById('hud-level-fill');
+const hudMushroom = document.getElementById('hud-mushroom');
 
 // ── Game State ─────────────────────────────────────────
 let state = 'title'; // title | playing | dead
@@ -280,6 +290,12 @@ let survivalTime = 0;       // seconds survived (includes bonus time)
 let bonusTime = 0;          // accumulated bonus seconds from breaking bricks
 let diffLevel = 0;          // current difficulty level index (0-4)
 let diffProgress = 0;       // 0..1 progress within current level toward next
+
+// ── Mushroom & Double Jump State ─────────────────────
+let mushrooms = [];           // active mushroom items: { x, y, vx, vy, onGround }
+let doubleJumpTimer = 0;      // remaining seconds of double jump ability (0 = inactive)
+let airJumpsUsed = 0;         // number of air jumps used this airborne session
+const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is active
 
 // ── Player ─────────────────────────────────────────────
 const player = {
@@ -867,6 +883,162 @@ function drawBrick(bx, by) {
   ctx.strokeRect(x + 0.5, y + 0.5, BRICK_W - 1, BRICK_H - 1);
 }
 
+// ── Draw special brick (purple/magical, contains mushroom) ───
+function drawSpecialBrick(bx, by) {
+  const x = Math.round(bx);
+  const y = Math.round(by);
+  // Main body — deep purple
+  ctx.fillStyle = '#7b1fa2';
+  ctx.fillRect(x, y, BRICK_W, BRICK_H);
+  // Lighter highlight strip (top)
+  ctx.fillStyle = '#ab47bc';
+  ctx.fillRect(x + 1, y + 1, BRICK_W - 2, 3);
+  // Darker shadow strip (bottom)
+  ctx.fillStyle = '#4a148c';
+  ctx.fillRect(x + 1, y + BRICK_H - 3, BRICK_W - 2, 2);
+  // Mortar lines
+  ctx.fillStyle = '#6a1b9a';
+  ctx.fillRect(x, y + 11, BRICK_W, 2);
+  ctx.fillRect(x + 15, y, 2, 11);
+  ctx.fillRect(x + 8, y + 13, 2, 11);
+  ctx.fillRect(x + 24, y + 13, 2, 11);
+  // Sparkle/star decorations (animated shimmer)
+  const shimmer = Math.sin(frameCount * 0.12) * 0.4 + 0.6;
+  ctx.fillStyle = `rgba(255,215,0,${shimmer})`;
+  // Star pattern
+  ctx.fillRect(x + 7, y + 5, 2, 2);
+  ctx.fillRect(x + 6, y + 6, 1, 1);
+  ctx.fillRect(x + 9, y + 6, 1, 1);
+  ctx.fillRect(x + 7, y + 7, 2, 1);
+  ctx.fillRect(x + 22, y + 14, 2, 2);
+  ctx.fillRect(x + 21, y + 15, 1, 1);
+  ctx.fillRect(x + 24, y + 15, 1, 1);
+  // Mushroom icon in center
+  ctx.fillStyle = '#e53935';
+  ctx.fillRect(x + 13, y + 4, 6, 4);
+  ctx.fillRect(x + 12, y + 5, 8, 3);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x + 14, y + 5, 2, 2);
+  ctx.fillRect(x + 18, y + 6, 1, 1);
+  ctx.fillStyle = '#f5e6cc';
+  ctx.fillRect(x + 14, y + 8, 4, 3);
+  // Outline
+  ctx.strokeStyle = '#311b92';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, BRICK_W - 1, BRICK_H - 1);
+}
+
+// ── Draw mushroom item ──────────────────────────────────
+function drawMushroom(mx, my) {
+  const x = Math.round(mx);
+  const y = Math.round(my);
+  // Cap — red with white spots
+  ctx.fillStyle = '#e53935';
+  ctx.fillRect(x + 2, y + 2, 16, 8);
+  ctx.fillRect(x + 4, y, 12, 4);
+  ctx.fillRect(x, y + 4, 20, 6);
+  // White spots
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x + 5, y + 2, 3, 3);
+  ctx.fillRect(x + 12, y + 3, 3, 3);
+  ctx.fillRect(x + 8, y + 6, 2, 2);
+  // Stem — tan
+  ctx.fillStyle = '#f5e6cc';
+  ctx.fillRect(x + 6, y + 10, 8, 8);
+  ctx.fillStyle = '#e8d5b7';
+  ctx.fillRect(x + 6, y + 10, 2, 8);
+  // Eyes — cute face
+  ctx.fillStyle = '#000';
+  ctx.fillRect(x + 8, y + 13, 2, 2);
+  ctx.fillRect(x + 12, y + 13, 2, 2);
+  // Outline
+  ctx.strokeStyle = '#b71c1c';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, MUSHROOM_W - 1, MUSHROOM_H - 1);
+}
+
+// Spawn a mushroom from a broken special brick
+function spawnMushroom(bx, by) {
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  mushrooms.push({
+    x: bx + BRICK_W / 2 - MUSHROOM_W / 2,
+    y: by - MUSHROOM_H,
+    vx: MUSHROOM_SPEED * dir,
+    vy: -3,  // pop up initially
+    onGround: false,
+  });
+  if (DEBUG_MODE) {
+    console.log(`%c[Mushroom] Spawned at (${Math.round(bx)}, ${Math.round(by)}), dir=${dir > 0 ? 'right' : 'left'}`, 'color: #e53935');
+  }
+}
+
+// Update mushroom physics
+function updateMushrooms() {
+  const groundY = DESIGN_H - GROUND_H;
+  for (let i = mushrooms.length - 1; i >= 0; i--) {
+    const m = mushrooms[i];
+    // Apply gravity
+    m.vy += MUSHROOM_GRAVITY;
+    m.x += m.vx;
+    m.y += m.vy;
+    // Scroll with world
+    m.x -= scrollSpeed;
+
+    // Ground collision
+    if (m.y + MUSHROOM_H >= groundY) {
+      m.y = groundY - MUSHROOM_H;
+      m.vy = 0;
+      m.onGround = true;
+    }
+
+    // Bounce off pipes (simplified — just body collision)
+    for (const pipe of pipes) {
+      if (pipe.h <= 0) continue;
+      const pr = getPipeRects(pipe);
+      // Check lip and body
+      const rects = [pr.lipRect, pr.bodyRect];
+      for (const r of rects) {
+        if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, r.x, r.y, r.w, r.h)) {
+          // Land on top
+          if (m.vy > 0 && m.y + MUSHROOM_H - m.vy <= r.y + 2) {
+            m.y = r.y - MUSHROOM_H;
+            m.vy = 0;
+            m.onGround = true;
+          }
+          // Side bounce
+          else if (m.vx > 0 && m.x + MUSHROOM_W - m.vx <= r.x + 2) {
+            m.x = r.x - MUSHROOM_W;
+            m.vx = -m.vx;
+          } else if (m.vx < 0 && m.x - m.vx >= r.x + r.w - 2) {
+            m.x = r.x + r.w;
+            m.vx = -m.vx;
+          }
+        }
+      }
+    }
+
+    // Remove if off-screen
+    if (m.x + MUSHROOM_W < -20 || m.x > DESIGN_W + 50 || m.y > DESIGN_H + 20) {
+      mushrooms.splice(i, 1);
+      continue;
+    }
+
+    // Check player pickup
+    const pb = getPlayerHitbox();
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, m.x, m.y, MUSHROOM_W, MUSHROOM_H)) {
+      // Activate double jump
+      doubleJumpTimer = DOUBLE_JUMP_DURATION;
+      mushrooms.splice(i, 1);
+      // Popup
+      spawnScorePopup(m.x, m.y - 10, 0);
+      scorePopups[scorePopups.length - 1].text = 'MUSHROOM!';
+      if (DEBUG_MODE) {
+        console.log(`%c[Mushroom] Collected! Double jump active for ${DOUBLE_JUMP_DURATION}s`, 'color: #e53935; font-weight: bold');
+      }
+    }
+  }
+}
+
 // Draw a single debris fragment
 function drawFragment(frag) {
   ctx.fillStyle = frag.color;
@@ -1338,7 +1510,14 @@ function resolveSweptMovement(playerVY, scrollDX) {
           score += BRICK_SCORE;
           // Time bonus: add seconds to survival timer
           bonusTime += BRICK_TIME_BONUS;
+          if (DEBUG_MODE) {
+            console.log(`%c[Brick] +${BRICK_TIME_BONUS}s bonus | total bonusTime=${bonusTime}s | survivalTime=${(frameCount / 60 + bonusTime).toFixed(1)}s`, 'color: #2ecc71');
+          }
           spawnTimeBonusPopup(brick.x + BRICK_W / 2 - 12, brick.y - 20);
+          // Special brick: spawn mushroom
+          if (brick.special) {
+            spawnMushroom(brick.x, brick.y);
+          }
           // Bounce down
           player.vy = Math.abs(player.vy) * 0.4;
           relDY = player.vy;
@@ -1625,10 +1804,13 @@ function resetGame() {
   fragments = [];
   scorePopups = [];
   timeBonusPopups = [];
+  mushrooms = [];
   score = 0;
   frameCount = 0;
   survivalTime = 0;
   bonusTime = 0;
+  doubleJumpTimer = 0;
+  airJumpsUsed = 0;
   diffLevel = 0;
   diffProgress = 0;
   scrollSpeed = SCROLL_SPEED_BASE;
@@ -1828,6 +2010,7 @@ function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
       w: BRICK_W,
       h: BRICK_H,
       broken: false,
+      special: Math.random() < SPECIAL_BRICK_CHANCE,
     });
   }
 }
@@ -1897,6 +2080,7 @@ function spawnStandaloneBricks(anchorX) {
       w: BRICK_W,
       h: BRICK_H,
       broken: false,
+      special: Math.random() < SPECIAL_BRICK_CHANCE,
     });
   }
 }
@@ -1987,7 +2171,8 @@ function update() {
   if (state !== 'playing') return;
 
   frameCount++;
-  survivalTime = frameCount / 60 + bonusTime; // assume ~60fps + brick bonus
+  // Compute base elapsed time; bonusTime is added after sweep resolves bricks
+  survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
   const speedMul = getDiffParam('speedMul');
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
@@ -2033,6 +2218,17 @@ function update() {
     }
   }
 
+  // ── Double Jump (air jump) — requires active mushroom power ──
+  if (jumpPressed && !jumpConsumed && !player.onGround && doubleJumpTimer > 0 && airJumpsUsed < MAX_AIR_JUMPS) {
+    player.vy = JUMP_INITIAL;
+    jumpHoldFrames = 0;
+    jumpConsumed = true;
+    airJumpsUsed++;
+    if (DEBUG_MODE) {
+      console.log(`%c[DoubleJump] Air jump used (${airJumpsUsed}/${MAX_AIR_JUMPS}), timer=${doubleJumpTimer.toFixed(1)}s`, 'color: #e53935');
+    }
+  }
+
   // Variable jump: hold to go higher
   if (jumpPressed && !player.onGround && jumpHoldFrames < JUMP_HOLD_MAX_T && player.vy < 0) {
     player.vy += JUMP_HOLD_ACCEL;
@@ -2047,6 +2243,10 @@ function update() {
   // into one unified continuous collision resolve.
   const result = resolveSweptMovement(player.vy, scrollSpeed);
 
+  // Recompute survivalTime AFTER sweep so brick bonus is reflected immediately in HUD
+  survivalTime = frameCount / 60 + bonusTime;
+  updateDifficultyInfo();
+
   // ── Phase 3: Post-resolve checks ─────────────────────
   const groundY = DESIGN_H - GROUND_H - player.h;
 
@@ -2054,6 +2254,7 @@ function update() {
   if (result.landedThisFrame) {
     jumpHoldFrames = 0;
     wallNudgeUsed = false;
+    airJumpsUsed = 0; // reset air jump count on landing
   }
 
   // Clamp player X (don't go off-screen too far left)
@@ -2073,6 +2274,20 @@ function update() {
   // Update score popups
   updateScorePopups();
   updateTimeBonusPopups();
+
+  // Update mushrooms (physics + player pickup)
+  updateMushrooms();
+
+  // Update double jump timer (count down at ~60fps)
+  if (doubleJumpTimer > 0) {
+    doubleJumpTimer -= 1 / 60;
+    if (doubleJumpTimer <= 0) {
+      doubleJumpTimer = 0;
+      if (DEBUG_MODE) {
+        console.log('%c[DoubleJump] Timer expired', 'color: #e53935');
+      }
+    }
+  }
 
   // ── Phase 4: Move obstacles in world coords ──────────
   // The sweep already accounted for scroll in collision detection.
@@ -2200,6 +2415,22 @@ function update() {
   hudLevelFill.style.width = fillPct + '%';
   const levelColors = ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6'];
   hudLevelFill.style.background = levelColors[diffLevel];
+
+  // Mushroom / Double Jump HUD
+  if (doubleJumpTimer > 0) {
+    const secs = Math.ceil(doubleJumpTimer);
+    const canJump = !player.onGround && airJumpsUsed < MAX_AIR_JUMPS;
+    hudMushroom.style.display = 'block';
+    if (canJump) {
+      hudMushroom.textContent = `DOUBLE JUMP READY [${secs}s]`;
+      hudMushroom.style.color = '#2ecc71';
+    } else {
+      hudMushroom.textContent = `MUSHROOM: ON [${secs}s]`;
+      hudMushroom.style.color = '#f1c40f';
+    }
+  } else {
+    hudMushroom.style.display = 'none';
+  }
 }
 
 function draw() {
@@ -2236,8 +2467,17 @@ function draw() {
   // Breakable bricks
   for (const brick of bricks) {
     if (!brick.broken) {
-      drawBrick(brick.x, brick.y);
+      if (brick.special) {
+        drawSpecialBrick(brick.x, brick.y);
+      } else {
+        drawBrick(brick.x, brick.y);
+      }
     }
+  }
+
+  // Mushrooms
+  for (const m of mushrooms) {
+    drawMushroom(m.x, m.y);
   }
 
   // Player
@@ -2308,11 +2548,17 @@ function draw() {
       }
     }
 
-    // Brick hitboxes (yellow)
+    // Brick hitboxes (yellow / magenta for special)
     for (const brick of bricks) {
       if (brick.broken) continue;
-      ctx.strokeStyle = '#ff0';
+      ctx.strokeStyle = brick.special ? '#f0f' : '#ff0';
       ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
+    }
+
+    // Mushroom hitboxes (red)
+    for (const m of mushrooms) {
+      ctx.strokeStyle = '#f44';
+      ctx.strokeRect(m.x, m.y, MUSHROOM_W, MUSHROOM_H);
     }
 
     // Scroll speed indicator + swept AABB label
@@ -2320,7 +2566,7 @@ function draw() {
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
-    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)}`, 4, DESIGN_H - 14);
+    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s`, 4, DESIGN_H - 14);
 
     ctx.restore();
   }
