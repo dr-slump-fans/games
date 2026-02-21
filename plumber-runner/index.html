@@ -295,8 +295,8 @@ const MUSHROOM_W = 20;
 const MUSHROOM_H = 20;
 const MUSHROOM_SPEED = 1.8;          // horizontal movement speed
 const MUSHROOM_GRAVITY = 0.4;        // gravity for mushroom
-const MUSHROOM_POP_VY = -7;          // initial upward velocity (pop out of brick)
-const MUSHROOM_SPAWN_GRACE = 18;     // frames of collision + pickup immunity after spawn (~0.3s)
+const MUSHROOM_POP_VY = -3;          // initial upward velocity (pop out of brick) — restored to v1 feel
+const MUSHROOM_SPAWN_GRACE = 30;     // frames of pickup immunity after spawn (~0.5s)
 const DOUBLE_JUMP_DURATION = 25;     // seconds of double jump power after eating mushroom
 
 // ── Difficulty System ─────────────────────────────────
@@ -1314,8 +1314,7 @@ function drawMushroom(mx, my) {
 
 // Spawn a mushroom from a broken special brick
 function spawnMushroom(bx, by) {
-  // Prefer direction toward player so mushroom is reachable
-  const dir = (player.x < bx) ? -1 : 1;
+  const dir = Math.random() < 0.5 ? 1 : -1;  // random direction (v1 feel)
   let spawnX = bx + BRICK_W / 2 - MUSHROOM_W / 2;
   let spawnY = by - MUSHROOM_H;
 
@@ -1323,39 +1322,31 @@ function spawnMushroom(bx, by) {
   for (const brick of bricks) {
     if (brick.broken) continue;
     if (rectsOverlap(spawnX, spawnY, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
-      // Push mushroom above the blocking brick
       spawnY = brick.y - MUSHROOM_H - 2;
     }
   }
-  // Clamp: don't spawn above screen
   if (spawnY < 0) spawnY = 0;
 
-  // Ensure spawn position doesn't overlap player hitbox (prevents instant pickup)
-  const _pb = getPlayerHitbox();
-  if (rectsOverlap(spawnX, spawnY, MUSHROOM_W, MUSHROOM_H, _pb.x, _pb.y, _pb.w, _pb.h)) {
-    // Push mushroom horizontally away from player center
-    const safeGap = MUSHROOM_W + 4; // minimum clearance
-    if (player.x < spawnX) {
-      // Player is left of spawn → push mushroom right
-      spawnX = _pb.x + _pb.w + safeGap;
-    } else {
-      // Player is right of spawn → push mushroom left
-      spawnX = _pb.x - MUSHROOM_W - safeGap;
-    }
-    if (DEBUG_MODE) {
-      console.log(`%c[Mushroom] Spawn shifted to avoid player overlap → x=${Math.round(spawnX)}`, 'color: #ff6');
-    }
+  // Enforce minimum horizontal distance from player (anti-instant-eat)
+  const MIN_SPAWN_DIST = 24;
+  const pb = getPlayerHitbox();
+  const playerCX = pb.x + pb.w / 2;
+  const mushCX = spawnX + MUSHROOM_W / 2;
+  const hDist = Math.abs(mushCX - playerCX);
+  if (hDist < MIN_SPAWN_DIST) {
+    const shift = MIN_SPAWN_DIST - hDist;
+    spawnX += (mushCX >= playerCX) ? shift : -shift;
   }
 
   mushrooms.push({
     x: spawnX,
     y: spawnY,
     vx: MUSHROOM_SPEED * dir,
-    vy: MUSHROOM_POP_VY,
+    vy: MUSHROOM_POP_VY,        // -3: gentle pop (v1)
     onGround: false,
-    stuckFrames: 0,  // unstuck counter
-    graceTimer: MUSHROOM_SPAWN_GRACE,  // frames of collision immunity
-    state: 'pop',  // pop → fall → ground-run
+    stuckFrames: 0,
+    graceTimer: MUSHROOM_SPAWN_GRACE,  // pickup-only immunity
+    state: 'pop',
   });
   if (DEBUG_MODE) {
     console.log(`%c[Mushroom] Spawned at (${Math.round(spawnX)}, ${Math.round(spawnY)}), dir=${dir > 0 ? 'right' : 'left'}, vy=${MUSHROOM_POP_VY}`, 'color: #e53935');
@@ -1364,7 +1355,7 @@ function spawnMushroom(bx, by) {
 
 // Enlarged overlap check for mushroom pickup — expands both rects by a margin
 // to catch near-misses at high scroll speeds.
-const MUSHROOM_PICKUP_MARGIN = 6; // px expansion on each side
+const MUSHROOM_PICKUP_MARGIN = 2; // px expansion on each side (tightened from 6)
 
 function mushroomPickupOverlap(pb, mx, my) {
   // Expand player hitbox for pickup tolerance
@@ -1404,9 +1395,8 @@ function updateMushrooms() {
     const prevMY = m.y;
     const prevPB = { x: pb.x - playerVX, y: pb.y - player.vy, w: pb.w, h: pb.h };
 
-    // ── Grace timer: skip solid collisions during spawn pop-out ──
-    const inGrace = m.graceTimer > 0;
-    if (inGrace) m.graceTimer--;
+    // ── Grace timer: only blocks pickup, physics always runs ──
+    if (m.graceTimer > 0) m.graceTimer--;
 
     // Apply gravity
     m.vy += MUSHROOM_GRAVITY;
@@ -1424,34 +1414,27 @@ function updateMushrooms() {
       console.log(`%c[Mushroom] State: ${prevState} → ${m.state}`, 'color: #e53935');
     }
 
-    // Ground collision (always active, even during grace)
+    // Ground collision
     if (m.y + MUSHROOM_H >= groundY) {
       m.y = groundY - MUSHROOM_H;
       m.vy = 0;
       m.onGround = true;
-      m.graceTimer = 0; // end grace on landing
       m.state = 'ground-run';
     }
 
-    // ── Skip brick/pipe collisions during grace period ──
-    if (!inGrace) {
-
-    // Bounce off pipes
+    // Bounce off pipes (v1 logic: always active)
     for (const pipe of pipes) {
       if (pipe.h <= 0) continue;
       const pr = getPipeRects(pipe);
       const rects = [pr.lipRect, pr.bodyRect];
       for (const r of rects) {
         if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, r.x, r.y, r.w, r.h)) {
-          // Land on top
           if (m.vy > 0 && m.y + MUSHROOM_H - m.vy <= r.y + 2) {
             m.y = r.y - MUSHROOM_H;
             m.vy = 0;
             m.onGround = true;
             m.state = 'ground-run';
-          }
-          // Side bounce
-          else if (m.vx > 0 && m.x + MUSHROOM_W - m.vx <= r.x + 2) {
+          } else if (m.vx > 0 && m.x + MUSHROOM_W - m.vx <= r.x + 2) {
             m.x = r.x - MUSHROOM_W;
             m.vx = -m.vx;
           } else if (m.vx < 0 && m.x - m.vx >= r.x + r.w - 2) {
@@ -1462,24 +1445,19 @@ function updateMushrooms() {
       }
     }
 
-    // Bounce off unbroken bricks (prevents mushroom getting stuck inside bricks)
+    // Bounce off unbroken bricks (v2 improvement)
     for (const brick of bricks) {
       if (brick.broken) continue;
       if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
-        // Land on top
         if (m.vy > 0 && m.y + MUSHROOM_H - m.vy <= brick.y + 2) {
           m.y = brick.y - MUSHROOM_H;
           m.vy = 0;
           m.onGround = true;
           m.state = 'ground-run';
-        }
-        // Hit from below
-        else if (m.vy < 0 && m.y - m.vy >= brick.y + brick.h - 2) {
+        } else if (m.vy < 0 && m.y - m.vy >= brick.y + brick.h - 2) {
           m.y = brick.y + brick.h;
           m.vy = 0;
-        }
-        // Side bounce
-        else if (m.vx > 0 && m.x + MUSHROOM_W - m.vx <= brick.x + 2) {
+        } else if (m.vx > 0 && m.x + MUSHROOM_W - m.vx <= brick.x + 2) {
           m.x = brick.x - MUSHROOM_W;
           m.vx = -m.vx;
         } else if (m.vx < 0 && m.x - m.vx >= brick.x + brick.w - 2) {
@@ -1489,17 +1467,14 @@ function updateMushrooms() {
       }
     }
 
-    // ── Unstuck logic ──────────────────────────────────────
-    // If mushroom is overlapping a solid and hasn't moved much, push it out
+    // ── Unstuck logic (v2) ──
     let stuck = false;
-    // Check pipe overlap
     for (const pipe of pipes) {
       if (pipe.h <= 0) continue;
       const pr = getPipeRects(pipe);
       for (const r of [pr.lipRect, pr.bodyRect]) {
         if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, r.x, r.y, r.w, r.h)) {
           stuck = true;
-          // Push out via minimum penetration axis
           const overlapLeft = (m.x + MUSHROOM_W) - r.x;
           const overlapRight = (r.x + r.w) - m.x;
           const overlapTop = (m.y + MUSHROOM_H) - r.y;
@@ -1516,7 +1491,6 @@ function updateMushrooms() {
         }
       }
     }
-    // Check brick overlap
     for (const brick of bricks) {
       if (brick.broken) continue;
       if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
@@ -1538,7 +1512,6 @@ function updateMushrooms() {
     }
     if (stuck) {
       m.stuckFrames = (m.stuckFrames || 0) + 1;
-      // If stuck for too long, teleport to ground below current X
       if (m.stuckFrames > 30) {
         m.y = groundY - MUSHROOM_H;
         m.vy = 0;
@@ -1551,30 +1524,25 @@ function updateMushrooms() {
       m.stuckFrames = 0;
     }
 
-    } // end if (!inGrace)
-
     // Remove if far from camera
     if (m.x + MUSHROOM_W < cameraX - 100 || m.x > cameraX + DESIGN_W + 200 || m.y > DESIGN_H + 20) {
       mushrooms.splice(i, 1);
       continue;
     }
 
-    // Pickup enabled only after grace expires AND mushroom left 'pop' state
-    const pickupEnabled = m.graceTimer <= 0 && m.state !== 'pop';
+    // Pickup: grace timer must expire AND mushroom must be in ground-run state
+    const pickupEnabled = m.graceTimer <= 0 && m.state === 'ground-run';
 
-    // Check player pickup — enlarged hitbox + swept detection
+    // Check player pickup — enlarged hitbox + swept detection (v2)
     const picked = pickupEnabled &&
                    (mushroomPickupOverlap(pb, m.x, m.y) ||
                     sweptMushroomPickup(pb, m, prevMX, prevMY, prevPB));
     if (picked) {
-      // Activate double jump
       doubleJumpTimer = DOUBLE_JUMP_DURATION;
       mushrooms.splice(i, 1);
       advanceMission('eat_mushroom');
-      // Popup
       spawnScorePopup(m.x, m.y - 10, 0);
       scorePopups[scorePopups.length - 1].text = 'MUSHROOM!';
-      // Debug overlay text (visible with debug=1)
       if (DEBUG_MODE) {
         edgeDebugMsgs.push({ text: 'MUSHROOM PICKUP', ttl: 120 });
         console.log(`%c[Mushroom] Collected! Double jump active for ${DOUBLE_JUMP_DURATION}s`, 'color: #e53935; font-weight: bold');
@@ -3666,8 +3634,8 @@ function draw() {
       // Show mushroom state label above
       ctx.font = '9px monospace';
       ctx.fillStyle = m.state === 'pop' ? '#f0f' : m.state === 'fall' ? '#ff0' : '#0f0';
-      const pickupOk = m.graceTimer <= 0 && m.state !== 'pop';
-      ctx.fillText(m.state + (m.graceTimer > 0 ? ' G' + m.graceTimer : '') + (pickupOk ? ' PU' : ' NO'), m.x, m.y - 4);
+      const pickupOk = m.graceTimer <= 0 && m.state === 'ground-run';
+      ctx.fillText(m.state + ' G' + m.graceTimer + ' M' + MUSHROOM_PICKUP_MARGIN + (pickupOk ? ' PU' : ' NO'), m.x, m.y - 4);
     }
 
     // Debug text (screen-space)

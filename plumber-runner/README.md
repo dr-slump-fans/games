@@ -160,7 +160,8 @@ When a special brick is broken, a **red mushroom** pops out, **drops to the grou
 - Mushroom spawns centered on the broken brick, **direction biased toward the player** for reachability
 - If the spawn position overlaps another unbroken brick, the mushroom is pushed above it
 - Mushroom **pops upward with visible initial velocity** (vy=-7) — 先從磚塊中彈出再落地行走，類似經典 Mario 香菇行為
-- During the pop-out phase, the mushroom has **18 frames of spawn protection** (~0.3s) — collision immunity from bricks/pipes AND **pickup is disabled**, preventing "instant eat on headbutt"
+- During the pop-out phase, the mushroom has **30 frames of spawn grace** (~0.5s) — pickup is disabled until grace expires AND the mushroom reaches `ground-run` state, preventing "instant eat on headbutt"
+- Spawn position is shifted to maintain **≥24px horizontal distance** from the player
 - If the spawn position overlaps the player hitbox, the mushroom is **shifted horizontally** away from the player for extra safety
 - After the arc, the mushroom **falls under gravity** (0.4 px/frame²) until landing on the ground or a solid surface
 - After landing, the mushroom **walks horizontally along the ground** at 1.8 px/frame in world-space
@@ -177,7 +178,7 @@ When a special brick is broken, a **red mushroom** pops out, **drops to the grou
 
 The pickup system uses a **two-layer approach** to prevent missed pickups at high game speeds:
 
-1. **Enlarged overlap check** — the player hitbox is expanded by `MUSHROOM_PICKUP_MARGIN` (6 px) on each side when testing mushroom collision. This provides a generous "grab radius" that compensates for frame-to-frame position jumps.
+1. **Enlarged overlap check** — the player hitbox is expanded by `MUSHROOM_PICKUP_MARGIN` (2 px) on each side when testing mushroom collision. This provides a tight but forgiving "grab radius" that compensates for frame-to-frame position jumps. (Tightened from 6px to reduce instant-eat.)
 
 2. **Swept pickup (continuous detection)** — each frame, the relative displacement between the mushroom and player is computed. A Minkowski-expanded swept AABB test is run along this path. If the player and mushroom paths crossed at any point during the frame (even if they don't overlap at frame boundaries), the pickup triggers.
 
@@ -185,14 +186,16 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 
 | Constant | Default | Purpose |
 |----------|---------|---------|
-| `MUSHROOM_PICKUP_MARGIN` | `6` | Pixel expansion on each side for enlarged pickup zone |
+| `MUSHROOM_PICKUP_MARGIN` | `2` | Pixel expansion on each side for enlarged pickup zone (tightened from 6) |
+| `MUSHROOM_SPAWN_GRACE` | `30` | Frames of pickup immunity after spawn (~0.5s); also requires `ground-run` state |
+| `MIN_SPAWN_DIST` | `24` | Minimum horizontal px distance from player at spawn |
 
 #### Debug Features (`?debug=1`)
 
 - **Red outline**: mushroom hitbox (actual collision box)
 - **Pink dashed outline**: expanded pickup zone (with `MUSHROOM_PICKUP_MARGIN`)
 - **Yellow arrow**: mushroom velocity direction
-- **State label** above mushroom: `pop` (magenta) → `fall` (yellow) → `ground-run` (green), with `G<n>` suffix showing remaining grace frames, and `PU` (pickup enabled) or `NO` (pickup blocked)
+- **State label** above mushroom: `pop` (magenta) → `fall` (yellow) → `ground-run` (green), with `G<n>` grace frames, `M<n>` pickup margin, and `PU` (pickup enabled) or `NO` (pickup blocked)
 - **`MUSHROOM PICKUP`** (red text, top-left): flashes for ~2s when a mushroom is collected
 - **Bottom status line**: shows `mush:N` (number of active mushrooms)
 - **Console logs**: spawn position, state transitions (`pop→fall→ground-run`), collection events, unstuck teleports
