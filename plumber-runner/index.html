@@ -71,6 +71,41 @@ canvas {
   height: 100%; width: 0%; border-radius: 3px;
   transition: width 0.5s ease, background 0.5s ease;
 }
+/* ── Mobile Dual Buttons ───────────────────────────── */
+#mobile-buttons {
+  position: absolute; bottom: 0; left: 0; width: 100%; height: 110px;
+  display: flex; justify-content: space-between; align-items: flex-end;
+  padding: 0 12px 12px 12px;
+  pointer-events: none;
+  z-index: 10;
+}
+.mobile-btn {
+  pointer-events: auto;
+  width: 44%; height: 88px;
+  border: 3px solid rgba(255,255,255,0.5);
+  border-radius: 16px;
+  background: rgba(0,0,0,0.25);
+  color: rgba(255,255,255,0.8);
+  font-family: monospace; font-size: 20px; font-weight: bold;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.mobile-btn.active {
+  background: rgba(255,255,255,0.25);
+  border-color: rgba(255,255,255,0.85);
+}
+#hud-boost {
+  position: absolute; bottom: 120px; left: 50%;
+  transform: translateX(-50%);
+  font-family: monospace; font-size: 16px; font-weight: bold;
+  color: #ff6; text-shadow: 1px 1px 0 #000, 0 0 8px rgba(255,200,0,0.6);
+  pointer-events: none;
+  display: none;
+  z-index: 11;
+}
 </style>
 </head>
 <body>
@@ -90,10 +125,15 @@ canvas {
     </div>
   </div>
 </div>
+<div id="mobile-buttons">
+  <div class="mobile-btn" id="btn-run">RUN</div>
+  <div class="mobile-btn" id="btn-jump">JUMP</div>
+</div>
+<div id="hud-boost">RUN BOOST</div>
 <div id="ui">
   <div id="overlay">
     <h1 id="ol-title">Plumber Runner</h1>
-    <p id="ol-msg">Press SPACE / Tap to Start</p>
+    <p id="ol-msg">JUMP: Space/Tap  |  RUN: Shift/Z</p>
     <p id="ol-score"></p>
     <button id="ol-btn">START</button>
   </div>
@@ -121,6 +161,9 @@ const PIPE_W = 48;
 const LIP_W = 56;
 const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
+
+// ── Run Boost ────────────────────────────────────────
+const RUN_BOOST_MULTIPLIER = 1.55;  // speed multiplier when run button held
 
 // ── Lip Corner Forgiveness ──────────────────────────
 // When the player is beside a pipe and jumps upward, the lip overhang
@@ -273,6 +316,7 @@ const hudTime = document.getElementById('hud-time');
 const hudLevel = document.getElementById('hud-level');
 const hudLevelFill = document.getElementById('hud-level-fill');
 const hudMushroom = document.getElementById('hud-mushroom');
+const hudBoost = document.getElementById('hud-boost');
 
 // ── Game State ─────────────────────────────────────────
 let state = 'title'; // title | playing | dead
@@ -285,6 +329,7 @@ let jumpConsumed = false;  // true after jump initiated; must release to jump ag
 let jumpHoldFrames = 0;
 let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
 let justJumped = false;    // true during the frame a jump was initiated; prevents swept movement from re-grounding
+let runBoostPressed = false; // true when run/boost key or left button is held
 
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
@@ -2020,6 +2065,7 @@ function resetGame() {
   jumpConsumed = false;
   justJumped = false;
   wallNudgeUsed = false;
+  runBoostPressed = false;
   edgeDebugMsgs = [];
   depenFixCount = 0;
   initClouds();
@@ -2378,7 +2424,8 @@ function update() {
   survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
   const speedMul = getDiffParam('speedMul');
-  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
+  const boostMul = (runBoostPressed && state === 'playing') ? RUN_BOOST_MULTIPLIER : 1.0;
+  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * boostMul;
   groundOffset += scrollSpeed;
 
   // ── Phase 1: Compute desired velocity vector ──────────
@@ -2500,9 +2547,10 @@ function update() {
   // Animation state machine
   updateAnimState();
 
-  // Animation frame (run cycle only advances on ground)
+  // Animation frame (run cycle only advances on ground; faster when boosting)
   if (player.animState === 'run') {
-    if (frameCount % 6 === 0) player.frame = (player.frame + 1) % 4;
+    const runAnimInterval = runBoostPressed ? 4 : 6;
+    if (frameCount % runAnimInterval === 0) player.frame = (player.frame + 1) % 4;
   }
 
   // Update debris fragments
@@ -2737,6 +2785,13 @@ function update() {
   } else {
     hudMushroom.style.display = 'none';
   }
+
+  // Run Boost HUD
+  if (runBoostPressed && state === 'playing') {
+    hudBoost.style.display = 'block';
+  } else {
+    hudBoost.style.display = 'none';
+  }
 }
 
 function draw() {
@@ -2914,6 +2969,7 @@ function showOverlay(title, msg, sc) {
   }
   olBtn.textContent = state === 'title' ? 'START' : 'RESTART';
   overlay.style.display = 'flex';
+  hudBoost.style.display = 'none';
 }
 
 function hideOverlay() {
@@ -2933,59 +2989,130 @@ function startGame() {
 }
 
 // ── Input ──────────────────────────────────────────────
-function onInputDown(e) {
-  if (state === 'dead') {
-    startGame();
-    return;
-  }
-  if (state === 'title') {
-    startGame();
-    jumpPressed = true;
-    return;
-  }
+function onJumpDown() {
+  if (state === 'dead') { startGame(); return; }
+  if (state === 'title') { startGame(); jumpPressed = true; return; }
   jumpPressed = true;
 }
-function onInputUp() {
+function onJumpUp() {
   jumpPressed = false;
   jumpConsumed = false;
+}
+function onRunDown() {
+  runBoostPressed = true;
+}
+function onRunUp() {
+  runBoostPressed = false;
 }
 
 // Keyboard
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' || e.code === 'ArrowUp') {
     e.preventDefault();
-    onInputDown(e);
+    onJumpDown();
+  }
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
+    e.preventDefault();
+    onRunDown();
   }
 });
 document.addEventListener('keyup', (e) => {
   if (e.code === 'Space' || e.code === 'ArrowUp') {
-    onInputUp();
+    onJumpUp();
+  }
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
+    onRunUp();
   }
 });
 
-// Touch
-document.addEventListener('touchstart', (e) => {
-  if (e.target === olBtn) return;
+// ── Mobile Buttons ─────────────────────────────────────
+const btnRun = document.getElementById('btn-run');
+const btnJump = document.getElementById('btn-jump');
+
+// Track active touch IDs per button to handle multi-touch correctly
+let runTouchIds = new Set();
+let jumpTouchIds = new Set();
+
+btnRun.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  onInputDown(e);
+  e.stopPropagation();
+  for (const t of e.changedTouches) runTouchIds.add(t.identifier);
+  btnRun.classList.add('active');
+  onRunDown();
+  // If game not started, treat as game start too
+  if (state === 'dead' || state === 'title') startGame();
+}, { passive: false });
+
+btnRun.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  for (const t of e.changedTouches) runTouchIds.delete(t.identifier);
+  if (runTouchIds.size === 0) {
+    btnRun.classList.remove('active');
+    onRunUp();
+  }
+}, { passive: false });
+
+btnRun.addEventListener('touchcancel', (e) => {
+  for (const t of e.changedTouches) runTouchIds.delete(t.identifier);
+  if (runTouchIds.size === 0) {
+    btnRun.classList.remove('active');
+    onRunUp();
+  }
+}, { passive: false });
+
+btnJump.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  for (const t of e.changedTouches) jumpTouchIds.add(t.identifier);
+  btnJump.classList.add('active');
+  onJumpDown();
+}, { passive: false });
+
+btnJump.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  for (const t of e.changedTouches) jumpTouchIds.delete(t.identifier);
+  if (jumpTouchIds.size === 0) {
+    btnJump.classList.remove('active');
+    onJumpUp();
+  }
+}, { passive: false });
+
+btnJump.addEventListener('touchcancel', (e) => {
+  for (const t of e.changedTouches) jumpTouchIds.delete(t.identifier);
+  if (jumpTouchIds.size === 0) {
+    btnJump.classList.remove('active');
+    onJumpUp();
+  }
+}, { passive: false });
+
+// Touch fallback — tapping anywhere else on screen acts as jump (backwards compat)
+document.addEventListener('touchstart', (e) => {
+  if (e.target === olBtn || e.target === btnRun || e.target === btnJump) return;
+  if (e.target.closest('#mobile-buttons')) return;
+  e.preventDefault();
+  onJumpDown();
 }, { passive: false });
 document.addEventListener('touchend', (e) => {
-  onInputUp();
+  if (e.target === btnRun || e.target === btnJump) return;
+  if (e.target.closest('#mobile-buttons')) return;
+  onJumpUp();
 }, { passive: false });
 
 // Mouse (for desktop testing)
 canvas.addEventListener('mousedown', (e) => {
-  onInputDown(e);
+  onJumpDown();
 });
 document.addEventListener('mouseup', () => {
-  onInputUp();
+  onJumpUp();
 });
 
 // ── Init ───────────────────────────────────────────────
 loadSprite(); // attempt sprite mode; falls back to procedural on failure
 initClouds();
 initHills();
-showOverlay('Plumber Runner', 'Press SPACE / Tap to Start');
+showOverlay('Plumber Runner', 'JUMP: Space/Tap  |  RUN: Shift/Z');
 gameLoop();
 
 // Expose self-test globally for console access

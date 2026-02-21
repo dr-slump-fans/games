@@ -4,9 +4,10 @@ A retro-style side-scrolling runner game playable in the browser (desktop & mobi
 
 ## How to Play
 
-The screen scrolls automatically to the right. Your character runs forward on their own — your only control is **jumping**.
+The screen scrolls automatically to the right. Your character runs forward on their own — you control **jumping** and **run boost** (speed up).
 
 - **Short tap** for a small jump, **long press** for a high jump — two distinct jump heights with clear feel difference
+- **Hold RUN** (Shift/Z or left mobile button) to boost forward speed by 55% — combine with jump for longer distances
 - **Must release before jumping again** — holding the button/screen after landing will NOT auto-repeat the jump; you must lift your finger (or release the key) and press again
 - You can **stand on top of pipes** — pipe tops are platforms!
 - **Side collisions push you back** instead of killing you instantly
@@ -283,10 +284,25 @@ This rule applies to both stepping-stone bricks (placed before pipes) and standa
 
 ## Controls
 
-| Platform | Action |
-|----------|--------|
-| Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump |
-| Mobile   | Touch anywhere — tap for small jump, hold for high jump |
+| Platform | Jump | Run Boost |
+|----------|------|-----------|
+| Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump | `Shift` or `Z` — hold to boost speed |
+| Mobile   | Right button (JUMP) — tap for small jump, hold for high jump | Left button (RUN) — hold to boost speed |
+| Mobile (fallback) | Tap anywhere on screen = jump | — |
+
+### Run Boost
+
+Hold the run button/key to increase scroll speed by **55%** (`RUN_BOOST_MULTIPLIER = 1.55`). The boost:
+
+- Takes effect **immediately** while held, reverts instantly on release
+- Works simultaneously with jump — hold RUN + tap JUMP for boosted jump distances
+- Speeds up the run animation cycle to match the faster movement
+- Displays a **"RUN BOOST"** indicator at the bottom of the screen while active
+- Stacks with the natural difficulty speed scaling
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `RUN_BOOST_MULTIPLIER` | `1.55` | Speed multiplier when run button is held |
 
 ## Collision System — Swept AABB (Continuous Collision Detection)
 
