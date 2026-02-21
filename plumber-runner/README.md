@@ -297,12 +297,14 @@ Hold the run button/key to boost the character's **running ability** — this do
 - **Ramps up smoothly** over ~0.6 seconds to full boost while held — no jarring snap
 - **Decelerates smoothly** over ~0.37 seconds back to normal on release — no abrupt change
 - **Faster recenter**: when pushed back by obstacles, the character returns to position up to **55%** faster at full boost
+- **Fixed recenter target**: the recenter target X is fixed at 40% of screen width (`RECENTER_TARGET_X`) and does not drift over time
 - **Jump height boost**: jumping while boosting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost.
 - Run animation speed scales smoothly with the boost level
 - Displays a **"RUN XX%"** indicator at the bottom of the screen showing current boost level
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
+| `RECENTER_TARGET_X` | `DESIGN_W * 0.40` | Fixed recenter target X position (does not drift) |
 | `RUN_BOOST_MULTIPLIER` | `1.55` | Max recenter speed multiplier at full boost |
 | `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Max jump initial velocity multiplier at full boost |
 | `RUN_BOOST_RAMP_UP` | `0.028` | Per-frame boost increment (~0.6s to full at 60fps) |

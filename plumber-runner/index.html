@@ -161,6 +161,7 @@ const PIPE_W = 48;
 const LIP_W = 56;
 const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
+const RECENTER_TARGET_X = DESIGN_W * 0.40; // fixed recenter target (320px) — must never drift
 
 // ── Run Boost ────────────────────────────────────────
 const RUN_BOOST_MULTIPLIER = 1.55;  // max speed multiplier when run button held
@@ -353,7 +354,7 @@ const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is acti
 
 // ── Player ─────────────────────────────────────────────
 const player = {
-  x: DESIGN_W * 0.40, y: 0, w: 28, h: 36,
+  x: RECENTER_TARGET_X, y: 0, w: 28, h: 36,
   vy: 0, onGround: true, frame: 0,
   animState: 'idle',  // idle | run | jump_up | fall | land
   landTimer: 0,       // frames remaining in land animation
@@ -1605,7 +1606,7 @@ function resolveSweptMovement(playerVY, scrollDX) {
   // - Vertically: player moves by playerVY
   // - Horizontally: obstacles move left by scrollDX, so in obstacle-frame,
   //   player effectively moves right by scrollDX.
-  //   But we also want to keep player at x=120 (recovery), so net player
+  //   But we also want to keep player at x=RECENTER_TARGET_X (recovery), so net player
   //   movement in world coords is 0 horizontally (scroll moves obstacles).
   //   In the sweep frame, we move the player by (0, playerVY) in world coords,
   //   then move obstacles by (-scrollDX, 0).
@@ -2041,7 +2042,7 @@ let groundOffset = 0;
 
 function resetGame() {
   player.y = DESIGN_H - GROUND_H - player.h;
-  player.x = DESIGN_W * 0.40;
+  player.x = RECENTER_TARGET_X;
   player.vy = 0;
   player.onGround = true;
   player.frame = 0;
@@ -2675,8 +2676,8 @@ function update() {
       }
     }
   }
-  if (!beingPushed && player.x < 120) {
-    const diff = 120 - player.x;
+  if (!beingPushed && player.x < RECENTER_TARGET_X) {
+    const diff = RECENTER_TARGET_X - player.x;
     // Lerp-based recovery scaled with scrollSpeed so high-speed play can still recenter.
     // At base speed (3.5) uses factor 0.12; at higher speeds, factor scales up proportionally.
     // Min speed also scales with scrollSpeed to prevent Zeno crawl at high difficulty.
@@ -2964,6 +2965,7 @@ function draw() {
     ctx.fillStyle = '#0f0';
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
     ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
+    ctx.fillText(`TARGET_X:${RECENTER_TARGET_X} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - RECENTER_TARGET_X).toFixed(1)}`, 4, DESIGN_H - 24);
 
     ctx.restore();
   }
