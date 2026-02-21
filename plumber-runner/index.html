@@ -108,8 +108,8 @@ const GRAVITY = 0.55;
 const JUMP_INITIAL = -7.0;         // short-tap: small jump
 const JUMP_HOLD_ACCEL = -0.55;     // long-press: stronger boost per frame
 const JUMP_HOLD_MAX_T = 16;        // long-press: more frames of boost
-const AIR_JUMP_INITIAL = JUMP_INITIAL * 0.5;   // air jump: half initial velocity
-const AIR_JUMP_HOLD_MAX_T = Math.floor(JUMP_HOLD_MAX_T * 0.5); // air jump: half hold frames
+const AIR_JUMP_INITIAL = JUMP_INITIAL * 0.6;   // air jump: 60% initial velocity (slightly stronger than half)
+const AIR_JUMP_HOLD_MAX_T = Math.floor(JUMP_HOLD_MAX_T * 0.55); // air jump: 55% hold frames
 const TALL_PIPE_THRESHOLD = 140;   // pipes >= this height trigger staircase logic
 const SCROLL_SPEED_BASE = 3.5;
 const SCROLL_ACCEL = 0.0003;

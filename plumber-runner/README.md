@@ -202,9 +202,9 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 
 **How it works:**
 - After collecting a mushroom, a **25-second countdown** begins
-- While airborne, pressing jump again (after releasing from the first jump) triggers an **air jump** with **half the height** of a ground jump (half initial velocity and half hold frames)
+- While airborne, pressing jump again (after releasing from the first jump) triggers an **air jump** with **~60% the height** of a ground jump (60% initial velocity and 55% hold frames)
 - Only **1 air jump per airborne session** — landing resets the counter
-- Variable jump hold works on air jumps too (short tap = small air jump, long press = higher air jump), but the maximum height is capped at ~50% of the ground jump
+- Variable jump hold works on air jumps too (short tap = small air jump, long press = higher air jump), but the maximum height is capped at ~60% of the ground jump
 
 **HUD indicator:**
 - `MUSHROOM: ON [Xs]` — mushroom active, on ground or air jump already used
@@ -218,8 +218,8 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 | `MUSHROOM_GRAVITY` | `0.4` | Mushroom gravity (px/frame²) |
 | `DOUBLE_JUMP_DURATION` | `25` | Seconds of double jump ability after eating mushroom |
 | `MAX_AIR_JUMPS` | `1` | Maximum air jumps per airborne session |
-| `AIR_JUMP_INITIAL` | `-3.5` | Air jump initial velocity (50% of ground jump) |
-| `AIR_JUMP_HOLD_MAX_T` | `8` | Air jump hold frames (50% of ground jump) |
+| `AIR_JUMP_INITIAL` | `-4.2` | Air jump initial velocity (60% of ground jump) |
+| `AIR_JUMP_HOLD_MAX_T` | `8` | Air jump hold frames (55% of ground jump) |
 
 ### What Cannot Be Broken
 
