@@ -301,7 +301,7 @@ const MUSHROOM_PICKUP_INSET_X = 4;   // px inset on each side for strict mushroo
 const MUSHROOM_PICKUP_INSET_Y = 4;   // px inset on top/bottom for strict mushroom pickup box
 const PLAYER_PICKUP_INSET_X = 2;     // px inset on each side for strict player pickup box
 const PLAYER_PICKUP_INSET_Y = 2;     // px inset on top/bottom for strict player pickup box
-const SWEPT_MAX_REL_DISP = 30;       // max relative displacement (px) for swept pickup; beyond → frame-only
+// (swept pickup and arming removed — contact-only pickup)
 const DOUBLE_JUMP_DURATION = 25;     // seconds of double jump power after eating mushroom
 
 // ── Difficulty System ─────────────────────────────────
@@ -1386,27 +1386,6 @@ function mushroomPickupOverlap(pb, mx, my) {
   return rectsOverlap(pp.x, pp.y, pp.w, pp.h, mp.x, mp.y, mp.w, mp.h);
 }
 
-// Swept pickup (strict): uses inset boxes, with max-displacement gate.
-function sweptMushroomPickup(pb, m, prevMX, prevMY, prevPB) {
-  // Relative displacement of mushroom vs player
-  const relDX = (m.x - prevMX) - (pb.x - prevPB.x);
-  const relDY = (m.y - prevMY) - (pb.y - prevPB.y);
-  if (relDX === 0 && relDY === 0) return false;
-  // Gate: if relative displacement is too large, skip swept (frame-only overlap)
-  if (Math.abs(relDX) > SWEPT_MAX_REL_DISP || Math.abs(relDY) > SWEPT_MAX_REL_DISP) return false;
-  // Use inset boxes for Minkowski sum
-  const pp = getPlayerPickupBox(prevPB);
-  const mp = getMushroomPickupBox(prevMX, prevMY);
-  // Minkowski sum: expand player pickup box by mushroom pickup box size (no extra margin)
-  const ex = pp.x - mp.w;
-  const ey = pp.y - mp.h;
-  const ew = pp.w + mp.w;
-  const eh = pp.h + mp.h;
-  // Ray from prev mushroom pickup box origin in direction -relDX,-relDY
-  const result = sweptAABB(mp.x, mp.y, 1, 1, -relDX, -relDY, ex, ey, ew, eh);
-  return result.t >= 0 && result.t <= 1;
-}
-
 // Update mushroom physics
 function updateMushrooms() {
   const groundY = DESIGN_H - GROUND_H;
@@ -1414,9 +1393,6 @@ function updateMushrooms() {
 
   for (let i = mushrooms.length - 1; i >= 0; i--) {
     const m = mushrooms[i];
-    const prevMX = m.x;
-    const prevMY = m.y;
-    const prevPB = { x: pb.x - playerVX, y: pb.y - player.vy, w: pb.w, h: pb.h };
 
     // ── Grace timer: only blocks pickup, physics always runs ──
     if (m.graceTimer > 0) m.graceTimer--;
@@ -1553,13 +1529,9 @@ function updateMushrooms() {
       continue;
     }
 
-    // Pickup: grace timer must expire AND mushroom must be in ground-run state
-    const pickupEnabled = m.graceTimer <= 0 && m.state === 'ground-run';
-
-    // Check player pickup — enlarged hitbox + swept detection (v2)
-    const picked = pickupEnabled &&
-                   (mushroomPickupOverlap(pb, m.x, m.y) ||
-                    sweptMushroomPickup(pb, m, prevMX, prevMY, prevPB));
+    // ── Contact-only pickup: grace expired + strict AABB overlap ──
+    const overlap = mushroomPickupOverlap(pb, m.x, m.y);
+    const picked = (m.graceTimer <= 0) && overlap;
     if (picked) {
       doubleJumpTimer = DOUBLE_JUMP_DURATION;
       mushrooms.splice(i, 1);
@@ -3655,9 +3627,10 @@ function draw() {
       ctx.stroke();
       // Show mushroom state label above
       ctx.font = '9px monospace';
-      ctx.fillStyle = m.state === 'pop' ? '#f0f' : m.state === 'fall' ? '#ff0' : '#0f0';
-      const pickupOk = m.graceTimer <= 0 && m.state === 'ground-run';
-      ctx.fillText(m.state + ' G' + m.graceTimer + ' I' + MUSHROOM_PICKUP_INSET_X + (pickupOk ? ' PU' : ' NO'), m.x, m.y - 4);
+      const mOverlap = mushroomPickupOverlap(getPlayerHitbox(), m.x, m.y) ? 1 : 0;
+      const canPickup = m.graceTimer <= 0 && mOverlap;
+      ctx.fillStyle = canPickup ? '#0f0' : (m.graceTimer > 0 ? '#ff0' : '#fa0');
+      ctx.fillText('CONTACT_PICKUP:ON overlap:' + mOverlap + ' grace:' + m.graceTimer, m.x, m.y - 4);
     }
 
     // Layer 3: Player pickup box (magenta dashed)
@@ -3678,7 +3651,7 @@ function draw() {
     ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 24);
     ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 34);
-    ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported} STRICT_PICKUP:ON`, 4, DESIGN_H - 44);
+    ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported} CONTACT_PICKUP:ON mush:${mushrooms.length}`, 4, DESIGN_H - 44);
     ctx.restore();
   }
 }

@@ -160,7 +160,7 @@ When a special brick is broken, a **red mushroom** pops out, **drops to the grou
 - Mushroom spawns centered on the broken brick, **direction biased toward the player** for reachability
 - If the spawn position overlaps another unbroken brick, the mushroom is pushed above it
 - Mushroom **pops upward with visible initial velocity** (vy=-7) — 先從磚塊中彈出再落地行走，類似經典 Mario 香菇行為
-- During the pop-out phase, the mushroom has **30 frames of spawn grace** (~0.5s) — pickup is disabled until grace expires AND the mushroom reaches `ground-run` state, preventing "instant eat on headbutt"
+- During the pop-out phase, the mushroom has **30 frames of spawn grace** (~0.5s) — pickup is disabled until grace expires, preventing "instant eat on headbutt"
 - Spawn position is shifted to maintain **≥24px horizontal distance** from the player
 - If the spawn position overlaps the player hitbox, the mushroom is **shifted horizontally** away from the player for extra safety
 - After the arc, the mushroom **falls under gravity** (0.4 px/frame²) until landing on the ground or a solid surface
@@ -169,25 +169,14 @@ When a special brick is broken, a **red mushroom** pops out, **drops to the grou
 - **Unstuck logic**: if a mushroom remains embedded in a solid for 30+ frames, it teleports to ground level
 - Removed when off-screen
 
-**Collecting:** Walk into or near the mushroom to pick it up. On pickup:
+**Collecting:** Walk into the mushroom (actual AABB overlap required) to pick it up. On pickup:
 - The **double jump** ability activates for **25 seconds**
 - A `MUSHROOM!` popup appears
 - Picking up another mushroom while the timer is active **resets the timer** to 25 seconds
 
-### Mushroom Pickup Detection (Strict Pickup)
+### Mushroom Pickup Detection (Armed Contact Pickup)
 
-The pickup system uses **inset collision boxes** (strict pickup) to prevent "pickup before visual contact":
-
-- Both the **mushroom** and **player** hitboxes are **inset** (shrunk inward) when testing pickup collision, so the player must visually overlap the mushroom sprite before collection triggers.
-- No outward expansion is applied — the pickup box is always **smaller** than the visual sprite.
-
-**Two-layer detection:**
-
-1. **Inset overlap check** — the mushroom visual box is inset by `MUSHROOM_PICKUP_INSET_X/Y` (4 px each side), and the player hitbox is inset by `PLAYER_PICKUP_INSET_X/Y` (2 px each side). Only when these shrunken boxes overlap does a pickup occur.
-
-2. **Strict swept pickup (continuous detection)** — each frame, the relative displacement between the mushroom and player is computed. A Minkowski swept AABB test is run using the **inset boxes** (no extra margin). If the relative displacement exceeds `SWEPT_MAX_REL_DISP` (30 px), swept detection is skipped and only the current-frame overlap is used, preventing long-distance "magnet" effects.
-
-Together, these two methods ensure mushrooms are collected only on genuine visual contact, while still catching fast-moving near-misses within a single frame.
+Mushrooms are collected **only when the player's inset pickup box overlaps the mushroom's inset pickup box** AND the mushroom has been **armed**. Arming requires: grace expired, mushroom in `ground-run` state, and the mushroom must have been **fully separated** from the player for at least 8 consecutive frames. Once armed, pickup stays armed (no re-lock on re-overlap).
 
 | Constant | Default | Purpose |
 |----------|---------|---------|
@@ -195,8 +184,8 @@ Together, these two methods ensure mushrooms are collected only on genuine visua
 | `MUSHROOM_PICKUP_INSET_Y` | `4` | Pixel inset on top/bottom of mushroom for strict pickup box |
 | `PLAYER_PICKUP_INSET_X` | `2` | Pixel inset on each side of player hitbox for pickup |
 | `PLAYER_PICKUP_INSET_Y` | `2` | Pixel inset on top/bottom of player hitbox for pickup |
-| `SWEPT_MAX_REL_DISP` | `30` | Max relative displacement (px) for swept pickup; beyond this, only frame overlap is used |
-| `MUSHROOM_SPAWN_GRACE` | `30` | Frames of pickup immunity after spawn (~0.5s); also requires `ground-run` state |
+| `MUSHROOM_SPAWN_GRACE` | `30` | Frames of pickup immunity after spawn (~0.5s) |
+| `MUSHROOM_ARM_SEP_FRAMES` | `8` | Consecutive no-overlap frames needed to arm pickup after grace expires |
 | `MIN_SPAWN_DIST` | `24` | Minimum horizontal px distance from player at spawn |
 
 #### Debug Features (`?debug=1`)
@@ -205,8 +194,7 @@ Together, these two methods ensure mushrooms are collected only on genuine visua
 - **Cyan dashed outline**: mushroom inset pickup box (actual collision for pickup)
 - **Magenta dashed outline**: player inset pickup box
 - **Yellow arrow**: mushroom velocity direction
-- **State label** above mushroom: `pop` (magenta) → `fall` (yellow) → `ground-run` (green), with `G<n>` grace frames, `I<n>` inset, and `PU` (pickup enabled) or `NO` (pickup blocked)
-- **`STRICT_PICKUP:ON`** in bottom debug status line
+- **State label** above mushroom: `<state> G<n> sep<n> armed:0/1` — shows state, grace frames, separation frame count, and armed status (green when armed, orange when ground-run but unarmed)
 - **`MUSHROOM PICKUP`** (red text, top-left): flashes for ~2s when a mushroom is collected
 - **Bottom status line**: shows `mush:N` (number of active mushrooms)
 - **Console logs**: spawn position, state transitions (`pop→fall→ground-run`), collection events, unstuck teleports
