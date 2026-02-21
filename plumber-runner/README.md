@@ -152,7 +152,7 @@ Special bricks follow the same break rules as normal bricks (hit from below whil
 
 ### Mushroom Power-Up
 
-When a special brick is broken, a **red mushroom** pops out and moves through the world:
+When a special brick is broken, a **red mushroom** pops out and moves through the world (香菇為「掉落到地面後移動」行為):
 
 - Mushroom spawns centered on the broken brick, **direction biased toward the player** for reachability
 - If the spawn position overlaps another unbroken brick, the mushroom is pushed above it
