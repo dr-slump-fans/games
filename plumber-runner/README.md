@@ -174,28 +174,39 @@ When a special brick is broken, a **red mushroom** pops out, **drops to the grou
 - A `MUSHROOM!` popup appears
 - Picking up another mushroom while the timer is active **resets the timer** to 25 seconds
 
-### Mushroom Pickup Detection
+### Mushroom Pickup Detection (Strict Pickup)
 
-The pickup system uses a **two-layer approach** to prevent missed pickups at high game speeds:
+The pickup system uses **inset collision boxes** (strict pickup) to prevent "pickup before visual contact":
 
-1. **Enlarged overlap check** — the player hitbox is expanded by `MUSHROOM_PICKUP_MARGIN` (2 px) on each side when testing mushroom collision. This provides a tight but forgiving "grab radius" that compensates for frame-to-frame position jumps. (Tightened from 6px to reduce instant-eat.)
+- Both the **mushroom** and **player** hitboxes are **inset** (shrunk inward) when testing pickup collision, so the player must visually overlap the mushroom sprite before collection triggers.
+- No outward expansion is applied — the pickup box is always **smaller** than the visual sprite.
 
-2. **Swept pickup (continuous detection)** — each frame, the relative displacement between the mushroom and player is computed. A Minkowski-expanded swept AABB test is run along this path. If the player and mushroom paths crossed at any point during the frame (even if they don't overlap at frame boundaries), the pickup triggers.
+**Two-layer detection:**
 
-Together, these two methods ensure that mushrooms can be reliably collected even at the highest scroll speeds and during fast air movement.
+1. **Inset overlap check** — the mushroom visual box is inset by `MUSHROOM_PICKUP_INSET_X/Y` (4 px each side), and the player hitbox is inset by `PLAYER_PICKUP_INSET_X/Y` (2 px each side). Only when these shrunken boxes overlap does a pickup occur.
+
+2. **Strict swept pickup (continuous detection)** — each frame, the relative displacement between the mushroom and player is computed. A Minkowski swept AABB test is run using the **inset boxes** (no extra margin). If the relative displacement exceeds `SWEPT_MAX_REL_DISP` (30 px), swept detection is skipped and only the current-frame overlap is used, preventing long-distance "magnet" effects.
+
+Together, these two methods ensure mushrooms are collected only on genuine visual contact, while still catching fast-moving near-misses within a single frame.
 
 | Constant | Default | Purpose |
 |----------|---------|---------|
-| `MUSHROOM_PICKUP_MARGIN` | `2` | Pixel expansion on each side for enlarged pickup zone (tightened from 6) |
+| `MUSHROOM_PICKUP_INSET_X` | `4` | Pixel inset on each side of mushroom for strict pickup box |
+| `MUSHROOM_PICKUP_INSET_Y` | `4` | Pixel inset on top/bottom of mushroom for strict pickup box |
+| `PLAYER_PICKUP_INSET_X` | `2` | Pixel inset on each side of player hitbox for pickup |
+| `PLAYER_PICKUP_INSET_Y` | `2` | Pixel inset on top/bottom of player hitbox for pickup |
+| `SWEPT_MAX_REL_DISP` | `30` | Max relative displacement (px) for swept pickup; beyond this, only frame overlap is used |
 | `MUSHROOM_SPAWN_GRACE` | `30` | Frames of pickup immunity after spawn (~0.5s); also requires `ground-run` state |
 | `MIN_SPAWN_DIST` | `24` | Minimum horizontal px distance from player at spawn |
 
 #### Debug Features (`?debug=1`)
 
-- **Red outline**: mushroom hitbox (actual collision box)
-- **Pink dashed outline**: expanded pickup zone (with `MUSHROOM_PICKUP_MARGIN`)
+- **Red outline**: mushroom visual box (full sprite bounds)
+- **Cyan dashed outline**: mushroom inset pickup box (actual collision for pickup)
+- **Magenta dashed outline**: player inset pickup box
 - **Yellow arrow**: mushroom velocity direction
-- **State label** above mushroom: `pop` (magenta) → `fall` (yellow) → `ground-run` (green), with `G<n>` grace frames, `M<n>` pickup margin, and `PU` (pickup enabled) or `NO` (pickup blocked)
+- **State label** above mushroom: `pop` (magenta) → `fall` (yellow) → `ground-run` (green), with `G<n>` grace frames, `I<n>` inset, and `PU` (pickup enabled) or `NO` (pickup blocked)
+- **`STRICT_PICKUP:ON`** in bottom debug status line
 - **`MUSHROOM PICKUP`** (red text, top-left): flashes for ~2s when a mushroom is collected
 - **Bottom status line**: shows `mush:N` (number of active mushrooms)
 - **Console logs**: spawn position, state transitions (`pop→fall→ground-run`), collection events, unstuck teleports
