@@ -784,6 +784,60 @@ Bottom status line adds:
 - `VIB:ON/OFF` — current vibration state
 - `VIB_SUPPORTED:true/false` — whether the browser supports the Vibration API
 
+## Frame-rate Independent Simulation
+
+The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.
+
+### How It Works
+
+The main loop uses `requestAnimationFrame` with an **accumulator pattern**:
+
+1. Each render frame, the real elapsed wall-clock time (`dt`) is measured.
+2. `dt` is added to an accumulator.
+3. The game logic (`update()`) runs in fixed increments of **1/60th of a second** (`FIXED_DT = 1/60`) until the accumulator is drained.
+4. After all logic steps, a single `draw()` call renders the current state.
+
+```
+realDt = (now - lastTimestamp) / 1000   // seconds
+accumulator += realDt
+while (accumulator >= FIXED_DT):
+    update()                             // always 1/60s per call
+    accumulator -= FIXED_DT
+draw()
+```
+
+### Safety Measures
+
+| Measure | Value | Purpose |
+|---------|-------|---------|
+| `MAX_FRAME_DT` | `0.1s` | Clamp real dt to prevent death spiral when switching back to the tab after being away |
+| `MAX_STEPS_PER_FRAME` | `5` | Cap logic steps per render frame; excess accumulator is drained to prevent permanent lag spiral |
+| Accumulator reset | On `startGame()` | Prevents stale dt from title/death screen carrying over into gameplay |
+
+### Why Fixed Timestep (Not Delta-Time Scaling)
+
+- **Deterministic**: every `update()` call sees the exact same time step — no floating-point drift from variable `dt` multiplication.
+- **Zero constant changes**: all existing physics values (gravity, jump velocity, acceleration, timers) were tuned for 60 FPS and work unmodified.
+- **Collision stability**: the swept AABB collision system operates identically every step — no risk of tunneling from large `dt` values.
+
+### Debug Overlay (`?debug=1`)
+
+When debug mode is active, the bottom status area includes:
+
+- `dt:X.Xms` — raw wall-clock time of the last render frame
+- `logicSteps:N` — number of `update()` calls executed in the last render frame (typically 1 at 60 Hz, 2 at 30 Hz, 0–1 at 144 Hz)
+- `fps(est):X.X` — exponentially smoothed estimate of the display refresh rate
+
+### Expected Behavior at Different Refresh Rates
+
+| Display | Logic steps/frame | Result |
+|---------|-------------------|--------|
+| 30 Hz | 2 | Two update() calls per draw — game runs at correct speed, slightly choppier animation |
+| 60 Hz | 1 | One update() per draw — baseline experience |
+| 120 Hz | 0 or 1 (alternating) | Some frames skip logic, some run one step — smooth animation, correct speed |
+| 144 Hz | 0 or 1 (alternating) | Same as 120 Hz — no speed increase |
+| Tab hidden | 0 (clamped) | dt capped at 100ms, max 5 catch-up steps — no death spiral or teleporting |
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

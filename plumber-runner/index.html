@@ -3652,14 +3652,60 @@ function draw() {
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 24);
     ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 34);
     ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported} CONTACT_PICKUP:ON mush:${mushrooms.length}`, 4, DESIGN_H - 44);
+    ctx.fillText(`dt:${(_debugDt * 1000).toFixed(1)}ms logicSteps:${_debugLogicSteps} fps(est):${_debugFps.toFixed(1)}`, 4, DESIGN_H - 54);
     ctx.restore();
   }
 }
 
-function gameLoop() {
-  update();
-  draw();
+// ── Fixed Timestep Loop ─────────────────────────────────
+// All game logic runs at a fixed 60 Hz (FIXED_DT = 1/60s).
+// The game loop uses an accumulator: each render frame, real elapsed
+// time is added to the accumulator, and update() is called in fixed
+// increments until the accumulator is drained.  This ensures identical
+// physics on 30 Hz phones, 60 Hz laptops, and 144+ Hz monitors.
+const FIXED_DT = 1 / 60;         // seconds per logic step
+const MAX_FRAME_DT = 0.1;        // clamp real dt to avoid spiral (tab-away)
+const MAX_STEPS_PER_FRAME = 5;   // safety: cap logic steps per render frame
+let _accumulator = 0;
+let _lastTimestamp = -1;
+let _debugDt = 0;         // raw dt of last render frame (seconds)
+let _debugLogicSteps = 0; // logic steps executed last render frame
+let _debugFps = 60;       // estimated FPS (smoothed)
+let _fpsAlpha = 0.05;     // EMA smoothing factor for FPS
+
+function gameLoop(timestamp) {
   requestAnimationFrame(gameLoop);
+
+  // First frame: seed timestamp, skip logic to avoid a giant dt
+  if (_lastTimestamp < 0) {
+    _lastTimestamp = timestamp;
+    draw();
+    return;
+  }
+
+  // Real elapsed time in seconds; clamp to prevent death spiral
+  let realDt = (timestamp - _lastTimestamp) / 1000;
+  _lastTimestamp = timestamp;
+  if (realDt > MAX_FRAME_DT) realDt = MAX_FRAME_DT;
+
+  // Debug stats
+  _debugDt = realDt;
+  if (realDt > 0) _debugFps += _fpsAlpha * (1 / realDt - _debugFps);
+
+  // Accumulate and run fixed-step updates
+  _accumulator += realDt;
+  let steps = 0;
+  while (_accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
+    update();
+    _accumulator -= FIXED_DT;
+    steps++;
+  }
+  // If accumulator still has leftover (hit step cap), drain it to
+  // prevent permanent lag spiral.
+  if (steps >= MAX_STEPS_PER_FRAME) _accumulator = 0;
+  _debugLogicSteps = steps;
+
+  draw();
 }
 
 // ── Overlay ────────────────────────────────────────────
@@ -3697,6 +3743,9 @@ function startGame() {
   resetGame();
   player.animState = 'idle';
   state = 'playing';
+  // Reset fixed-timestep accumulator so no stale dt carries over
+  _accumulator = 0;
+  _lastTimestamp = -1;
 }
 
 // ── Input ──────────────────────────────────────────────
@@ -3799,7 +3848,7 @@ loadSprite(); // attempt sprite mode; falls back to procedural on failure
 initClouds();
 initHills();
 showOverlay('Plumber Runner', 'MOVE: Arrows/AD  |  JUMP: Space');
-gameLoop();
+requestAnimationFrame(gameLoop);
 
 // Expose self-test globally for console access
 window.runCollisionSelfTest = runCollisionSelfTest;
