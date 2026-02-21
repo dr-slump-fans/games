@@ -673,6 +673,66 @@ Each run randomly assigns one lightweight mission from a pool. Complete it for a
 | `MISSION_REWARD_SCORE` | `50` | Score bonus for completing a mission |
 | `MISSION_COMPLETE_DISPLAY` | `120` | Frames to show the completion popup |
 
+## Fun Pack v2: Boss Wave
+
+A periodic mini-challenge that creates exciting rhythm spikes every 60 seconds, rewarding survival with bonus points.
+
+### Trigger
+
+- Boss Wave activates every **60 seconds** of survival time
+- Each wave lasts **10 seconds**
+- After the wave ends, normal gameplay resumes
+- The cycle repeats: 60s normal → 10s boss → 60s normal → 10s boss ...
+
+### Boss Wave Modes
+
+Two obstacle patterns alternate each wave:
+
+| Mode | Name | Pattern | Challenge |
+|------|------|---------|-----------|
+| A | Dense Low | Short bottom pipes (50–80px) at tight intervals (120px apart) | Rhythm jumping — rapid successive hops |
+| B | High-Low Mix | Alternating tall bottom pipes, ceiling pipes with helpful bricks, and brick-only gaps | Precision and platform awareness |
+
+- Odd-numbered waves use **Mode A**, even-numbered waves use **Mode B**
+- All patterns are survivable — no guaranteed-death layouts
+- Mode B includes breakable bricks (some special) for bonus points and mushroom spawns
+
+### Reward
+
+- Surviving a Boss Wave awards **+100 points**
+- A `BOSS CLEAR +100` popup appears for 2 seconds after completion
+- Points stack with the combo system — breaking bricks during a boss wave still triggers combos
+
+### Integration with Existing Systems
+
+- **Speed Wave**: amplitude is dampened to 30% during Boss Waves to prevent unfair speed spikes
+- **Combo System**: fully active during Boss Waves — chain brick breaks and perfect landings for multiplied bonus
+- **Mission System**: missions continue tracking during Boss Waves
+- **RUN Boost**: unchanged — player running ability works normally
+- **Collision**: all swept AABB collision detection and safety systems remain active
+
+### HUD
+
+- `BOSS WAVE! Xs` — red pulsing text at center-screen during the wave, with countdown
+- `BOSS CLEAR +100` — orange text after surviving, fades out over 2 seconds
+
+### Debug (`?debug=1`)
+
+Bottom status line shows:
+- `BOSS:ON/OFF` — whether a boss wave is active
+- `BOSS_T:X.X` — seconds remaining in current wave
+- `BOSS_MODE:A/B` — current wave pattern
+- `BOSS_COUNT:N` — total waves this run
+- `NEXT:Xs` — survival time threshold for next wave
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `BOSS_WAVE_INTERVAL` | `60` | Seconds between boss waves |
+| `BOSS_WAVE_DURATION` | `10` | Seconds each boss wave lasts |
+| `BOSS_WAVE_REWARD_SCORE` | `100` | Score bonus for surviving a boss wave |
+| `BOSS_WAVE_SPEED_WAVE_DAMP` | `0.3` | Speed wave amplitude multiplier during boss (30%) |
+| `BOSS_WAVE_SPAWN_GAP` | `120` | Pixels between boss wave obstacles |
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

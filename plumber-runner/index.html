@@ -141,6 +141,25 @@ canvas {
   display: none;
   z-index: 12;
 }
+/* ── Fun Pack v2: Boss Wave HUD ───────────────────── */
+#hud-boss-wave {
+  position: absolute; top: 30%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 32px; font-weight: bold;
+  color: #e74c3c; text-shadow: 2px 2px 0 #000, 0 0 16px rgba(231,76,60,0.8);
+  pointer-events: none;
+  display: none;
+  z-index: 13;
+}
+#hud-boss-clear {
+  position: absolute; top: 35%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 26px; font-weight: bold;
+  color: #f39c12; text-shadow: 2px 2px 0 #000, 0 0 12px rgba(243,156,18,0.7);
+  pointer-events: none;
+  display: none;
+  z-index: 13;
+}
 </style>
 </head>
 <body>
@@ -169,6 +188,8 @@ canvas {
 <div id="hud-combo-bar"></div>
 <div id="hud-mission"></div>
 <div id="hud-mission-complete">MISSION COMPLETE!</div>
+<div id="hud-boss-wave"></div>
+<div id="hud-boss-clear"></div>
 <div id="ui">
   <div id="overlay">
     <h1 id="ol-title">Plumber Runner</h1>
@@ -280,6 +301,13 @@ const SPEED_WAVE_AMP = 0.10;       // ±10% amplitude
 const MISSION_REWARD_SCORE = 50;
 const MISSION_COMPLETE_DISPLAY = 120; // frames to show MISSION COMPLETE
 
+// ── Fun Pack v2: Boss Wave ──────────────────────────
+const BOSS_WAVE_INTERVAL = 60;       // seconds between boss waves
+const BOSS_WAVE_DURATION = 10;       // seconds each boss wave lasts
+const BOSS_WAVE_REWARD_SCORE = 100;  // bonus score for surviving boss wave
+const BOSS_WAVE_SPEED_WAVE_DAMP = 0.3; // dampen speed wave amplitude during boss (30% of normal)
+const BOSS_WAVE_SPAWN_GAP = 120;     // pixels between boss wave obstacles (tighter than normal)
+
 // ── Debug Mode ───────────────────────────────────────
 const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === '1';
 
@@ -379,6 +407,8 @@ const hudCombo = document.getElementById('hud-combo');
 const hudComboBar = document.getElementById('hud-combo-bar');
 const hudMission = document.getElementById('hud-mission');
 const hudMissionComplete = document.getElementById('hud-mission-complete');
+const hudBossWave = document.getElementById('hud-boss-wave');
+const hudBossClear = document.getElementById('hud-boss-clear');
 
 // ── Game State ─────────────────────────────────────────
 let state = 'title'; // title | playing | dead
@@ -419,6 +449,17 @@ let speedWavePhase = 0;       // current wave phase in radians
 let mission = null;           // { type, desc, target, progress, done }
 let missionCompleteTimer = 0; // frames remaining for MISSION COMPLETE display
 let missionPlatformLandCount = 0; // consecutive platform landings for mission type 2
+
+// ── Fun Pack v2: Boss Wave State ────────────────────
+let bossWaveActive = false;          // true during a boss wave
+let bossWaveTimer = 0;               // seconds remaining in current boss wave
+let bossWaveCount = 0;               // how many boss waves have occurred this run
+let bossWaveMode = 'A';              // current boss wave mode: 'A' or 'B'
+let bossWaveCleared = false;         // true when boss wave ends by surviving
+let bossWaveClearTimer = 0;          // frames remaining for BOSS CLEAR popup
+let bossWaveSpawnX = 0;              // tracks next boss obstacle spawn X position
+let bossWaveStepCounter = 0;         // obstacle step counter within current boss wave (for Mode B pattern)
+let bossWaveNextTrigger = BOSS_WAVE_INTERVAL; // survivalTime threshold for next boss wave
 
 // ── Mushroom & Double Jump State ─────────────────────
 let mushrooms = [];           // active mushroom items: { x, y, vx, vy, onGround }
@@ -2335,6 +2376,88 @@ function advanceMission(eventType) {
   }
 }
 
+// ── Fun Pack v2: Boss Wave Logic ───────────────────────
+function startBossWave() {
+  bossWaveActive = true;
+  bossWaveTimer = BOSS_WAVE_DURATION;
+  bossWaveCount++;
+  bossWaveCleared = false;
+  bossWaveStepCounter = 0;
+  // Alternate modes: odd waves = A, even waves = B (or random)
+  bossWaveMode = (bossWaveCount % 2 === 1) ? 'A' : 'B';
+  // Set next trigger time (from when the wave ENDS, not starts)
+  bossWaveNextTrigger = survivalTime + BOSS_WAVE_DURATION + BOSS_WAVE_INTERVAL;
+}
+
+function endBossWave() {
+  bossWaveActive = false;
+  bossWaveTimer = 0;
+  if (!bossWaveCleared) {
+    // Player survived — give reward
+    bossWaveCleared = true;
+    bossWaveClearTimer = 120; // 2 seconds at 60fps
+    score += BOSS_WAVE_REWARD_SCORE;
+    spawnScorePopup(player.x, player.y - 30, BOSS_WAVE_REWARD_SCORE);
+  }
+}
+
+// Mode A: Dense low obstacles — rhythm jumping challenge
+// Spawns a series of short bottom pipes at tight intervals
+function spawnBossWaveObstacleA() {
+  // Low pipes: heights 50-80px — easy to jump over individually but need rhythm
+  const h = 50 + Math.floor(Math.random() * 30);
+  pipes.push({ x: bossWaveSpawnX, h: h, fromTop: false, scored: false });
+}
+
+// Mode B: High-low alternating obstacles with platform bricks
+// Mix of tall bottom pipes, short ceiling pipes, and helpful bricks
+function spawnBossWaveObstacleB() {
+  const groundY = DESIGN_H - GROUND_H;
+  const step = bossWaveStepCounter % 3;
+
+  if (step === 0) {
+    // Tall bottom pipe (needs jump)
+    const h = 90 + Math.floor(Math.random() * 40); // 90-130px
+    pipes.push({ x: bossWaveSpawnX, h: h, fromTop: false, scored: false });
+  } else if (step === 1) {
+    // Short ceiling pipe + a helpful brick to stand on or break
+    const topH = 60 + Math.floor(Math.random() * 30); // 60-90px ceiling
+    pipes.push({ x: bossWaveSpawnX, h: topH, fromTop: true, scored: false });
+    // Place a brick at a useful jump height
+    const brickTopY = groundY - (80 + Math.floor(Math.random() * 25)); // 80-105px above ground
+    bricks.push({
+      x: bossWaveSpawnX - 20 + Math.floor(Math.random() * 40),
+      y: brickTopY,
+      w: BRICK_W,
+      h: BRICK_H,
+      broken: false,
+      special: Math.random() < 0.3,
+    });
+  } else {
+    // Gap with a brick platform at mid height — breathing room + reward
+    const brickTopY = groundY - (90 + Math.floor(Math.random() * 30)); // 90-120px
+    bricks.push({
+      x: bossWaveSpawnX,
+      y: brickTopY,
+      w: BRICK_W,
+      h: BRICK_H,
+      broken: false,
+      special: Math.random() < 0.4,
+    });
+    // Add a small marker pipe so scoring/spawn tracking continues
+    pipes.push({ x: bossWaveSpawnX, h: 0, fromTop: false, scored: false });
+  }
+}
+
+function spawnBossWaveObstacle() {
+  if (bossWaveMode === 'A') {
+    spawnBossWaveObstacleA();
+  } else {
+    spawnBossWaveObstacleB();
+  }
+  bossWaveStepCounter++;
+}
+
 // ── Game Logic ─────────────────────────────────────────
 let groundOffset = 0;
 
@@ -2382,6 +2505,16 @@ function resetGame() {
   mission.startTime = 0;
   missionCompleteTimer = 0;
   missionPlatformLandCount = 0;
+  // Fun Pack v2 resets
+  bossWaveActive = false;
+  bossWaveTimer = 0;
+  bossWaveCount = 0;
+  bossWaveMode = 'A';
+  bossWaveCleared = false;
+  bossWaveClearTimer = 0;
+  bossWaveSpawnX = 0;
+  bossWaveStepCounter = 0;
+  bossWaveNextTrigger = BOSS_WAVE_INTERVAL;
   initClouds();
   initHills();
   // Seed first pipe pair far away
@@ -2747,9 +2880,26 @@ function update() {
   // Dynamic recenter target: shifts forward proportionally to boost level
   dynamicTargetX = RECENTER_TARGET_X + runBoostFactor * RUN_BOOST_FORWARD_SHIFT;
   // RUN BOOST affects player run ability only, NOT world scroll speed.
+
+  // ── Fun Pack v2: Boss Wave trigger & timer ──────────
+  if (bossWaveActive) {
+    bossWaveTimer -= 1 / 60;
+    if (bossWaveTimer <= 0) {
+      endBossWave();
+    }
+  } else if (survivalTime >= bossWaveNextTrigger) {
+    startBossWave();
+  }
+  // Boss clear popup countdown
+  if (bossWaveClearTimer > 0) bossWaveClearTimer--;
+
   // Fun Pack v1: Speed wave — smooth oscillation around base speed
   speedWavePhase = (survivalTime / SPEED_WAVE_PERIOD) * Math.PI * 2;
-  const waveFactor = getSpeedWaveFactor();
+  let waveFactor = getSpeedWaveFactor();
+  // Fun Pack v2: Dampen speed wave during boss wave to avoid unfair spikes
+  if (bossWaveActive) {
+    waveFactor = 1.0 + (waveFactor - 1.0) * BOSS_WAVE_SPEED_WAVE_DAMP;
+  }
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * waveFactor;
   groundOffset += scrollSpeed;
 
@@ -2987,14 +3137,26 @@ function update() {
   // Remove off-screen or broken bricks
   bricks = bricks.filter(b => !b.broken && b.x > -BRICK_W - 10);
 
-  // Spawn pipes
-  if (pipes.length > 0) {
-    const rightmost = pipes.reduce((a, b) => a.x > b.x ? a : b);
-    if (rightmost.x < DESIGN_W) {
-      spawnPipe();
+  // Spawn pipes (or boss wave obstacles during boss wave)
+  if (bossWaveActive) {
+    // During boss wave, spawn boss obstacles instead of normal pipes.
+    // Check if rightmost pipe has scrolled close enough to need more obstacles ahead.
+    const rightmostBossX = pipes.length > 0
+      ? pipes.reduce((a, b) => a.x > b.x ? a : b).x
+      : 0;
+    if (rightmostBossX < DESIGN_W) {
+      bossWaveSpawnX = rightmostBossX + BOSS_WAVE_SPAWN_GAP;
+      spawnBossWaveObstacle();
     }
   } else {
-    spawnInitialPipes();
+    if (pipes.length > 0) {
+      const rightmost = pipes.reduce((a, b) => a.x > b.x ? a : b);
+      if (rightmost.x < DESIGN_W) {
+        spawnPipe();
+      }
+    } else {
+      spawnInitialPipes();
+    }
   }
 
   // ── Recover player X towards dynamicTargetX ───────────────────
@@ -3186,6 +3348,28 @@ function update() {
   } else {
     hudMissionComplete.style.display = 'none';
   }
+
+  // ── Fun Pack v2: Boss Wave HUD ──────────────────────
+  if (bossWaveActive) {
+    const secLeft = Math.ceil(bossWaveTimer);
+    hudBossWave.textContent = `BOSS WAVE!  ${secLeft}s`;
+    hudBossWave.style.display = 'block';
+    // Pulse effect: scale oscillates slightly
+    const pulse = 1.0 + 0.05 * Math.sin(frameCount * 0.15);
+    hudBossWave.style.transform = `translate(-50%, -50%) scale(${pulse.toFixed(3)})`;
+  } else {
+    hudBossWave.style.display = 'none';
+  }
+  // Boss clear reward popup
+  if (bossWaveClearTimer > 0) {
+    hudBossClear.textContent = `BOSS CLEAR +${BOSS_WAVE_REWARD_SCORE}`;
+    hudBossClear.style.display = 'block';
+    hudBossClear.style.opacity = Math.min(1, bossWaveClearTimer / 20);
+    const clearScale = 1 + 0.2 * (bossWaveClearTimer / 120);
+    hudBossClear.style.transform = `translate(-50%, -50%) scale(${clearScale.toFixed(3)})`;
+  } else {
+    hudBossClear.style.display = 'none';
+  }
 }
 
 function draw() {
@@ -3342,6 +3526,7 @@ function draw() {
     ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount} RECOVER_STALL:${recoverStallFrames}`, 4, DESIGN_H - 14);
     ctx.fillText(`TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)} STALL:${recoverStallFrames}`, 4, DESIGN_H - 24);
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 34);
+    ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 44);
 
     ctx.restore();
   }
@@ -3370,6 +3555,8 @@ function showOverlay(title, msg, sc) {
   hudComboBar.style.display = 'none';
   hudMission.style.display = 'none';
   hudMissionComplete.style.display = 'none';
+  hudBossWave.style.display = 'none';
+  hudBossClear.style.display = 'none';
 }
 
 function hideOverlay() {
