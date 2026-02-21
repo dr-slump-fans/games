@@ -168,6 +168,7 @@ const RUN_BOOST_MULTIPLIER = 1.55;  // max speed multiplier when run button held
 const RUN_BOOST_JUMP_MULTIPLIER = 1.18; // jump initial velocity multiplier when run boost active at jump start
 const RUN_BOOST_RAMP_UP = 0.028;    // per-frame increment when holding run (~0.6s to full at 60fps)
 const RUN_BOOST_RAMP_DOWN = 0.045;  // per-frame decrement on release (~0.37s to zero at 60fps)
+const RUN_BOOST_FORWARD_SHIFT = DESIGN_W * 0.10; // +10% screen width forward shift when running
 
 // ── Lip Corner Forgiveness ──────────────────────────
 // When the player is beside a pipe and jumps upward, the lip overhang
@@ -335,6 +336,7 @@ let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
 let justJumped = false;    // true during the frame a jump was initiated; prevents swept movement from re-grounding
 let runBoostPressed = false; // true when run/boost key or left button is held
 let runBoostFactor = 0;       // 0..1 gradual boost level (ramps up while held, ramps down on release)
+let dynamicTargetX = RECENTER_TARGET_X; // current recenter target — shifts forward with runBoostFactor
 
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
@@ -2117,6 +2119,7 @@ function resetGame() {
   wallNudgeUsed = false;
   runBoostPressed = false;
   runBoostFactor = 0;
+  dynamicTargetX = RECENTER_TARGET_X;
   edgeDebugMsgs = [];
   depenFixCount = 0;
   initClouds();
@@ -2481,6 +2484,8 @@ function update() {
   } else {
     runBoostFactor = Math.max(0, runBoostFactor - RUN_BOOST_RAMP_DOWN);
   }
+  // Dynamic recenter target: shifts forward proportionally to boost level
+  dynamicTargetX = RECENTER_TARGET_X + runBoostFactor * RUN_BOOST_FORWARD_SHIFT;
   // RUN BOOST affects player run ability only, NOT world scroll speed.
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
   groundOffset += scrollSpeed;
@@ -2721,8 +2726,8 @@ function update() {
       }
     }
   }
-  if (!beingPushed && player.x < RECENTER_TARGET_X) {
-    const diff = RECENTER_TARGET_X - player.x;
+  if (!beingPushed && player.x < dynamicTargetX) {
+    const diff = dynamicTargetX - player.x;
     // Lerp-based recovery scaled with scrollSpeed so high-speed play can still recenter.
     // At base speed (3.5) uses factor 0.12; at higher speeds, factor scales up proportionally.
     // Min speed also scales with scrollSpeed to prevent Zeno crawl at high difficulty.
@@ -3010,7 +3015,7 @@ function draw() {
     ctx.fillStyle = '#0f0';
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
     ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
-    ctx.fillText(`TARGET_X:${RECENTER_TARGET_X} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - RECENTER_TARGET_X).toFixed(1)}`, 4, DESIGN_H - 24);
+    ctx.fillText(`TARGET_X:${RECENTER_TARGET_X} TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)}`, 4, DESIGN_H - 24);
 
     ctx.restore();
   }
