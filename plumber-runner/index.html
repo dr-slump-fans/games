@@ -959,24 +959,77 @@ function drawMushroom(mx, my) {
 
 // Spawn a mushroom from a broken special brick
 function spawnMushroom(bx, by) {
-  const dir = Math.random() < 0.5 ? 1 : -1;
+  // Prefer direction toward player so mushroom is reachable
+  const dir = (player.x < bx) ? -1 : 1;
+  let spawnX = bx + BRICK_W / 2 - MUSHROOM_W / 2;
+  let spawnY = by - MUSHROOM_H;
+
+  // Ensure spawn position doesn't overlap unbroken bricks above
+  for (const brick of bricks) {
+    if (brick.broken) continue;
+    if (rectsOverlap(spawnX, spawnY, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
+      // Push mushroom above the blocking brick
+      spawnY = brick.y - MUSHROOM_H - 2;
+    }
+  }
+  // Clamp: don't spawn above screen
+  if (spawnY < 0) spawnY = 0;
+
   mushrooms.push({
-    x: bx + BRICK_W / 2 - MUSHROOM_W / 2,
-    y: by - MUSHROOM_H,
+    x: spawnX,
+    y: spawnY,
     vx: MUSHROOM_SPEED * dir,
     vy: -3,  // pop up initially
     onGround: false,
+    stuckFrames: 0,  // unstuck counter
   });
   if (DEBUG_MODE) {
-    console.log(`%c[Mushroom] Spawned at (${Math.round(bx)}, ${Math.round(by)}), dir=${dir > 0 ? 'right' : 'left'}`, 'color: #e53935');
+    console.log(`%c[Mushroom] Spawned at (${Math.round(spawnX)}, ${Math.round(spawnY)}), dir=${dir > 0 ? 'right' : 'left'}`, 'color: #e53935');
   }
+}
+
+// Enlarged overlap check for mushroom pickup — expands both rects by a margin
+// to catch near-misses at high scroll speeds.
+const MUSHROOM_PICKUP_MARGIN = 6; // px expansion on each side
+
+function mushroomPickupOverlap(pb, mx, my) {
+  // Expand player hitbox for pickup tolerance
+  const px = pb.x - MUSHROOM_PICKUP_MARGIN;
+  const py = pb.y - MUSHROOM_PICKUP_MARGIN;
+  const pw = pb.w + MUSHROOM_PICKUP_MARGIN * 2;
+  const ph = pb.h + MUSHROOM_PICKUP_MARGIN * 2;
+  return rectsOverlap(px, py, pw, ph, mx, my, MUSHROOM_W, MUSHROOM_H);
+}
+
+// Swept pickup: check if the mushroom and player paths crossed this frame.
+// Uses Minkowski-expanded AABB sweep along the relative displacement.
+function sweptMushroomPickup(pb, m, prevMX, prevMY, prevPB) {
+  // Relative displacement of mushroom vs player
+  const relDX = (m.x - prevMX) - (pb.x - prevPB.x);
+  const relDY = (m.y - prevMY) - (pb.y - prevPB.y);
+  if (relDX === 0 && relDY === 0) return false;
+  // Minkowski sum: expand player box by mushroom size + margin
+  const margin = MUSHROOM_PICKUP_MARGIN;
+  const ex = prevPB.x - MUSHROOM_W - margin;
+  const ey = prevPB.y - MUSHROOM_H - margin;
+  const ew = prevPB.w + MUSHROOM_W + margin * 2;
+  const eh = prevPB.h + MUSHROOM_H + margin * 2;
+  // Ray from prevMX,prevMY in direction relDX,relDY; check intersection with expanded box
+  const result = sweptAABB(prevMX, prevMY, 1, 1, -relDX, -relDY, ex, ey, ew, eh);
+  return result.t >= 0 && result.t <= 1;
 }
 
 // Update mushroom physics
 function updateMushrooms() {
   const groundY = DESIGN_H - GROUND_H;
+  const pb = getPlayerHitbox();
+
   for (let i = mushrooms.length - 1; i >= 0; i--) {
     const m = mushrooms[i];
+    const prevMX = m.x;
+    const prevMY = m.y;
+    const prevPB = { x: pb.x + scrollSpeed, y: pb.y - player.vy, w: pb.w, h: pb.h };
+
     // Apply gravity
     m.vy += MUSHROOM_GRAVITY;
     m.x += m.vx;
@@ -991,11 +1044,10 @@ function updateMushrooms() {
       m.onGround = true;
     }
 
-    // Bounce off pipes (simplified — just body collision)
+    // Bounce off pipes
     for (const pipe of pipes) {
       if (pipe.h <= 0) continue;
       const pr = getPipeRects(pipe);
-      // Check lip and body
       const rects = [pr.lipRect, pr.bodyRect];
       for (const r of rects) {
         if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, r.x, r.y, r.w, r.h)) {
@@ -1017,22 +1069,112 @@ function updateMushrooms() {
       }
     }
 
+    // Bounce off unbroken bricks (prevents mushroom getting stuck inside bricks)
+    for (const brick of bricks) {
+      if (brick.broken) continue;
+      if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
+        // Land on top
+        if (m.vy > 0 && m.y + MUSHROOM_H - m.vy <= brick.y + 2) {
+          m.y = brick.y - MUSHROOM_H;
+          m.vy = 0;
+          m.onGround = true;
+        }
+        // Hit from below
+        else if (m.vy < 0 && m.y - m.vy >= brick.y + brick.h - 2) {
+          m.y = brick.y + brick.h;
+          m.vy = 0;
+        }
+        // Side bounce
+        else if (m.vx > 0 && m.x + MUSHROOM_W - m.vx <= brick.x + 2) {
+          m.x = brick.x - MUSHROOM_W;
+          m.vx = -m.vx;
+        } else if (m.vx < 0 && m.x - m.vx >= brick.x + brick.w - 2) {
+          m.x = brick.x + brick.w;
+          m.vx = -m.vx;
+        }
+      }
+    }
+
+    // ── Unstuck logic ──────────────────────────────────────
+    // If mushroom is overlapping a solid and hasn't moved much, push it out
+    let stuck = false;
+    // Check pipe overlap
+    for (const pipe of pipes) {
+      if (pipe.h <= 0) continue;
+      const pr = getPipeRects(pipe);
+      for (const r of [pr.lipRect, pr.bodyRect]) {
+        if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, r.x, r.y, r.w, r.h)) {
+          stuck = true;
+          // Push out via minimum penetration axis
+          const overlapLeft = (m.x + MUSHROOM_W) - r.x;
+          const overlapRight = (r.x + r.w) - m.x;
+          const overlapTop = (m.y + MUSHROOM_H) - r.y;
+          const overlapBottom = (r.y + r.h) - m.y;
+          const minH = Math.min(overlapLeft, overlapRight);
+          const minV = Math.min(overlapTop, overlapBottom);
+          if (minH < minV) {
+            if (overlapLeft < overlapRight) { m.x = r.x - MUSHROOM_W; m.vx = -Math.abs(m.vx); }
+            else { m.x = r.x + r.w; m.vx = Math.abs(m.vx); }
+          } else {
+            if (overlapTop < overlapBottom) { m.y = r.y - MUSHROOM_H; m.vy = 0; m.onGround = true; }
+            else { m.y = r.y + r.h; m.vy = 0; }
+          }
+        }
+      }
+    }
+    // Check brick overlap
+    for (const brick of bricks) {
+      if (brick.broken) continue;
+      if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
+        stuck = true;
+        const overlapLeft = (m.x + MUSHROOM_W) - brick.x;
+        const overlapRight = (brick.x + brick.w) - m.x;
+        const overlapTop = (m.y + MUSHROOM_H) - brick.y;
+        const overlapBottom = (brick.y + brick.h) - m.y;
+        const minH = Math.min(overlapLeft, overlapRight);
+        const minV = Math.min(overlapTop, overlapBottom);
+        if (minH < minV) {
+          if (overlapLeft < overlapRight) { m.x = brick.x - MUSHROOM_W; m.vx = -Math.abs(m.vx); }
+          else { m.x = brick.x + brick.w; m.vx = Math.abs(m.vx); }
+        } else {
+          if (overlapTop < overlapBottom) { m.y = brick.y - MUSHROOM_H; m.vy = 0; m.onGround = true; }
+          else { m.y = brick.y + brick.h; m.vy = 0; }
+        }
+      }
+    }
+    if (stuck) {
+      m.stuckFrames = (m.stuckFrames || 0) + 1;
+      // If stuck for too long, teleport to ground below current X
+      if (m.stuckFrames > 30) {
+        m.y = groundY - MUSHROOM_H;
+        m.vy = 0;
+        m.onGround = true;
+        m.stuckFrames = 0;
+        if (DEBUG_MODE) console.log('%c[Mushroom] Unstuck: teleported to ground', 'color: #ff6');
+      }
+    } else {
+      m.stuckFrames = 0;
+    }
+
     // Remove if off-screen
     if (m.x + MUSHROOM_W < -20 || m.x > DESIGN_W + 50 || m.y > DESIGN_H + 20) {
       mushrooms.splice(i, 1);
       continue;
     }
 
-    // Check player pickup
-    const pb = getPlayerHitbox();
-    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, m.x, m.y, MUSHROOM_W, MUSHROOM_H)) {
+    // Check player pickup — enlarged hitbox + swept detection
+    const picked = mushroomPickupOverlap(pb, m.x, m.y) ||
+                   sweptMushroomPickup(pb, m, prevMX, prevMY, prevPB);
+    if (picked) {
       // Activate double jump
       doubleJumpTimer = DOUBLE_JUMP_DURATION;
       mushrooms.splice(i, 1);
       // Popup
       spawnScorePopup(m.x, m.y - 10, 0);
       scorePopups[scorePopups.length - 1].text = 'MUSHROOM!';
+      // Debug overlay text (visible with debug=1)
       if (DEBUG_MODE) {
+        edgeDebugMsgs.push({ text: 'MUSHROOM PICKUP', ttl: 120 });
         console.log(`%c[Mushroom] Collected! Double jump active for ${DOUBLE_JUMP_DURATION}s`, 'color: #e53935; font-weight: bold');
       }
     }
@@ -2510,7 +2652,7 @@ function draw() {
       const msg = edgeDebugMsgs[i];
       const alpha = Math.min(1, msg.ttl / 30);
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = msg.text === 'WALL-NUDGE' ? '#ff6' : '#6ff';
+      ctx.fillStyle = msg.text === 'WALL-NUDGE' ? '#ff6' : msg.text === 'MUSHROOM PICKUP' ? '#f44' : '#6ff';
       ctx.fillText(msg.text, 6, dbgY);
       dbgY += 14;
       msg.ttl--;
@@ -2555,10 +2697,28 @@ function draw() {
       ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
     }
 
-    // Mushroom hitboxes (red)
+    // Mushroom hitboxes (red) + expanded pickup area (dashed pink)
     for (const m of mushrooms) {
       ctx.strokeStyle = '#f44';
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(m.x, m.y, MUSHROOM_W, MUSHROOM_H);
+      // Show expanded pickup zone
+      ctx.strokeStyle = '#f8a';
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(
+        m.x - MUSHROOM_PICKUP_MARGIN, m.y - MUSHROOM_PICKUP_MARGIN,
+        MUSHROOM_W + MUSHROOM_PICKUP_MARGIN * 2, MUSHROOM_H + MUSHROOM_PICKUP_MARGIN * 2
+      );
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
+      // Show velocity direction arrow
+      ctx.strokeStyle = '#ff0';
+      const cx = m.x + MUSHROOM_W / 2;
+      const cy = m.y + MUSHROOM_H / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + m.vx * 5, cy + m.vy * 2);
+      ctx.stroke();
     }
 
     // Scroll speed indicator + swept AABB label
@@ -2566,7 +2726,7 @@ function draw() {
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
-    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s`, 4, DESIGN_H - 14);
+    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length}`, 4, DESIGN_H - 14);
 
     ctx.restore();
   }

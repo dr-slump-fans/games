@@ -154,16 +154,42 @@ Special bricks follow the same break rules as normal bricks (hit from below whil
 
 When a special brick is broken, a **red mushroom** pops out and moves through the world:
 
-- Mushroom moves **horizontally** at 1.8 px/frame (random left or right direction)
+- Mushroom spawns centered on the broken brick, **direction biased toward the player** for reachability
+- If the spawn position overlaps another unbroken brick, the mushroom is pushed above it
+- Mushroom moves **horizontally** at 1.8 px/frame
 - Affected by **gravity** (0.4 px/frame²) — falls and lands on ground/pipe surfaces
-- **Bounces off pipe walls** (reverses horizontal direction on side collision)
+- **Bounces off pipe walls AND unbroken bricks** (reverses horizontal direction on side collision, lands on top surfaces)
 - **Scrolls with the world** like all other objects
+- **Unstuck logic**: if a mushroom remains embedded in a solid for 30+ frames, it teleports to ground level
 - Removed when off-screen
 
-**Collecting:** Walk into the mushroom to pick it up. On pickup:
+**Collecting:** Walk into or near the mushroom to pick it up. On pickup:
 - The **double jump** ability activates for **25 seconds**
 - A `MUSHROOM!` popup appears
 - Picking up another mushroom while the timer is active **resets the timer** to 25 seconds
+
+### Mushroom Pickup Detection
+
+The pickup system uses a **two-layer approach** to prevent missed pickups at high game speeds:
+
+1. **Enlarged overlap check** — the player hitbox is expanded by `MUSHROOM_PICKUP_MARGIN` (6 px) on each side when testing mushroom collision. This provides a generous "grab radius" that compensates for frame-to-frame position jumps.
+
+2. **Swept pickup (continuous detection)** — each frame, the relative displacement between the mushroom and player is computed. A Minkowski-expanded swept AABB test is run along this path. If the player and mushroom paths crossed at any point during the frame (even if they don't overlap at frame boundaries), the pickup triggers.
+
+Together, these two methods ensure that mushrooms can be reliably collected even at the highest scroll speeds and during fast air movement.
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `MUSHROOM_PICKUP_MARGIN` | `6` | Pixel expansion on each side for enlarged pickup zone |
+
+#### Debug Features (`?debug=1`)
+
+- **Red outline**: mushroom hitbox (actual collision box)
+- **Pink dashed outline**: expanded pickup zone (with `MUSHROOM_PICKUP_MARGIN`)
+- **Yellow arrow**: mushroom velocity direction
+- **`MUSHROOM PICKUP`** (red text, top-left): flashes for ~2s when a mushroom is collected
+- **Bottom status line**: shows `mush:N` (number of active mushrooms)
+- **Console logs**: spawn position, collection events, unstuck teleports
 
 ### Double Jump Rules
 
