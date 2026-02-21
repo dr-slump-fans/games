@@ -733,6 +733,59 @@ Bottom status line shows:
 | `BOSS_WAVE_SPEED_WAVE_DAMP` | `0.3` | Speed wave amplitude multiplier during boss (30%) |
 | `BOSS_WAVE_SPAWN_GAP` | `120` | Pixels between boss wave obstacles |
 
+## Fun Pack v2.1: Boss Audio / Haptics
+
+Adds programmatically generated sound effects and mobile vibration feedback to Boss Wave events, heightening the climactic feel without any external audio files.
+
+### Sound Effects (WebAudio)
+
+All sounds are synthesized at runtime using the Web Audio API (`OscillatorNode` + `GainNode`). No `.mp3`/`.wav` files needed.
+
+| Event | Sound | Description |
+|-------|-------|-------------|
+| Boss Wave Start | Alarm beeps | Three rapid square-wave sweeps (880→440→880 Hz), creating an alert/siren feel |
+| Countdown (last 3s) | Short beep | One sine-wave pip at 1 kHz per remaining second (3, 2, 1) |
+| Boss Clear | Victory arpeggio | Ascending triangle-wave notes (C5→E5→G5→C6), triumphant feel |
+
+- Volume is conservative (gain 0.08–0.10) to avoid being jarring
+- `AudioContext` is lazily created on first user interaction to comply with browser autoplay policies
+
+### Vibration (Vibration API)
+
+| Event | Pattern | Description |
+|-------|---------|-------------|
+| Boss Wave Start | `[80, 40, 80, 40, 120]` | Short-short-long alert pulse |
+| Boss Clear | `[40, 30, 40]` | Quick double-tap reward feel |
+
+- Feature-detected: `navigator.vibrate` is checked before use
+- Desktop browsers without vibration support silently skip — no errors thrown
+
+### Settings Toggles
+
+Two buttons at the top-center of the screen:
+
+- **SFX ON/OFF** — toggles all sound effects
+- **VIB ON/OFF** — toggles vibration feedback
+
+Both default to ON. Settings are session-only (not persisted to storage). Toggles are always visible and clickable during gameplay and menus.
+
+### Browser Compatibility
+
+| Feature | Chrome | Firefox | Safari | Mobile Chrome | Mobile Safari |
+|---------|--------|---------|--------|---------------|---------------|
+| WebAudio SFX | Yes | Yes | Yes | Yes | Yes |
+| Vibration API | Yes | Yes | No | Yes (Android) | No (iOS) |
+
+- iOS Safari does not support the Vibration API — VIB toggle will have no effect on iOS devices
+- WebAudio requires a user gesture (tap/click) before sounds can play — the START button satisfies this requirement
+
+### Debug (`?debug=1`)
+
+Bottom status line adds:
+- `SFX:ON/OFF` — current sound effects state
+- `VIB:ON/OFF` — current vibration state
+- `VIB_SUPPORTED:true/false` — whether the browser supports the Vibration API
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

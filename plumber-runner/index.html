@@ -141,6 +141,23 @@ canvas {
   display: none;
   z-index: 12;
 }
+/* ── Fun Pack v2.1: Settings Toggles ─────────────── */
+#hud-settings {
+  position: absolute; top: 6px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 6px;
+  z-index: 20;
+}
+#hud-settings .toggle-btn {
+  font-family: monospace; font-size: 11px; font-weight: bold;
+  padding: 2px 8px; border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 4px; background: rgba(0,0,0,0.45);
+  color: #fff; cursor: pointer; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#hud-settings .toggle-btn.off {
+  color: #888; border-color: rgba(255,255,255,0.15);
+}
 /* ── Fun Pack v2: Boss Wave HUD ───────────────────── */
 #hud-boss-wave {
   position: absolute; top: 30%; left: 50%;
@@ -190,6 +207,10 @@ canvas {
 <div id="hud-mission-complete">MISSION COMPLETE!</div>
 <div id="hud-boss-wave"></div>
 <div id="hud-boss-clear"></div>
+<div id="hud-settings">
+  <div class="toggle-btn" id="btn-sfx">SFX ON</div>
+  <div class="toggle-btn" id="btn-vib">VIB ON</div>
+</div>
 <div id="ui">
   <div id="overlay">
     <h1 id="ol-title">Plumber Runner</h1>
@@ -308,6 +329,89 @@ const BOSS_WAVE_REWARD_SCORE = 100;  // bonus score for surviving boss wave
 const BOSS_WAVE_SPEED_WAVE_DAMP = 0.3; // dampen speed wave amplitude during boss (30% of normal)
 const BOSS_WAVE_SPAWN_GAP = 120;     // pixels between boss wave obstacles (tighter than normal)
 
+// ── Fun Pack v2.1: Boss Audio / Haptics ─────────────
+let sfxEnabled = true;
+let vibEnabled = true;
+let audioCtx = null; // lazily created on first user gesture
+
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+// ── SFX: Boss Wave Start (alarm/siren feel) ──────────
+function sfxBossStart() {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  // Two-tone alarm: descending then ascending
+  for (let i = 0; i < 3; i++) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(880, now + i * 0.15);
+    osc.frequency.linearRampToValueAtTime(440, now + i * 0.15 + 0.07);
+    osc.frequency.linearRampToValueAtTime(880, now + i * 0.15 + 0.14);
+    gain.gain.setValueAtTime(0.08, now + i * 0.15);
+    gain.gain.linearRampToValueAtTime(0, now + i * 0.15 + 0.14);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + i * 0.15);
+    osc.stop(now + i * 0.15 + 0.15);
+  }
+}
+
+// ── SFX: Countdown Beep (last 3 seconds) ─────────────
+function sfxCountdownBeep() {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(1000, now);
+  gain.gain.setValueAtTime(0.10, now);
+  gain.gain.linearRampToValueAtTime(0, now + 0.1);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.12);
+}
+
+// ── SFX: Boss Clear (ascending triumphant) ───────────
+function sfxBossClear() {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  const notes = [523, 659, 784, 1047]; // C5 E5 G5 C6
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now + i * 0.09);
+    gain.gain.setValueAtTime(0.10, now + i * 0.09);
+    gain.gain.linearRampToValueAtTime(0, now + i * 0.09 + 0.15);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + i * 0.09);
+    osc.stop(now + i * 0.09 + 0.16);
+  });
+}
+
+// ── Haptics: Vibration API wrapper ───────────────────
+const vibSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
+
+function vibrate(pattern) {
+  if (!vibEnabled || !vibSupported) return;
+  try { navigator.vibrate(pattern); } catch (_) { /* ignore */ }
+}
+
+function vibBossStart() { vibrate([80, 40, 80, 40, 120]); }
+function vibBossClear() { vibrate([40, 30, 40]); }
+
+// Countdown beep last-second tracker (prevents duplicate beeps per second)
+let bossCountdownLastSec = -1;
+
 // ── Debug Mode ───────────────────────────────────────
 const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === '1';
 
@@ -409,6 +513,22 @@ const hudMission = document.getElementById('hud-mission');
 const hudMissionComplete = document.getElementById('hud-mission-complete');
 const hudBossWave = document.getElementById('hud-boss-wave');
 const hudBossClear = document.getElementById('hud-boss-clear');
+const btnSfx = document.getElementById('btn-sfx');
+const btnVib = document.getElementById('btn-vib');
+
+// ── Fun Pack v2.1: Settings toggle handlers ───────────
+btnSfx.addEventListener('click', (e) => {
+  e.stopPropagation();
+  sfxEnabled = !sfxEnabled;
+  btnSfx.textContent = sfxEnabled ? 'SFX ON' : 'SFX OFF';
+  btnSfx.classList.toggle('off', !sfxEnabled);
+});
+btnVib.addEventListener('click', (e) => {
+  e.stopPropagation();
+  vibEnabled = !vibEnabled;
+  btnVib.textContent = vibEnabled ? 'VIB ON' : 'VIB OFF';
+  btnVib.classList.toggle('off', !vibEnabled);
+});
 
 // ── Game State ─────────────────────────────────────────
 let state = 'title'; // title | playing | dead
@@ -2383,10 +2503,14 @@ function startBossWave() {
   bossWaveCount++;
   bossWaveCleared = false;
   bossWaveStepCounter = 0;
+  bossCountdownLastSec = -1; // reset countdown beep tracker
   // Alternate modes: odd waves = A, even waves = B (or random)
   bossWaveMode = (bossWaveCount % 2 === 1) ? 'A' : 'B';
   // Set next trigger time (from when the wave ENDS, not starts)
   bossWaveNextTrigger = survivalTime + BOSS_WAVE_DURATION + BOSS_WAVE_INTERVAL;
+  // Fun Pack v2.1: Boss start audio + haptics
+  sfxBossStart();
+  vibBossStart();
 }
 
 function endBossWave() {
@@ -2398,6 +2522,9 @@ function endBossWave() {
     bossWaveClearTimer = 120; // 2 seconds at 60fps
     score += BOSS_WAVE_REWARD_SCORE;
     spawnScorePopup(player.x, player.y - 30, BOSS_WAVE_REWARD_SCORE);
+    // Fun Pack v2.1: Boss clear audio + haptics
+    sfxBossClear();
+    vibBossClear();
   }
 }
 
@@ -2515,6 +2642,7 @@ function resetGame() {
   bossWaveSpawnX = 0;
   bossWaveStepCounter = 0;
   bossWaveNextTrigger = BOSS_WAVE_INTERVAL;
+  bossCountdownLastSec = -1;
   initClouds();
   initHills();
   // Seed first pipe pair far away
@@ -2884,6 +3012,14 @@ function update() {
   // ── Fun Pack v2: Boss Wave trigger & timer ──────────
   if (bossWaveActive) {
     bossWaveTimer -= 1 / 60;
+    // Fun Pack v2.1: Countdown beep for last 3 seconds
+    if (bossWaveTimer > 0 && bossWaveTimer <= 3) {
+      const sec = Math.ceil(bossWaveTimer);
+      if (sec !== bossCountdownLastSec) {
+        bossCountdownLastSec = sec;
+        sfxCountdownBeep();
+      }
+    }
     if (bossWaveTimer <= 0) {
       endBossWave();
     }
@@ -3527,6 +3663,7 @@ function draw() {
     ctx.fillText(`TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)} STALL:${recoverStallFrames}`, 4, DESIGN_H - 24);
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 34);
     ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 44);
+    ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported}`, 4, DESIGN_H - 54);
 
     ctx.restore();
   }
