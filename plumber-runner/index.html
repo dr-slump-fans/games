@@ -71,22 +71,26 @@ canvas {
   height: 100%; width: 0%; border-radius: 3px;
   transition: width 0.5s ease, background 0.5s ease;
 }
-/* ── Mobile Dual Buttons ───────────────────────────── */
+/* ── Mobile 4-Button Layout ────────────────────────── */
 #mobile-buttons {
   position: absolute; bottom: 0; left: 0; width: 100%; height: 110px;
   display: flex; justify-content: space-between; align-items: flex-end;
-  padding: 0 12px 12px 12px;
+  padding: 0 8px 8px 8px;
   pointer-events: none;
   z-index: 10;
 }
+#mobile-left, #mobile-right {
+  display: flex; gap: 6px;
+  pointer-events: none;
+}
 .mobile-btn {
   pointer-events: auto;
-  width: 44%; height: 88px;
+  width: 72px; height: 72px;
   border: 3px solid rgba(255,255,255,0.5);
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(0,0,0,0.25);
   color: rgba(255,255,255,0.8);
-  font-family: monospace; font-size: 20px; font-weight: bold;
+  font-family: monospace; font-size: 16px; font-weight: bold;
   display: flex; align-items: center; justify-content: center;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
@@ -96,6 +100,10 @@ canvas {
 .mobile-btn.active {
   background: rgba(255,255,255,0.25);
   border-color: rgba(255,255,255,0.85);
+}
+.mobile-btn.wide {
+  width: 88px; height: 72px;
+  font-size: 15px;
 }
 #hud-boost {
   position: absolute; bottom: 120px; left: 50%;
@@ -197,8 +205,14 @@ canvas {
   </div>
 </div>
 <div id="mobile-buttons">
-  <div class="mobile-btn" id="btn-run">RUN</div>
-  <div class="mobile-btn" id="btn-jump">JUMP</div>
+  <div id="mobile-left">
+    <div class="mobile-btn" id="btn-left">&larr;</div>
+    <div class="mobile-btn" id="btn-right">&rarr;</div>
+  </div>
+  <div id="mobile-right">
+    <div class="mobile-btn wide" id="btn-run">RUN</div>
+    <div class="mobile-btn wide" id="btn-jump">JUMP</div>
+  </div>
 </div>
 <div id="hud-boost">RUN BOOST</div>
 <div id="hud-combo"></div>
@@ -214,7 +228,7 @@ canvas {
 <div id="ui">
   <div id="overlay">
     <h1 id="ol-title">Plumber Runner</h1>
-    <p id="ol-msg">JUMP: Space/Tap  |  RUN: Shift/Z</p>
+    <p id="ol-msg">MOVE: Arrows/AD  |  RUN: Shift/Z  |  JUMP: Space</p>
     <p id="ol-score"></p>
     <button id="ol-btn">START</button>
   </div>
@@ -243,6 +257,13 @@ const LIP_W = 56;
 const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
 const RECENTER_TARGET_X = DESIGN_W * 0.40; // fixed recenter target (320px) — must never drift
+
+// ── Manual Movement ─────────────────────────────────
+const PLAYER_WALK_SPEED = 2.5;       // base walk speed (pixels/frame)
+const PLAYER_RUN_SPEED = 4.5;        // max run speed when holding RUN
+const PLAYER_ACCEL = 0.18;           // acceleration per frame toward target speed
+const PLAYER_DECEL = 0.25;           // deceleration per frame when no input
+const CAMERA_LEAD = DESIGN_W * 0.40; // camera keeps player at 40% from left edge
 
 // ── Run Boost ────────────────────────────────────────
 const RUN_BOOST_MULTIPLIER = 1.55;  // max speed multiplier when run button held
@@ -541,11 +562,12 @@ let jumpConsumed = false;  // true after jump initiated; must release to jump ag
 let jumpHoldFrames = 0;
 let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
 let justJumped = false;    // true during the frame a jump was initiated; prevents swept movement from re-grounding
-let runBoostPressed = false; // true when run/boost key or left button is held
+let moveLeftPressed = false;  // true when left key/button is held
+let moveRightPressed = false; // true when right key/button is held
+let runBoostPressed = false;  // true when run/boost key or button is held
 let runBoostFactor = 0;       // 0..1 gradual boost level (ramps up while held, ramps down on release)
-let dynamicTargetX = RECENTER_TARGET_X; // current recenter target — shifts forward with runBoostFactor
-let recoverStallFrames = 0;   // consecutive frames where recenter error hasn't decreased
-let lastRecoverAbsErr = 0;    // previous frame's |player.x - dynamicTargetX|
+let playerVX = 0;             // horizontal velocity (positive = right)
+let cameraX = 0;              // world X of camera left edge
 
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
@@ -668,7 +690,7 @@ function updateAnimState() {
   if (player.animState === 'land') {
     player.landTimer--;
     if (player.landTimer <= 0) {
-      player.animState = 'run';
+      player.animState = Math.abs(playerVX) > 0.3 ? 'run' : 'idle';
     }
     return;
   }
@@ -684,16 +706,25 @@ function updateAnimState() {
   }
 
   // On ground and not landing
-  player.animState = 'run';
+  player.animState = Math.abs(playerVX) > 0.3 ? 'run' : 'idle';
 }
 
 // Draw the player character — original "Pippo" the plumber
 // 28x36 px, original design: round-nosed plumber with red cap, blue overalls, mustache
 // NOT derived from any Nintendo or copyrighted IP — original proportions & details
 function drawPlayer(px, py, frame) {
+  // Flip sprite when moving left
+  const facingLeft = playerVX < -0.1;
+  if (facingLeft) {
+    ctx.save();
+    ctx.translate(Math.round(px) + player.w / 2, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-(Math.round(px) + player.w / 2), 0);
+  }
   // Sprite mode: use sprite sheet if available
   if (spriteMode === 'sprite' && spriteReady) {
     drawPlayerSprite(px, py);
+    if (facingLeft) ctx.restore();
     return;
   }
   // Procedural mode: code-drawn character below
@@ -1049,6 +1080,7 @@ function drawPlayer(px, py, frame) {
     drawPixelRect(x + 15, y + 32, 8, 4, BOOTS_C);
     drawPixelRect(x + 16, y + 32, 3, 1, BOOTS_H);
   }
+  if (facingLeft) ctx.restore();
 }
 
 // Get pipe collision rectangles
@@ -1135,17 +1167,21 @@ function drawTopPipe(px, ph) {
 }
 
 // Draw ground with brick pattern
-function drawGround(offset) {
+function drawGround() {
   const groundY = DESIGN_H - GROUND_H;
+  // Draw ground covering the camera-visible area (in world coords)
+  const drawLeft = cameraX - 32;
+  const drawW = DESIGN_W + 96;
   ctx.fillStyle = '#c0784a';
-  ctx.fillRect(0, groundY, DESIGN_W, GROUND_H);
+  ctx.fillRect(drawLeft, groundY, drawW, GROUND_H);
   const brickW = 32;
   const brickH = 16;
-  const startX = -(offset % brickW);
+  // Align bricks to world grid
+  const startX = Math.floor(drawLeft / brickW) * brickW;
   ctx.fillStyle = '#a0603a';
   for (let row = 0; row < Math.ceil(GROUND_H / brickH); row++) {
     const rowOffset = (row % 2) * (brickW / 2);
-    for (let col = -1; col < Math.ceil(DESIGN_W / brickW) + 2; col++) {
+    for (let col = 0; col < Math.ceil(drawW / brickW) + 3; col++) {
       const bx = startX + col * brickW + rowOffset;
       const by = groundY + row * brickH;
       ctx.fillRect(bx, by, brickW, 1);
@@ -1153,7 +1189,7 @@ function drawGround(offset) {
     }
   }
   ctx.fillStyle = '#8B4513';
-  ctx.fillRect(0, groundY, DESIGN_W, 3);
+  ctx.fillRect(drawLeft, groundY, drawW, 3);
 }
 
 function drawCloud(cx, cy, cw) {
@@ -1364,14 +1400,12 @@ function updateMushrooms() {
     const m = mushrooms[i];
     const prevMX = m.x;
     const prevMY = m.y;
-    const prevPB = { x: pb.x + scrollSpeed, y: pb.y - player.vy, w: pb.w, h: pb.h };
+    const prevPB = { x: pb.x - playerVX, y: pb.y - player.vy, w: pb.w, h: pb.h };
 
     // Apply gravity
     m.vy += MUSHROOM_GRAVITY;
     m.x += m.vx;
     m.y += m.vy;
-    // Scroll with world
-    m.x -= scrollSpeed;
 
     // Ground collision
     if (m.y + MUSHROOM_H >= groundY) {
@@ -1492,8 +1526,8 @@ function updateMushrooms() {
       m.stuckFrames = 0;
     }
 
-    // Remove if off-screen
-    if (m.x + MUSHROOM_W < -20 || m.x > DESIGN_W + 50 || m.y > DESIGN_H + 20) {
+    // Remove if far from camera
+    if (m.x + MUSHROOM_W < cameraX - 100 || m.x > cameraX + DESIGN_W + 200 || m.y > DESIGN_H + 20) {
       mushrooms.splice(i, 1);
       continue;
     }
@@ -1679,7 +1713,7 @@ function gatherCollisionRects() {
   const groundY = DESIGN_H - GROUND_H;
 
   // Ground (extends infinitely left/right, thick enough to never tunnel)
-  rects.push({ x: -1000, y: groundY, w: DESIGN_W + 2000, h: 500, type: 'ground' });
+  rects.push({ x: player.x - 2000, y: groundY, w: 4000, h: 500, type: 'ground' });
 
   // Pipes
   for (const pipe of pipes) {
@@ -1902,33 +1936,17 @@ function depenetratePlayer(collisionRects) {
 //
 // Parameters:
 //   playerVY: vertical velocity (pixels/frame, after gravity)
-//   scrollDX: horizontal scroll displacement this frame (positive = world moves left)
-//
-// The player's relative motion vs obstacles is:
-//   dx = -scrollDX (obstacles move left → equivalent to player moving right relative to them,
-//        but player is pushed left by scroll, so relative dx = -scrollDX)
-//   dy = playerVY
+//   playerDX: horizontal displacement this frame (from manual input)
 //
 // After resolving, updates player.x, player.y, player.vy, player.onGround.
-// Returns { hitBricks: [...] } for bricks hit from below.
-function resolveSweptMovement(playerVY, scrollDX) {
+// Returns { hitBricks: [...], landedThisFrame, hitCeilingThisFrame }.
+function resolveSweptMovement(playerVY, playerDX) {
   const HB_OX = 4, HB_OY = 2, HB_W = player.w - 8, HB_H = player.h - 4;
 
-  // The relative velocity of the player hitbox vs static obstacles:
-  // - Vertically: player moves by playerVY
-  // - Horizontally: obstacles move left by scrollDX, so in obstacle-frame,
-  //   player effectively moves right by scrollDX.
-  //   But we also want to keep player at x=RECENTER_TARGET_X (recovery), so net player
-  //   movement in world coords is 0 horizontally (scroll moves obstacles).
-  //   In the sweep frame, we move the player by (0, playerVY) in world coords,
-  //   then move obstacles by (-scrollDX, 0).
-  //
-  // To handle both in one unified sweep, we compute in "obstacle rest frame":
-  //   relative dx = +scrollDX (player moves right relative to obstacles)
-  //   relative dy = playerVY
-  // After resolving, we convert back: player world displacement = sweep displacement - scrollDX on X.
+  // Manual movement: player moves by (playerDX, playerVY) in world coords.
+  // Obstacles are static. No frame conversion needed at the end.
 
-  let relDX = scrollDX; // player moves right relative to obstacles
+  let relDX = playerDX;
   let relDY = playerVY;
 
   // Gather obstacles
@@ -2097,37 +2115,21 @@ function resolveSweptMovement(playerVY, scrollDX) {
     }
 
     if (bestNX === -1) {
-      // Hit left face of obstacle (player moving right relative to it)
-      // This means the scroll is pushing player into obstacle.
-      // Stop the horizontal relative motion component.
+      // Hit left face of obstacle (player moving right)
       relDX = 0;
+      playerVX = 0;
     } else if (bestNX === 1) {
-      // Hit right face of obstacle — unusual (player moving left relative)
+      // Hit right face of obstacle (player moving left)
       relDX = 0;
+      playerVX = 0;
     }
 
     // Consume the used time fraction
     remainingT *= (1.0 - bestT);
   }
 
-  // Convert back from obstacle-relative frame to world frame.
-  // In the sweep, player.x moved by (actual sweep displacement).
-  // But obstacles actually move left by scrollDX in world coords.
-  // The sweep already moved player.x by the relative displacement,
-  // so we subtract the scroll portion to get world coords:
-  // world_x = original_x + (relDisp - scrollDX)
-  // But since sweep already applied the displacement to player.x,
-  // we just need to subtract scrollDX from player.x to account for
-  // the fact that obstacles were treated as static.
-  // Actually: let's think carefully.
-  //   Before sweep: player at world px, obstacles at world ox.
-  //   Sweep uses relative frame: player moves by (scrollDX, vy) relative to obstacles.
-  //   After sweep: player.x += actualRelDX. But in world frame, obstacles moved by -scrollDX.
-  //   So player.x in world = original_px + actualRelDX, obstacles at original_ox - scrollDX.
-  //   For world correctness, we need: player.x stays in world frame, obstacles get scrollDX subtracted.
-  //   Since sweep already added relDX contribution to player.x, and relDX included scrollDX,
-  //   we need to subtract scrollDX from player.x (it was the obstacle's motion, not player's).
-  player.x -= scrollDX;
+  // Manual movement: displacement is the player's own movement.
+  // No frame conversion needed (obstacles are static in world coords).
 
   return { hitBricks, landedThisFrame, hitCeilingThisFrame };
 }
@@ -2618,11 +2620,12 @@ function resetGame() {
   jumpConsumed = false;
   justJumped = false;
   wallNudgeUsed = false;
+  moveLeftPressed = false;
+  moveRightPressed = false;
   runBoostPressed = false;
   runBoostFactor = 0;
-  dynamicTargetX = RECENTER_TARGET_X;
-  recoverStallFrames = 0;
-  lastRecoverAbsErr = 0;
+  playerVX = 0;
+  cameraX = 0;
   edgeDebugMsgs = [];
   depenFixCount = 0;
   // Fun Pack v1 resets
@@ -2650,7 +2653,7 @@ function resetGame() {
 }
 
 function spawnInitialPipes() {
-  const x = DESIGN_W + 100;
+  const x = cameraX + DESIGN_W + 100;
   // Bottom pipe
   pipes.push({
     x: x,
@@ -3005,9 +3008,33 @@ function update() {
   } else {
     runBoostFactor = Math.max(0, runBoostFactor - RUN_BOOST_RAMP_DOWN);
   }
-  // Dynamic recenter target: shifts forward proportionally to boost level
-  dynamicTargetX = RECENTER_TARGET_X + runBoostFactor * RUN_BOOST_FORWARD_SHIFT;
-  // RUN BOOST affects player run ability only, NOT world scroll speed.
+
+  // ── Manual horizontal movement ─────────────────────────
+  // Compute desired move direction from input
+  let moveDir = 0;
+  if (moveLeftPressed) moveDir -= 1;
+  if (moveRightPressed) moveDir += 1;
+
+  // Target speed: walk or run
+  const maxSpeed = PLAYER_WALK_SPEED + runBoostFactor * (PLAYER_RUN_SPEED - PLAYER_WALK_SPEED);
+  const targetVX = moveDir * maxSpeed;
+
+  // Accelerate / decelerate toward target
+  if (moveDir !== 0) {
+    // Accelerating toward target
+    if (playerVX < targetVX) {
+      playerVX = Math.min(targetVX, playerVX + PLAYER_ACCEL);
+    } else if (playerVX > targetVX) {
+      playerVX = Math.max(targetVX, playerVX - PLAYER_ACCEL);
+    }
+  } else {
+    // No input — decelerate to 0
+    if (playerVX > 0) {
+      playerVX = Math.max(0, playerVX - PLAYER_DECEL);
+    } else if (playerVX < 0) {
+      playerVX = Math.min(0, playerVX + PLAYER_DECEL);
+    }
+  }
 
   // ── Fun Pack v2: Boss Wave trigger & timer ──────────
   if (bossWaveActive) {
@@ -3036,8 +3063,9 @@ function update() {
   if (bossWaveActive) {
     waveFactor = 1.0 + (waveFactor - 1.0) * BOSS_WAVE_SPEED_WAVE_DAMP;
   }
+  // scrollSpeed kept for difficulty reference / boss wave spawning, but world doesn't auto-scroll
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * waveFactor;
-  groundOffset += scrollSpeed;
+  // Ground offset no longer needed — ground is drawn in world coords with camera transform
 
   // ── Phase 1: Compute desired velocity vector ──────────
   justJumped = false; // reset each frame; set below if a jump initiates
@@ -3135,10 +3163,10 @@ function update() {
   player.vy += GRAVITY;
 
   // ── Phase 2: Swept AABB resolve ───────────────────────
-  // Combine player's vertical motion + scroll-induced horizontal motion
+  // Combine player's vertical motion + horizontal motion (manual movement)
   // into one unified continuous collision resolve.
   const preResolveVY = player.vy; // save for perfect landing detection
-  const result = resolveSweptMovement(player.vy, scrollSpeed);
+  const result = resolveSweptMovement(player.vy, playerVX);
 
   // Recompute survivalTime AFTER sweep so brick bonus is reflected immediately in HUD
   survivalTime = frameCount / 60 + bonusTime;
@@ -3175,8 +3203,8 @@ function update() {
     }
   }
 
-  // Clamp player X (don't go off-screen too far left)
-  if (player.x < -10) player.x = -10;
+  // Clamp player X (don't go left of world origin)
+  if (player.x < 0) player.x = 0;
 
   // Animation state machine
   updateAnimState();
@@ -3218,15 +3246,8 @@ function update() {
   if (comboPopupTimer > 0) comboPopupTimer--;
   if (missionCompleteTimer > 0) missionCompleteTimer--;
 
-  // ── Phase 4: Move obstacles in world coords ──────────
-  // The sweep already accounted for scroll in collision detection.
-  // Now actually move obstacle positions for rendering/scoring.
-  for (const pipe of pipes) {
-    pipe.x -= scrollSpeed;
-  }
-  for (const brick of bricks) {
-    brick.x -= scrollSpeed;
-  }
+  // ── Phase 4: Obstacles are static in world coords ────
+  // (No auto-scroll; player moves manually through the world.)
 
   // Check if player fell off a platform edge (pipe/brick scrolled away)
   if (player.onGround && player.y < groundY - 5) {
@@ -3248,8 +3269,8 @@ function update() {
     return;
   }
 
-  // If player pushed too far left off screen, also die
-  if (player.x + player.w < -5) {
+  // If player goes too far left off screen, also die
+  if (player.x + player.w < cameraX - 20) {
     state = 'dead';
     if (score > highScore) highScore = score;
     const tMins = Math.floor(survivalTime / 60);
@@ -3267,27 +3288,27 @@ function update() {
     }
   }
 
-  // Remove off-screen pipes
-  pipes = pipes.filter(p => p.x > -LIP_W - 10);
+  // Remove off-screen pipes (far behind camera)
+  pipes = pipes.filter(p => p.x > cameraX - LIP_W - 100);
 
-  // Remove off-screen or broken bricks
-  bricks = bricks.filter(b => !b.broken && b.x > -BRICK_W - 10);
+  // Remove off-screen or broken bricks (far behind camera)
+  bricks = bricks.filter(b => !b.broken && b.x > cameraX - BRICK_W - 100);
 
   // Spawn pipes (or boss wave obstacles during boss wave)
+  // Spawn when rightmost pipe is within camera view + margin
+  const spawnEdge = cameraX + DESIGN_W;
   if (bossWaveActive) {
-    // During boss wave, spawn boss obstacles instead of normal pipes.
-    // Check if rightmost pipe has scrolled close enough to need more obstacles ahead.
     const rightmostBossX = pipes.length > 0
       ? pipes.reduce((a, b) => a.x > b.x ? a : b).x
       : 0;
-    if (rightmostBossX < DESIGN_W) {
+    if (rightmostBossX < spawnEdge) {
       bossWaveSpawnX = rightmostBossX + BOSS_WAVE_SPAWN_GAP;
       spawnBossWaveObstacle();
     }
   } else {
     if (pipes.length > 0) {
       const rightmost = pipes.reduce((a, b) => a.x > b.x ? a : b);
-      if (rightmost.x < DESIGN_W) {
+      if (rightmost.x < spawnEdge) {
         spawnPipe();
       }
     } else {
@@ -3295,57 +3316,12 @@ function update() {
     }
   }
 
-  // ── Recover player X towards dynamicTargetX ───────────────────
-  // No longer gated by "beingPushed" — always attempt recenter.
-  // All moves use swept AABB via collisionSafeMoveX to prevent pipe penetration.
-  // Stall detection: if error doesn't shrink for 20 frames, force small step.
+  // ── Camera follow: keep player on screen ───────────────
+  // Camera X tracks player so player stays near CAMERA_LEAD from left edge
   {
-    const curErr = player.x - dynamicTargetX; // positive = player too far right
-    const absErr = Math.abs(curErr);
-
-    if (absErr > 0.5) {
-      const diff = dynamicTargetX - player.x; // positive = need right, negative = need left
-      const sign = diff > 0 ? 1 : -1;
-
-      // Lerp-based recovery scaled with scrollSpeed and runBoostFactor
-      const speedRatio = scrollSpeed / SCROLL_SPEED_BASE;
-      const runMul = 1.0 + runBoostFactor * (RUN_BOOST_MULTIPLIER - 1.0);
-      const lerpFactor = Math.min(0.45, 0.12 * speedRatio * runMul);
-      const minRecoverSpeed = 0.5 * speedRatio * runMul;
-      let recoverDX = sign * Math.min(absErr, Math.max(minRecoverSpeed, absErr * lerpFactor));
-
-      // Stall detection: if error didn't shrink, count stall frames
-      if (absErr >= lastRecoverAbsErr - 0.1) {
-        recoverStallFrames++;
-      } else {
-        recoverStallFrames = 0;
-      }
-      lastRecoverAbsErr = absErr;
-
-      // If stalled for 20+ frames, add a small forced nudge toward target
-      if (recoverStallFrames >= 20) {
-        recoverDX = sign * Math.max(Math.abs(recoverDX), 1.0);
-        if (DEBUG_MODE) edgeDebugMsgs.push({ text: 'RECOVER_STALL', ttl: 30 });
-      }
-
-      // ── Swept collision-safe move (direction-aware) ──────────
-      // Uses swept AABB along the path to prevent tunneling through pipes.
-      const actualDX = collisionSafeMoveX(recoverDX);
-
-      // If swept move was significantly clipped, count as stall
-      if (Math.abs(actualDX) < Math.abs(recoverDX) * 0.1) {
-        // Blocked — try micro-step if stalled long enough
-        if (recoverStallFrames >= 20) {
-          collisionSafeMoveX(sign * 0.5);
-        }
-      }
-    } else {
-      // Close enough — collision-safe snap to target
-      const snapDX = dynamicTargetX - player.x;
-      collisionSafeMoveX(snapDX);
-      recoverStallFrames = 0;
-      lastRecoverAbsErr = 0;
-    }
+    const targetCamX = player.x - CAMERA_LEAD;
+    // Don't let camera go left of world origin
+    cameraX = Math.max(0, targetCamX);
   }
 
   // ── Frame-End Depenetration Fallback ───────────────────
@@ -3393,10 +3369,10 @@ function update() {
     }
   }
 
-  // Update hills
+  // Hills are drawn with parallax in draw(), just recycle when off-screen
   for (const h of hills) {
-    h.x -= scrollSpeed * 0.3;
-    if (h.x + h.w < 0) {
+    const screenX = h.x - cameraX * 0.3;
+    if (screenX + h.w < -100) {
       const last = hills.reduce((a, b) => a.x > b.x ? a : b);
       h.x = last.x + 200 + Math.random() * 100;
       h.w = 180 + Math.random() * 100;
@@ -3516,22 +3492,26 @@ function draw() {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
 
-  // Clouds
+  // Clouds (parallax — not affected by camera)
   for (const c of clouds) {
     drawCloud(c.x, c.y, c.w);
   }
 
-  // Hills
+  // Hills (parallax — slow camera follow)
   for (const h of hills) {
-    drawHill(h.x, h.w, h.h);
+    drawHill(h.x - cameraX * 0.3, h.w, h.h);
   }
 
+  // ── Camera transform for world objects ──────────────────
+  ctx.save();
+  ctx.translate(-cameraX, 0);
+
   // Ground
-  drawGround(groundOffset);
+  drawGround();
 
   // Pipes
   for (const pipe of pipes) {
-    if (pipe.h <= 0) continue; // skip marker pipes (brick-replaced)
+    if (pipe.h <= 0) continue;
     if (pipe.fromTop) {
       drawTopPipe(pipe.x, pipe.h);
     } else {
@@ -3575,6 +3555,8 @@ function draw() {
   drawScorePopups();
   drawTimeBonusPopups();
 
+  ctx.restore(); // end camera transform
+
   // ── Edge-Protection Debug Overlay (always visible) ────
   // Show EDGE-FORGIVE / WALL-NUDGE messages at top-left when triggered
   if (edgeDebugMsgs.length > 0) {
@@ -3597,6 +3579,7 @@ function draw() {
   // ── Debug hitbox overlay ──────────────────────────────
   if (DEBUG_MODE) {
     ctx.save();
+    ctx.translate(-cameraX, 0);
     ctx.globalAlpha = 0.45;
     ctx.lineWidth = 1;
 
@@ -3654,17 +3637,17 @@ function draw() {
       ctx.stroke();
     }
 
-    // Scroll speed indicator + swept AABB label
+    // Debug text (screen-space)
+    ctx.restore(); // pop camera transform
+    ctx.save();
     ctx.globalAlpha = 1;
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
-    ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
-    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount} RECOVER_STALL:${recoverStallFrames}`, 4, DESIGN_H - 14);
-    ctx.fillText(`TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)} STALL:${recoverStallFrames}`, 4, DESIGN_H - 24);
-    ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 34);
-    ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 44);
-    ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported}`, 4, DESIGN_H - 54);
-
+    ctx.fillText(`vx:${playerVX.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} cam:${cameraX.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
+    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount} boost:${runBoostFactor.toFixed(2)}`, 4, DESIGN_H - 14);
+    ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 24);
+    ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 34);
+    ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported}`, 4, DESIGN_H - 44);
     ctx.restore();
   }
 }
@@ -3708,7 +3691,7 @@ olBtn.addEventListener('click', (e) => {
 function startGame() {
   hideOverlay();
   resetGame();
-  player.animState = 'run';
+  player.animState = 'idle';
   state = 'playing';
 }
 
@@ -3728,6 +3711,22 @@ function onRunDown() {
 function onRunUp() {
   runBoostPressed = false;
 }
+function onMoveLeftDown() {
+  if (state === 'dead') { startGame(); return; }
+  if (state === 'title') { startGame(); }
+  moveLeftPressed = true;
+}
+function onMoveLeftUp() {
+  moveLeftPressed = false;
+}
+function onMoveRightDown() {
+  if (state === 'dead') { startGame(); return; }
+  if (state === 'title') { startGame(); }
+  moveRightPressed = true;
+}
+function onMoveRightUp() {
+  moveRightPressed = false;
+}
 
 // Keyboard
 document.addEventListener('keydown', (e) => {
@@ -3739,6 +3738,14 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     onRunDown();
   }
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+    e.preventDefault();
+    onMoveLeftDown();
+  }
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+    e.preventDefault();
+    onMoveRightDown();
+  }
 });
 document.addEventListener('keyup', (e) => {
   if (e.code === 'Space' || e.code === 'ArrowUp') {
@@ -3747,96 +3754,63 @@ document.addEventListener('keyup', (e) => {
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
     onRunUp();
   }
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+    onMoveLeftUp();
+  }
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+    onMoveRightUp();
+  }
 });
 
 // ── Mobile Buttons ─────────────────────────────────────
+const btnLeft = document.getElementById('btn-left');
+const btnRight = document.getElementById('btn-right');
 const btnRun = document.getElementById('btn-run');
 const btnJump = document.getElementById('btn-jump');
 
 // Track active touch IDs per button to handle multi-touch correctly
+let leftTouchIds = new Set();
+let rightTouchIds = new Set();
 let runTouchIds = new Set();
 let jumpTouchIds = new Set();
 
-btnRun.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  for (const t of e.changedTouches) runTouchIds.add(t.identifier);
-  btnRun.classList.add('active');
-  onRunDown();
-  // If game not started, treat as game start too
-  if (state === 'dead' || state === 'title') startGame();
-}, { passive: false });
+// Helper: setup touch events for a mobile button
+function setupMobileBtn(el, touchSet, downFn, upFn) {
+  el.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    for (const t of e.changedTouches) touchSet.add(t.identifier);
+    el.classList.add('active');
+    downFn();
+  }, { passive: false });
+  el.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    for (const t of e.changedTouches) touchSet.delete(t.identifier);
+    if (touchSet.size === 0) {
+      el.classList.remove('active');
+      upFn();
+    }
+  }, { passive: false });
+  el.addEventListener('touchcancel', (e) => {
+    for (const t of e.changedTouches) touchSet.delete(t.identifier);
+    if (touchSet.size === 0) {
+      el.classList.remove('active');
+      upFn();
+    }
+  }, { passive: false });
+}
 
-btnRun.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  for (const t of e.changedTouches) runTouchIds.delete(t.identifier);
-  if (runTouchIds.size === 0) {
-    btnRun.classList.remove('active');
-    onRunUp();
-  }
-}, { passive: false });
-
-btnRun.addEventListener('touchcancel', (e) => {
-  for (const t of e.changedTouches) runTouchIds.delete(t.identifier);
-  if (runTouchIds.size === 0) {
-    btnRun.classList.remove('active');
-    onRunUp();
-  }
-}, { passive: false });
-
-btnJump.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  for (const t of e.changedTouches) jumpTouchIds.add(t.identifier);
-  btnJump.classList.add('active');
-  onJumpDown();
-}, { passive: false });
-
-btnJump.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  for (const t of e.changedTouches) jumpTouchIds.delete(t.identifier);
-  if (jumpTouchIds.size === 0) {
-    btnJump.classList.remove('active');
-    onJumpUp();
-  }
-}, { passive: false });
-
-btnJump.addEventListener('touchcancel', (e) => {
-  for (const t of e.changedTouches) jumpTouchIds.delete(t.identifier);
-  if (jumpTouchIds.size === 0) {
-    btnJump.classList.remove('active');
-    onJumpUp();
-  }
-}, { passive: false });
-
-// Touch fallback — tapping anywhere else on screen acts as jump (backwards compat)
-document.addEventListener('touchstart', (e) => {
-  if (e.target === olBtn || e.target === btnRun || e.target === btnJump) return;
-  if (e.target.closest('#mobile-buttons')) return;
-  e.preventDefault();
-  onJumpDown();
-}, { passive: false });
-document.addEventListener('touchend', (e) => {
-  if (e.target === btnRun || e.target === btnJump) return;
-  if (e.target.closest('#mobile-buttons')) return;
-  onJumpUp();
-}, { passive: false });
-
-// Mouse (for desktop testing)
-canvas.addEventListener('mousedown', (e) => {
-  onJumpDown();
-});
-document.addEventListener('mouseup', () => {
-  onJumpUp();
-});
+setupMobileBtn(btnLeft, leftTouchIds, onMoveLeftDown, onMoveLeftUp);
+setupMobileBtn(btnRight, rightTouchIds, onMoveRightDown, onMoveRightUp);
+setupMobileBtn(btnRun, runTouchIds, onRunDown, onRunUp);
+setupMobileBtn(btnJump, jumpTouchIds, onJumpDown, onJumpUp);
 
 // ── Init ───────────────────────────────────────────────
 loadSprite(); // attempt sprite mode; falls back to procedural on failure
 initClouds();
 initHills();
-showOverlay('Plumber Runner', 'JUMP: Space/Tap  |  RUN: Shift/Z');
+showOverlay('Plumber Runner', 'MOVE: Arrows/AD  |  RUN: Shift/Z  |  JUMP: Space');
 gameLoop();
 
 // Expose self-test globally for console access

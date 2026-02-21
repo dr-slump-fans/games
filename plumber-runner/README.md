@@ -1,22 +1,20 @@
 # Plumber Runner
 
-A retro-style side-scrolling runner game playable in the browser (desktop & mobile).
+A retro-style side-scrolling platformer game playable in the browser (desktop & mobile).
 
 ## How to Play
 
-The screen scrolls automatically to the right. Your character runs forward on their own — you control **jumping** and **run boost** (faster running). RUN affects the character's running ability (faster recenter + jump boost), **not** the world scroll speed.
+**The character does NOT auto-run.** You manually move left and right through a procedurally generated world of pipes, bricks, and mushrooms. The camera follows you.
 
-- **Short tap** for a small jump, **long press** for a high jump — two distinct jump heights with clear feel difference
-- **Hold RUN** (Shift/Z or left mobile button) to boost character running ability — ramps up smoothly over ~0.6s, decelerates on release. Does **not** change world scroll speed
-- **Must release before jumping again** — holding the button/screen after landing will NOT auto-repeat the jump; you must lift your finger (or release the key) and press again
+- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to walk through the world
+- **Hold RUN** (Shift/Z or mobile RUN button) to sprint — movement speed increases with gradual acceleration
+- **Short tap JUMP** for a small jump, **long press** for a high jump — two distinct jump heights
+- **Must release before jumping again** — holding the button after landing will NOT auto-repeat the jump
 - You can **stand on top of pipes** — pipe tops are platforms!
-- **Side collisions push you back** instead of killing you instantly
-- You die when you get **crushed/squeezed** between obstacles:
-  - Pushed off the left edge of the screen by a pipe
-  - Squeezed between a bottom pipe and a ceiling pipe
-  - Pinned between a ceiling pipe and the ground
-- Your score increases each time you clear a pipe
-- The game speeds up over time!
+- **Side collisions block you** — you stop when walking into a pipe
+- You die when you get **crushed/squeezed** between obstacles or walk too far off the left edge of the screen
+- Your score increases each time you pass a pipe
+- Obstacles get harder over time (difficulty scales with survival time)
 - **HUD** shows survival time, current difficulty level (Lv.1~Lv.5), and progress bar
 
 ## Difficulty Growth Rules
@@ -32,8 +30,8 @@ Difficulty scales **smoothly** over survival time across 5 levels. All transitio
 | Lv.5 | INSANE | 240s | 2.15x | 175–245 px | 240 px | 55% | 28% |
 
 **What changes with difficulty:**
-- **Scroll speed**: Multiplied by the level's speed factor (on top of gradual per-frame acceleration)
-- **Pipe spacing**: Horizontal gap between obstacles shrinks, making runs denser
+- **Obstacle density**: Speed factor affects how closely obstacles spawn
+- **Pipe spacing**: Horizontal gap between obstacles shrinks, making the world denser
 - **Pipe height cap**: Later levels unlock taller bottom/ceiling pipes that require more precise jumping
 - **Pair frequency**: More top+bottom pipe combinations appear, creating tighter squeeze corridors
 - **Passable gap**: The vertical gap in pipe pairs narrows smoothly from ~96 px to ~66 px
@@ -160,7 +158,7 @@ When a special brick is broken, a **red mushroom** pops out and moves through th
 - Mushroom moves **horizontally** at 1.8 px/frame
 - Affected by **gravity** (0.4 px/frame²) — falls and lands on ground/pipe surfaces
 - **Bounces off pipe walls AND unbroken bricks** (reverses horizontal direction on side collision, lands on top surfaces)
-- **Scrolls with the world** like all other objects
+- Stays in world position (obstacles are static)
 - **Unstuck logic**: if a mushroom remains embedded in a solid for 30+ frames, it teleports to ground level
 - Removed when off-screen
 
@@ -232,7 +230,7 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 
 - You can **stand on top** of intact bricks (they act as platforms from above)
 - Bricks are placed before pipes as launch platforms — use them to reach tall pipe tops
-- Bricks scroll with the world at the same speed as pipes
+- Bricks are static in the world like pipes
 - Broken bricks are removed immediately — fragments are cosmetic only
 
 ## Player Character — "Pippo" the Plumber
@@ -280,22 +278,27 @@ The player character has a 5-state animation machine that drives distinct visual
 
 | State | Trigger | Visual |
 |-------|---------|--------|
-| `idle` | Title screen / pre-game | Relaxed stance with subtle breathing bob animation |
-| `run` | On ground, not landing | 4-frame run cycle — arms and legs alternate, hair bounces |
+| `idle` | On ground, not moving (or title screen) | Relaxed stance with subtle breathing bob animation |
+| `run` | On ground, moving left/right | 4-frame run cycle — arms and legs alternate, hair bounces |
 | `jump_up` | Airborne with upward velocity (`vy < -0.5`) | Fist raised, legs tucked, cap tilted, determined expression |
 | `fall` | Airborne with downward velocity (`vy >= -0.5`) | Arms spread for balance, legs dangling, worried expression |
 | `land` | Just touched ground after being airborne | 6-frame squash impact pose with dual dust puffs |
 
 Transitions happen automatically every frame in `updateAnimState()`:
-- **Idle → Run**: game starts → state becomes `run`
+- **Idle → Run**: player starts moving → state becomes `run`
 - **Ground → Air**: jump sets `onGround = false` → state becomes `jump_up`
 - **Rising → Falling**: when `vy` crosses the threshold → state becomes `fall`
 - **Air → Ground**: landing detected via `wasOnGround` flag → state becomes `land` for 6 frames
-- **Land → Run**: after land timer expires → state becomes `run`
+- **Land → Run/Idle**: after land timer expires → state becomes `run` (if moving) or `idle` (if stationary)
 
-## Player Default Position
+## Player Position & Camera
 
-The player's default horizontal position is set to **40% of the canvas width** (320 px on an 800 px canvas). This places the character near the center of the screen rather than far left, giving players better reaction time and a clearer view of upcoming obstacles. The position resets to 40% on each game restart. After being pushed back by obstacles, the player recovers to the default X position using **lerp-based smooth tracking** (12% per frame with 0.5 px minimum speed), providing a noticeably fast return without jarring teleportation.
+The player starts at world position X=320 on each new game. The camera follows the player, keeping them at **40% from the left edge** of the screen (CAMERA_LEAD). This gives the player a clear view of upcoming obstacles to the right while still being able to see what's behind.
+
+- The player moves freely in world coordinates — no auto-scrolling
+- The camera smoothly tracks the player's X position
+- The camera never goes below X=0 (world origin)
+- Obstacles are static in the world — the player walks through them
 
 ## Minimum Brick Height Rule
 
@@ -309,47 +312,45 @@ This rule applies to both stepping-stone bricks (placed before pipes) and standa
 
 ## Controls
 
-| Platform | Jump | Run Boost |
-|----------|------|-----------|
-| Desktop  | `Space` or `Arrow Up` — tap for small jump, hold for high jump | `Shift` or `Z` — hold to boost running |
-| Mobile   | Right button (JUMP) — tap for small jump, hold for high jump | Left button (RUN) — hold to boost running |
-| Mobile (fallback) | Tap anywhere on screen = jump | — |
+### Desktop
 
-### Run Boost (Character Running Ability)
+| Action | Keys |
+|--------|------|
+| Move Left | `Arrow Left` or `A` |
+| Move Right | `Arrow Right` or `D` |
+| Sprint (Run) | `Shift` or `Z` — hold to increase movement speed |
+| Jump | `Space` or `Arrow Up` — tap for small jump, hold for high jump |
 
-Hold the run button/key to boost the character's **running ability** — this does **not** change the world scroll speed (background/obstacle scroll rate stays on the difficulty curve). Instead, RUN makes the character recover to the target X position faster after being pushed back, and grants a jump height bonus:
+### Mobile
 
-- **Ramps up smoothly** over ~0.6 seconds to full boost while held — no jarring snap
-- **Decelerates smoothly** over ~0.37 seconds back to normal on release — no abrupt change
-- **Faster recenter**: when pushed back by obstacles, the character returns to position up to **55%** faster at full boost
-- **Forward dash**: while RUN is held, the recenter target shifts forward by up to **+10% screen width** (from 40% to 50%), making the character dash ahead. The shift ramps smoothly with the boost level and returns to 40% on release.
-- **Fixed base recenter target**: the base recenter target X is fixed at 40% of screen width (`RECENTER_TARGET_X`) and does not drift over time
-- **Collision-constrained movement**: all RUN-induced horizontal displacement (forward dash, recenter, snap-to-target) is routed through swept AABB collision detection (`collisionSafeMoveX`). The player can never tunnel through a pipe body or lip, even at full boost. The frame-end depenetration fallback remains as a final safety net.
-- **Bidirectional convergence**: recenter works in both directions — if the player is left of the target they recover rightward, and if they are right of the target (e.g. after releasing RUN) they smoothly converge leftward back to 40%. Both directions include collision safety checks.
-- **Guaranteed return to 40%**: releasing RUN will always bring the player back to the 40% target. The recenter logic is never gated by "currently overlapping an obstacle" — it always attempts recovery, with per-direction collision safety. If recovery stalls for 20+ consecutive frames (error not decreasing), a forced micro-nudge (0.5–1.0 px/frame, collision-safe) kicks in to break deadlocks.
-- **Jump height boost**: jumping while boosting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost.
+| Position | Buttons |
+|----------|---------|
+| Left side | **←** and **→** — move left/right |
+| Right side | **RUN** and **JUMP** — sprint and jump |
+
+All four buttons support multi-touch — you can hold right + RUN + JUMP simultaneously.
+
+### Run Boost (Sprint)
+
+Hold the RUN button/key to increase movement speed — the character walks faster, with gradual acceleration and deceleration for smooth feel:
+
+- **Ramps up smoothly** over ~0.6 seconds to full speed while held — no jarring snap
+- **Decelerates smoothly** over ~0.37 seconds back to walk speed on release
+- **Walk speed**: 2.5 px/frame (base)
+- **Run speed**: 4.5 px/frame (max, at full boost)
+- **Jump height boost**: jumping while sprinting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. Both ground jumps and air jumps benefit from this boost.
 - Run animation speed scales smoothly with the boost level
 - Displays a **"RUN XX%"** indicator at the bottom of the screen showing current boost level
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `RECENTER_TARGET_X` | `DESIGN_W * 0.40` | Fixed base recenter target X position (does not drift) |
-| `RUN_BOOST_FORWARD_SHIFT` | `DESIGN_W * 0.10` | Max forward shift (+10% screen width) when running |
-| `RUN_BOOST_MULTIPLIER` | `1.55` | Max recenter speed multiplier at full boost |
-| `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Max jump initial velocity multiplier at full boost |
+| `PLAYER_WALK_SPEED` | `2.5` | Base walk speed (px/frame) |
+| `PLAYER_RUN_SPEED` | `4.5` | Max run speed at full boost (px/frame) |
+| `PLAYER_ACCEL` | `0.18` | Acceleration per frame toward target speed |
+| `PLAYER_DECEL` | `0.25` | Deceleration per frame when no input |
+| `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Max jump velocity multiplier at full boost |
 | `RUN_BOOST_RAMP_UP` | `0.028` | Per-frame boost increment (~0.6s to full at 60fps) |
 | `RUN_BOOST_RAMP_DOWN` | `0.045` | Per-frame boost decrement (~0.37s to zero at 60fps) |
-
-### Self-Test: Verify RUN Release Returns to 40%
-
-1. Open the game with `?debug=1` in the URL.
-2. Start a run and hold RUN until `PLAYER_X` reaches ~400 (≈50%).
-3. Release RUN. Watch the debug overlay:
-   - `TARGET_X_DYNAMIC` should decay back toward 320 (40%).
-   - `RECOVER_ERR` should shrink steadily toward 0.
-   - `STALL` should stay 0 (or briefly spike then reset as error shrinks).
-4. Within 2–3 seconds, `RECOVER_ERR` should be ≈0 and `PLAYER_X` ≈ 320.
-5. If `STALL` reaches 20+, the anti-stall forced nudge is active — error should still converge, just slower.
 
 ## Collision System — Swept AABB (Continuous Collision Detection)
 
@@ -361,9 +362,9 @@ Instead of moving the player and then checking for overlap (discrete collision),
 
 #### Per-Frame Update Order
 
-1. **Compute desired velocity** — gravity, jump initiation, variable jump hold
-2. **Swept resolve** — `resolveSweptMovement(vy, scrollDX)`:
-   - Fold scroll-induced horizontal motion into the player's relative velocity vs obstacles
+1. **Compute desired velocity** — gravity, jump initiation, variable jump hold, manual horizontal movement
+2. **Swept resolve** — `resolveSweptMovement(vy, playerDX)`:
+   - Player moves by `(playerDX, vy)` in world coords against static obstacles
    - Gather all solid AABBs (ground, pipes lip/body, ceiling pipes, bricks)
    - Depenetrate any pre-existing overlaps (safety net)
    - Iterate up to `SWEEP_MAX_ITERATIONS` (4):
@@ -372,17 +373,15 @@ Instead of moving the player and then checking for overlap (discrete collision),
      - Resolve collision normal: zero the normal-axis velocity, keep tangent velocity
      - Special handling: brick hit from below → break brick, bounce player down
      - Consume used time fraction, repeat with remaining movement
-   - Convert from obstacle-rest-frame back to world coordinates
-3. **Move obstacles** — apply scroll displacement to pipe/brick positions
-4. **Post-move checks** — standing support loss, crush detection, off-screen death
-5. **Cleanup** — remove off-screen obstacles, spawn new ones, recover player X position
+3. **Post-move checks** — standing support loss, crush detection, off-screen death, camera follow
+4. **Cleanup** — remove off-screen obstacles, spawn new ones
 
 #### Key Functions
 
 | Function | Purpose |
 |----------|---------|
 | `sweptAABB(px,py,pw,ph,dx,dy,ox,oy,ow,oh)` | Compute time-of-impact `t ∈ [0,1]` and collision normal for a moving AABB vs a static AABB |
-| `resolveSweptMovement(vy, scrollDX)` | Full iterative sweep resolver — handles landing, ceiling hits, side blocks, brick breaking |
+| `resolveSweptMovement(vy, playerDX)` | Full iterative sweep resolver — handles landing, ceiling hits, side blocks, brick breaking |
 | `gatherCollisionRects()` | Collect all solid world AABBs (ground, pipes, bricks) |
 | `depenetratePlayer(rects)` | Push player out of any pre-existing overlaps using minimum penetration vector |
 | `checkStandingSupport()` | Check if player is still supported on a platform after obstacles move |
@@ -401,12 +400,9 @@ collision if tEntry <= tExit AND tEntry in [0, 1]
 
 This works for **any velocity magnitude** — even if `dy = 500` pixels/frame, it will find the exact contact time with a 16px-tall pipe lip. No step size or tolerance window is needed.
 
-### Scroll Motion Handling
+### Player Movement Handling
 
-Horizontal scroll is folded into the swept calculation as relative velocity. In the obstacle-rest-frame, the player moves by `(+scrollDX, vy)` relative to obstacles. After the sweep resolves, `scrollDX` is subtracted from the player's world X to convert back. This means:
-
-- Side collisions from scroll are detected continuously (no tunneling through pipe walls)
-- When blocked horizontally, the remaining scroll pushes the player left in world coords (correct crush behavior)
+The player's manual horizontal velocity (`playerVX`) is passed directly to the swept collision resolver along with vertical velocity. Obstacles are static in world coords — no frame conversion is needed. When the player hits a wall, their horizontal velocity is zeroed.
 
 ### Edge-Jump Protection (Lip Forgiveness + Wall-Kick Nudge + Head-Center Rule)
 
@@ -492,9 +488,8 @@ Each test reports pass/fail with contact details. All tests must pass for the co
 
 Even with swept AABB and pre-sweep depenetration, edge cases can cause the player hitbox to overlap a pipe after all frame processing completes. Common causes include:
 
-- **Obstacle scroll**: pipes move left after the sweep resolves, potentially pushing the pipe into the player's final position.
-- **X-recovery**: the lerp-based position recovery could move the player into a pipe that just scrolled into range.
 - **Edge-protection nudges**: `EDGE-FORGIVE` and `WALL-NUDGE` sideways pushes could, in rare cases, place the player inside a neighboring obstacle.
+- **Accumulated floating-point drift**: multiple collision responses in one frame may cause tiny overlaps.
 
 To guarantee the player is **never rendered inside a pipe**, a **frame-end depenetration fallback** runs after all movement (obstacle scroll, X-recovery, edge nudges) completes:
 
@@ -504,7 +499,7 @@ To guarantee the player is **never rendered inside a pipe**, a **frame-end depen
 4. Adjust velocity: if pushed upward, land the player; if pushed downward, zero upward velocity.
 5. Increment the `depenFixCount` counter for debug tracking.
 
-Additionally, all nudge systems (`EDGE-FORGIVE`, `WALL-NUDGE`, X-recovery) now verify the destination position is clear before applying the push. If the nudge would create a new overlap with another obstacle, it is **cancelled** (or falls back to the normal collision axis resolution).
+Additionally, all nudge systems (`EDGE-FORGIVE`, `WALL-NUDGE`) verify the destination position is clear before applying the push. If the nudge would create a new overlap with another obstacle, it is **cancelled** (or falls back to the normal collision axis resolution).
 
 #### Debug: `DEPEN FIX` counter (`?debug=1`)
 
@@ -627,15 +622,15 @@ Chain events within a short time window to build a combo multiplier for bonus po
 | `COMBO_MAX` | `5` | Maximum combo multiplier |
 | `COMBO_PERFECT_LAND_VY` | `4.0` | Max `|vy|` for a landing to count as "perfect" |
 
-### B) Speed Wave (Rhythm Breathing)
+### B) Speed Wave (Difficulty Rhythm)
 
-The scroll speed now oscillates smoothly around the base speed, creating a breathing rhythm instead of monotonic acceleration.
+The internal difficulty speed factor oscillates smoothly, creating rhythm variation in obstacle density and spawning.
 
 **How it works:**
-- A sine wave with **20-second period** modulates the scroll speed by **±10%**
+- A sine wave with **20-second period** modulates the difficulty speed factor by **±10%**
 - The wave ramps in gently over the first 30 seconds (intro fade)
-- The long-term difficulty trend (per-frame acceleration + difficulty multiplier) is preserved — later game is still harder than early game
-- The wave creates natural "push" and "breathe" phases that make runs feel dynamic
+- Affects obstacle spawn pacing — creates natural "push" and "breathe" phases
+- Note: in manual movement mode, the player controls their own speed, so the wave primarily affects difficulty timing
 
 **Debug (`?debug=1`):**
 - Bottom status line shows `SPEED_WAVE:X.XXX` — the current wave multiplier (1.0 = no effect, 1.10 = +10%, 0.90 = −10%)
