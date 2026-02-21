@@ -241,7 +241,54 @@ Horizontal scroll is folded into the swept calculation as relative velocity. In 
 - Side collisions from scroll are detected continuously (no tunneling through pipe walls)
 - When blocked horizontally, the remaining scroll pushes the player left in world coords (correct crush behavior)
 
+### Edge-Jump Protection (Lip Forgiveness + Wall-Kick Nudge + Head-Center Rule)
+
+Jumping near pipe edges is a common frustration point. Three complementary systems prevent unfair "stuck" situations when the player jumps while touching or near a pipe:
+
+#### 1. Lip Corner Forgiveness (Enhanced)
+
+Pipe lips are wider than the pipe body (`LIP_W=56` vs `PIPE_W=48`), creating a 4px overhang on each side. When the player is sliding along the side of a pipe body and jumps upward, their head can clip this overhang — resulting in a frustrating "bonk" that kills the jump even though the overlap is tiny.
+
+**Lip corner forgiveness** solves this by detecting when an upward-moving player clips only the outer edge of a lip. If the horizontal overlap between the player hitbox and the lip rect is within `LIP_CORNER_FORGIVE` pixels (default: **14**, increased from 8), the collision response **nudges the player sideways** to clear the lip corner instead of blocking the jump. This only activates while the player is ascending (`vy < 0`).
+
+This applies in two places:
+
+1. **Swept collision response** — when the sweep detects a ceiling hit (`normalY=1`) against a `pipe_lip` or `ceiling_pipe_lip` rect, the forgiveness check runs before the standard "stop upward movement" response. If triggered, the player is nudged sideways, the upward velocity is preserved, and the sweep continues with the remaining movement fraction.
+
+2. **Depenetration** — when pre-existing overlap with a lip rect is detected and the player is moving upward, sideways depenetration is forced over vertical depenetration if the horizontal overlap is within the forgiveness margin.
+
+**Safety**: The nudge pushes the player **away** from the pipe (outward past the lip edge), so it cannot cause wall penetration. The pipe body is narrower than the lip, and the nudge clears the player past the lip's outer edge. Full-center hits on the lip (overlap > `LIP_CORNER_FORGIVE` AND head center overlapping) still block the jump as expected.
+
+#### 2. Wall-Kick Nudge
+
+When the player is flush against a pipe body side wall and initiates a jump, a one-time outward push (`WALL_NUDGE_PX = 3` pixels) is applied on the jump start frame. This prevents the lip overhang from immediately blocking the ascent.
+
+- Fires **once per jump** (reset on landing)
+- Only on **pipe body side contact** (within 2px of touching)
+- Pushes **away** from the pipe — cannot push into the pipe
+- Works for both left-side and right-side contact
+
+#### 3. Head-Center Rule
+
+For pipe-lip ceiling collisions, only the **center 45%** of the player's hitbox width counts as a "head hit". If only the edge of the player's head brushes a lip corner, the collision is treated as a **side deflection** (sideways nudge) instead of a ceiling bonk.
+
+This prevents the common case where a tiny corner overlap kills an otherwise clean jump.
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `LIP_CORNER_FORGIVE` | `14` | Max horizontal overlap (px) that triggers sideways nudge instead of jump block |
+| `WALL_NUDGE_PX` | `3` | Pixels of outward push on jump-start when touching pipe wall |
+| `HEAD_CENTER_RATIO` | `0.45` | Fraction of hitbox width that counts as "head center" for ceiling bonk |
+
 ### Debug Features
+
+#### Edge-protection overlay (always visible)
+
+When lip forgiveness or wall-kick nudge activates, a short-lived label appears at the top-left of the game canvas:
+- **`EDGE-FORGIVE`** (cyan) — lip corner forgiveness or head-center rule triggered a sideways deflection
+- **`WALL-NUDGE`** (yellow) — wall-kick nudge fired on jump start near a pipe wall
+
+These labels fade out after ~1.5 seconds and are always visible (no debug flag needed).
 
 #### Hitbox overlay (`?debug=1`)
 

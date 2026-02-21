@@ -119,6 +119,27 @@ const LIP_W = 56;
 const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
 
+// ── Lip Corner Forgiveness ──────────────────────────
+// When the player is beside a pipe and jumps upward, the lip overhang
+// (LIP_W > PIPE_W) can clip the player's head even though the overlap is tiny.
+// LIP_CORNER_FORGIVE defines the width of the "forgiveness zone" on each side
+// of the lip: if the player's horizontal overlap with the lip is within this
+// margin while moving upward, the collision nudges the player sideways instead
+// of blocking the jump. This prevents the frustrating "bonk" on lip corners
+// while still blocking passage through the pipe body.
+const LIP_CORNER_FORGIVE = 14; // pixels of lip-edge forgiveness per side (increased from 8)
+
+// ── Wall-Kick Nudge ────────────────────────────────────
+// When the player is flush against a pipe wall and initiates a jump,
+// give a one-time outward nudge so the lip overhang doesn't immediately
+// block the ascent. Only fires once per jump, only on pipe body side contact.
+const WALL_NUDGE_PX = 3; // pixels of outward push on jump-start near wall
+
+// ── Head-Center Rule ───────────────────────────────────
+// For pipe-lip top-bonk: only count as a ceiling hit if the player's
+// head center region overlaps the lip. Corner brushes become side-deflections.
+const HEAD_CENTER_RATIO = 0.45; // fraction of player width that counts as "center"
+
 // ── Breakable Brick Constants ─────────────────────────
 const BRICK_W = 32;
 const BRICK_H = 24;
@@ -246,6 +267,11 @@ let scrollSpeed = SCROLL_SPEED_BASE;
 let jumpPressed = false;
 let jumpConsumed = false;  // true after jump initiated; must release to jump again
 let jumpHoldFrames = 0;
+let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
+
+// ── Edge-Protection Debug Overlay ──────────────────────
+// Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
+let edgeDebugMsgs = []; // { text, ttl (frames remaining) }
 let survivalTime = 0;       // seconds survived
 let diffLevel = 0;          // current difficulty level index (0-4)
 let diffProgress = 0;       // 0..1 progress within current level toward next
@@ -1078,7 +1104,27 @@ function depenetratePlayer(collisionRects) {
       const minX = overlapLeft < overlapRight ? -overlapLeft : overlapRight;
       const minY = overlapTop < overlapBottom ? -overlapTop : overlapBottom;
 
-      if (Math.abs(minX) < Math.abs(minY)) {
+      // Lip corner forgiveness: if overlapping a lip rect and the horizontal
+      // overlap is within the forgiveness margin, always push sideways so the
+      // player can clear the lip corner instead of being pushed down.
+      // Also apply head-center rule: if head center doesn't overlap lip, force sideways.
+      const isLip = r.type === 'pipe_lip' || r.type === 'ceiling_pipe_lip';
+      const horizOverlap = Math.min(overlapLeft, overlapRight);
+      let forceSideways = isLip && player.vy < 0 && horizOverlap <= LIP_CORNER_FORGIVE;
+      // Head-center rule for depenetration
+      if (isLip && player.vy < 0 && !forceSideways) {
+        const headCW = (player.w - 8) * HEAD_CENTER_RATIO;
+        const headCL = hx + ((player.w - 8) - headCW) / 2;
+        const headCR = headCL + headCW;
+        if (!(headCR > r.x && headCL < r.x + r.w)) {
+          forceSideways = true;
+        }
+      }
+      if (forceSideways) {
+        edgeDebugMsgs.push({ text: 'EDGE-FORGIVE', ttl: 90 });
+      }
+
+      if (forceSideways || Math.abs(minX) < Math.abs(minY)) {
         player.x += minX;
       } else {
         player.y += minY;
@@ -1199,6 +1245,50 @@ function resolveSweptMovement(playerVY, scrollDX) {
       player.onGround = true;
     } else if (bestNY === 1) {
       // Hit bottom of obstacle (ceiling/brick from below)
+
+      // ── Lip Corner Forgiveness (enhanced) ──────────────
+      // When player jumps upward beside a pipe and clips the lip overhang
+      // corner, nudge them sideways instead of blocking the jump.
+      // Now with wider margin (LIP_CORNER_FORGIVE=14) and only while ascending.
+      const isLipRect = bestRect && (bestRect.type === 'pipe_lip' || bestRect.type === 'ceiling_pipe_lip');
+      if (isLipRect && playerVY < 0) {
+        const hx = player.x + HB_OX;
+        const lipLeft = bestRect.x;
+        const lipRight = bestRect.x + bestRect.w;
+        const playerLeft = hx;
+        const playerRight = hx + HB_W;
+
+        // How much the player overlaps into the lip on each side
+        const overlapFromLeft = playerRight - lipLeft;   // player's right edge past lip's left
+        const overlapFromRight = lipRight - playerLeft;  // lip's right edge past player's left
+
+        // Determine which side has the smaller overlap (= which corner was clipped)
+        const minOverlap = Math.min(overlapFromLeft, overlapFromRight);
+
+        // ── Head-Center Rule ──────────────────────────────
+        // Only count as a true ceiling bonk if the player's head center
+        // region overlaps the lip top edge. Edge brushes → side deflection.
+        const headCenterW = HB_W * HEAD_CENTER_RATIO;
+        const headCenterLeft = hx + (HB_W - headCenterW) / 2;
+        const headCenterRight = headCenterLeft + headCenterW;
+        const headCenterOverlaps = headCenterRight > lipLeft && headCenterLeft < lipRight;
+
+        if (minOverlap > 0 && (minOverlap <= LIP_CORNER_FORGIVE || !headCenterOverlaps)) {
+          // Corner clip or head-center miss — nudge player sideways to clear the lip
+          if (overlapFromLeft < overlapFromRight) {
+            // Player is to the left of the lip — nudge left
+            player.x -= overlapFromLeft + 0.5;
+          } else {
+            // Player is to the right of the lip — nudge right
+            player.x += overlapFromRight + 0.5;
+          }
+          // Do NOT stop the jump — let upward motion continue
+          edgeDebugMsgs.push({ text: 'EDGE-FORGIVE', ttl: 90 });
+          remainingT *= (1.0 - bestT);
+          continue;
+        }
+      }
+
       hitCeilingThisFrame = true;
 
       // Check if we hit a brick from below (player moving up)
@@ -1504,6 +1594,8 @@ function resetGame() {
   groundOffset = 0;
   jumpHoldFrames = 0;
   jumpConsumed = false;
+  wallNudgeUsed = false;
+  edgeDebugMsgs = [];
   initClouds();
   initHills();
   // Seed first pipe pair far away
@@ -1865,6 +1957,37 @@ function update() {
     player.onGround = false;
     jumpHoldFrames = 0;
     jumpConsumed = true;
+    wallNudgeUsed = false; // allow one wall-kick nudge this jump
+
+    // ── Wall-Kick Nudge ──────────────────────────────────
+    // If player is flush against a pipe body side at jump start, nudge outward
+    // so the lip overhang doesn't immediately block the ascent.
+    const hb = getPlayerHitbox();
+    for (const pipe of pipes) {
+      if (pipe.h <= 0) continue;
+      const pr = getPipeRects(pipe);
+      const body = pipe.fromTop
+        ? { x: pr.bodyRect.x, y: pr.bodyRect.y, w: pr.bodyRect.w, h: pr.bodyRect.h }
+        : { x: pr.bodyRect.x, y: pr.bodyRect.y, w: pr.bodyRect.w, h: pr.bodyRect.h };
+      // Check vertical overlap with pipe body
+      if (hb.y + hb.h <= body.y || hb.y >= body.y + body.h) continue;
+      // Check if player's side is touching the pipe body (within 2px)
+      const gapRight = body.x - (hb.x + hb.w); // player left of pipe
+      const gapLeft = hb.x - (body.x + body.w); // player right of pipe
+      if (gapRight >= -1 && gapRight <= 2) {
+        // Player is to the LEFT of pipe body — nudge left
+        player.x -= WALL_NUDGE_PX;
+        wallNudgeUsed = true;
+        edgeDebugMsgs.push({ text: 'WALL-NUDGE', ttl: 90 });
+        break;
+      } else if (gapLeft >= -1 && gapLeft <= 2) {
+        // Player is to the RIGHT of pipe body — nudge right
+        player.x += WALL_NUDGE_PX;
+        wallNudgeUsed = true;
+        edgeDebugMsgs.push({ text: 'WALL-NUDGE', ttl: 90 });
+        break;
+      }
+    }
   }
 
   // Variable jump: hold to go higher
@@ -1887,6 +2010,7 @@ function update() {
   // Reset hold counter on landing
   if (result.landedThisFrame) {
     jumpHoldFrames = 0;
+    wallNudgeUsed = false;
   }
 
   // Clamp player X (don't go off-screen too far left)
@@ -2090,6 +2214,25 @@ function draw() {
 
   // Score popups
   drawScorePopups();
+
+  // ── Edge-Protection Debug Overlay (always visible) ────
+  // Show EDGE-FORGIVE / WALL-NUDGE messages at top-left when triggered
+  if (edgeDebugMsgs.length > 0) {
+    ctx.save();
+    ctx.font = 'bold 11px monospace';
+    let dbgY = 14;
+    for (let i = edgeDebugMsgs.length - 1; i >= 0; i--) {
+      const msg = edgeDebugMsgs[i];
+      const alpha = Math.min(1, msg.ttl / 30);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = msg.text === 'WALL-NUDGE' ? '#ff6' : '#6ff';
+      ctx.fillText(msg.text, 6, dbgY);
+      dbgY += 14;
+      msg.ttl--;
+      if (msg.ttl <= 0) edgeDebugMsgs.splice(i, 1);
+    }
+    ctx.restore();
+  }
 
   // ── Debug hitbox overlay ──────────────────────────────
   if (DEBUG_MODE) {
