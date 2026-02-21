@@ -598,6 +598,81 @@ The default sprite sheet is a **single-row PNG** with transparent background (RG
 
 The bundled `assets/sprite.png` is an **original character** ("Pippo" the Plumber) created for this project. If you replace it, ensure you have the right to use your replacement art.
 
+## Fun Pack v1
+
+Three new systems that add depth, replayability, and satisfying feedback to every run.
+
+### A) Combo System
+
+Chain events within a short time window to build a combo multiplier for bonus points.
+
+**Combo Events:**
+- **Break a brick** — base 5 points, triggers combo
+- **Perfect landing** — land on a pipe top or brick top with low vertical speed (`|vy| ≤ 4.0`), base 2 points
+
+**Rules:**
+- Each event resets a **2.5-second combo window**; chain events before it expires to build the multiplier
+- Combo level increments per event: x1, x2, x3... up to **x5 max**
+- Score bonus per event = base points × combo level (on top of the normal score)
+- Combo resets on timeout (2.5s without a combo event) or on death
+
+**Visual:**
+- `COMBO xN!` popup appears center-screen when combo ≥ 2, with scale-in animation
+- Persistent combo bar in top-right shows current combo level and remaining time
+- In debug mode (`?debug=1`): `PERFECT LAND` label flashes on successful perfect landings
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `COMBO_WINDOW` | `2.5` | Seconds to chain the next combo event |
+| `COMBO_MAX` | `5` | Maximum combo multiplier |
+| `COMBO_PERFECT_LAND_VY` | `4.0` | Max `|vy|` for a landing to count as "perfect" |
+
+### B) Speed Wave (Rhythm Breathing)
+
+The scroll speed now oscillates smoothly around the base speed, creating a breathing rhythm instead of monotonic acceleration.
+
+**How it works:**
+- A sine wave with **20-second period** modulates the scroll speed by **±10%**
+- The wave ramps in gently over the first 30 seconds (intro fade)
+- The long-term difficulty trend (per-frame acceleration + difficulty multiplier) is preserved — later game is still harder than early game
+- The wave creates natural "push" and "breathe" phases that make runs feel dynamic
+
+**Debug (`?debug=1`):**
+- Bottom status line shows `SPEED_WAVE:X.XXX` — the current wave multiplier (1.0 = no effect, 1.10 = +10%, 0.90 = −10%)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `SPEED_WAVE_PERIOD` | `20` | Seconds per full wave cycle |
+| `SPEED_WAVE_AMP` | `0.10` | Amplitude (±10% of base speed) |
+
+### C) Mission System (Per-Run Task)
+
+Each run randomly assigns one lightweight mission from a pool. Complete it for a score bonus.
+
+**Mission Pool (3 types):**
+
+| Mission | Description | Target | Time Limit |
+|---------|-------------|--------|------------|
+| Break Bricks | Break 3 bricks | 3 | 30 seconds |
+| Eat Mushroom | Collect 1 mushroom | 1 | None |
+| Land Platforms | Land on 2 platforms consecutively (no ground touch between) | 2 | None |
+
+**Rules:**
+- One mission per run, randomly selected at game start
+- Mission HUD shows the task description and progress (`[progress/target]`) below the time display
+- Timed missions show remaining seconds
+- On completion: **+50 score** bonus and `MISSION COMPLETE!` popup (displayed for 2 seconds)
+- The "Land Platforms" mission resets progress if the player touches the ground between platform landings
+- No penalty for failing a mission — it simply stays incomplete
+
+**Debug (`?debug=1`):**
+- Bottom status line shows `MISSION:type progress/target`
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `MISSION_REWARD_SCORE` | `50` | Score bonus for completing a mission |
+| `MISSION_COMPLETE_DISPLAY` | `120` | Frames to show the completion popup |
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

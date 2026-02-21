@@ -106,6 +106,41 @@ canvas {
   display: none;
   z-index: 11;
 }
+#hud-combo {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 28px; font-weight: bold;
+  color: #ff0; text-shadow: 2px 2px 0 #000, 0 0 12px rgba(255,200,0,0.7);
+  pointer-events: none;
+  display: none;
+  z-index: 12;
+  transition: opacity 0.3s ease;
+}
+#hud-combo-bar {
+  position: absolute; top: 80px; right: 16px;
+  font-family: monospace; font-size: 14px; font-weight: bold;
+  color: #ff6; text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+  display: none;
+  z-index: 11;
+}
+#hud-mission {
+  position: absolute; top: 56px; left: 16px;
+  font-family: monospace; font-size: 13px; font-weight: bold;
+  color: #0ff; text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+  display: none;
+  z-index: 11;
+}
+#hud-mission-complete {
+  position: absolute; top: 40%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 24px; font-weight: bold;
+  color: #2ecc71; text-shadow: 2px 2px 0 #000, 0 0 10px rgba(46,204,113,0.6);
+  pointer-events: none;
+  display: none;
+  z-index: 12;
+}
 </style>
 </head>
 <body>
@@ -130,6 +165,10 @@ canvas {
   <div class="mobile-btn" id="btn-jump">JUMP</div>
 </div>
 <div id="hud-boost">RUN BOOST</div>
+<div id="hud-combo"></div>
+<div id="hud-combo-bar"></div>
+<div id="hud-mission"></div>
+<div id="hud-mission-complete">MISSION COMPLETE!</div>
 <div id="ui">
   <div id="overlay">
     <h1 id="ol-title">Plumber Runner</h1>
@@ -227,6 +266,20 @@ const DIFFICULTY_LEVELS = [
 const SWEEP_MAX_ITERATIONS = 4;   // max resolve iterations per frame
 const SWEEP_EPSILON = 0.001;      // floating-point tolerance for contact
 
+// ── Fun Pack v1: Combo System ────────────────────────
+const COMBO_WINDOW = 2.5;          // seconds to chain next combo event
+const COMBO_MAX = 5;               // max combo multiplier
+const COMBO_POPUP_DURATION = 60;   // frames to show combo popup
+const COMBO_PERFECT_LAND_VY = 4.0; // max |vy| on landing to count as "perfect"
+
+// ── Fun Pack v1: Speed Wave ─────────────────────────
+const SPEED_WAVE_PERIOD = 20;      // seconds per wave cycle
+const SPEED_WAVE_AMP = 0.10;       // ±10% amplitude
+
+// ── Fun Pack v1: Mission System ─────────────────────
+const MISSION_REWARD_SCORE = 50;
+const MISSION_COMPLETE_DISPLAY = 120; // frames to show MISSION COMPLETE
+
 // ── Debug Mode ───────────────────────────────────────
 const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === '1';
 
@@ -322,6 +375,10 @@ const hudLevel = document.getElementById('hud-level');
 const hudLevelFill = document.getElementById('hud-level-fill');
 const hudMushroom = document.getElementById('hud-mushroom');
 const hudBoost = document.getElementById('hud-boost');
+const hudCombo = document.getElementById('hud-combo');
+const hudComboBar = document.getElementById('hud-combo-bar');
+const hudMission = document.getElementById('hud-mission');
+const hudMissionComplete = document.getElementById('hud-mission-complete');
 
 // ── Game State ─────────────────────────────────────────
 let state = 'title'; // title | playing | dead
@@ -348,6 +405,20 @@ let survivalTime = 0;       // seconds survived (includes bonus time)
 let bonusTime = 0;          // accumulated bonus seconds from breaking bricks
 let diffLevel = 0;          // current difficulty level index (0-4)
 let diffProgress = 0;       // 0..1 progress within current level toward next
+
+// ── Fun Pack v1: Combo State ─────────────────────────
+let comboCount = 0;           // current combo level (0 = no combo)
+let comboTimer = 0;           // seconds remaining in combo window
+let comboPopupTimer = 0;      // frames remaining for combo popup display
+let comboPopupText = '';      // text to show in popup
+
+// ── Fun Pack v1: Speed Wave State ───────────────────
+let speedWavePhase = 0;       // current wave phase in radians
+
+// ── Fun Pack v1: Mission State ──────────────────────
+let mission = null;           // { type, desc, target, progress, done }
+let missionCompleteTimer = 0; // frames remaining for MISSION COMPLETE display
+let missionPlatformLandCount = 0; // consecutive platform landings for mission type 2
 
 // ── Mushroom & Double Jump State ─────────────────────
 let mushrooms = [];           // active mushroom items: { x, y, vx, vy, onGround }
@@ -1273,6 +1344,7 @@ function updateMushrooms() {
       // Activate double jump
       doubleJumpTimer = DOUBLE_JUMP_DURATION;
       mushrooms.splice(i, 1);
+      advanceMission('eat_mushroom');
       // Popup
       spawnScorePopup(m.x, m.y - 10, 0);
       scorePopups[scorePopups.length - 1].text = 'MUSHROOM!';
@@ -1837,6 +1909,8 @@ function resolveSweptMovement(playerVY, scrollDX) {
           spawnBrickFragments(brick.x, brick.y);
           spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, BRICK_SCORE);
           score += BRICK_SCORE;
+          triggerCombo(BRICK_SCORE);
+          advanceMission('break_bricks');
           // Time bonus: add seconds to survival timer
           bonusTime += BRICK_TIME_BONUS;
           if (DEBUG_MODE) {
@@ -2195,6 +2269,72 @@ function runCollisionSelfTest() {
   return { allPassed, results };
 }
 
+// ── Fun Pack v1: Combo Helpers ───────────────────────
+function triggerCombo(eventScore) {
+  comboCount = Math.min(comboCount + 1, COMBO_MAX);
+  comboTimer = COMBO_WINDOW;
+  const bonus = eventScore * comboCount;
+  score += bonus;
+  comboPopupText = comboCount >= 2 ? `COMBO x${comboCount}!` : '';
+  comboPopupTimer = comboCount >= 2 ? COMBO_POPUP_DURATION : 0;
+  if (comboCount >= 2) {
+    spawnScorePopup(player.x, player.y - 20, bonus);
+  }
+  return bonus;
+}
+
+function resetCombo() {
+  comboCount = 0;
+  comboTimer = 0;
+  comboPopupTimer = 0;
+}
+
+// ── Fun Pack v1: Speed Wave ─────────────────────────
+function getSpeedWaveFactor() {
+  // Smooth sin wave; amplitude decays slightly at early game for gentle intro
+  const introFade = Math.min(1, survivalTime / 30); // ramp in over first 30s
+  return 1.0 + Math.sin(speedWavePhase) * SPEED_WAVE_AMP * introFade;
+}
+
+// ── Fun Pack v1: Mission System ─────────────────────
+const MISSION_DEFS = [
+  { type: 'break_bricks',   desc: '30s 内破 3 磚', target: 3, timeLimit: 30 },
+  { type: 'eat_mushroom',   desc: '吃到 1 顆香菇',  target: 1, timeLimit: 0  },
+  { type: 'land_platforms', desc: '連續站上 2 個平台', target: 2, timeLimit: 0  },
+];
+
+function initMission() {
+  const def = MISSION_DEFS[Math.floor(Math.random() * MISSION_DEFS.length)];
+  mission = {
+    type: def.type,
+    desc: def.desc,
+    target: def.target,
+    progress: 0,
+    done: false,
+    startTime: 0, // set when game starts
+    timeLimit: def.timeLimit,
+  };
+  missionCompleteTimer = 0;
+  missionPlatformLandCount = 0;
+}
+
+function advanceMission(eventType) {
+  if (!mission || mission.done) return;
+  // Check time limit for timed missions
+  if (mission.timeLimit > 0 && survivalTime - mission.startTime > mission.timeLimit) {
+    return; // expired, no more progress possible (but we don't fail, just can't complete)
+  }
+  if (mission.type === eventType) {
+    mission.progress = Math.min(mission.progress + 1, mission.target);
+    if (mission.progress >= mission.target) {
+      mission.done = true;
+      missionCompleteTimer = MISSION_COMPLETE_DISPLAY;
+      score += MISSION_REWARD_SCORE;
+      spawnScorePopup(player.x, player.y - 30, MISSION_REWARD_SCORE);
+    }
+  }
+}
+
 // ── Game Logic ─────────────────────────────────────────
 let groundOffset = 0;
 
@@ -2235,6 +2375,13 @@ function resetGame() {
   lastRecoverAbsErr = 0;
   edgeDebugMsgs = [];
   depenFixCount = 0;
+  // Fun Pack v1 resets
+  resetCombo();
+  speedWavePhase = 0;
+  initMission();
+  mission.startTime = 0;
+  missionCompleteTimer = 0;
+  missionPlatformLandCount = 0;
   initClouds();
   initHills();
   // Seed first pipe pair far away
@@ -2600,7 +2747,10 @@ function update() {
   // Dynamic recenter target: shifts forward proportionally to boost level
   dynamicTargetX = RECENTER_TARGET_X + runBoostFactor * RUN_BOOST_FORWARD_SHIFT;
   // RUN BOOST affects player run ability only, NOT world scroll speed.
-  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul;
+  // Fun Pack v1: Speed wave — smooth oscillation around base speed
+  speedWavePhase = (survivalTime / SPEED_WAVE_PERIOD) * Math.PI * 2;
+  const waveFactor = getSpeedWaveFactor();
+  scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * waveFactor;
   groundOffset += scrollSpeed;
 
   // ── Phase 1: Compute desired velocity vector ──────────
@@ -2701,6 +2851,7 @@ function update() {
   // ── Phase 2: Swept AABB resolve ───────────────────────
   // Combine player's vertical motion + scroll-induced horizontal motion
   // into one unified continuous collision resolve.
+  const preResolveVY = player.vy; // save for perfect landing detection
   const result = resolveSweptMovement(player.vy, scrollSpeed);
 
   // Recompute survivalTime AFTER sweep so brick bonus is reflected immediately in HUD
@@ -2716,6 +2867,26 @@ function update() {
     wallNudgeUsed = false;
     airJumpsUsed = 0; // reset air jump count on landing
     isAirJump = false; // reset air jump flag on landing
+
+    // ── Fun Pack v1: Perfect Landing combo + platform mission ──
+    // Check if landed on pipe top or brick top (not ground)
+    const landedOnPlatform = player.y < groundY - 2;
+    if (landedOnPlatform) {
+      // Perfect landing: vy was within threshold when we hit surface
+      if (Math.abs(preResolveVY) <= COMBO_PERFECT_LAND_VY) {
+        triggerCombo(2); // 2 base points for perfect landing
+        if (DEBUG_MODE) edgeDebugMsgs.push({ text: 'PERFECT LAND', ttl: 60 });
+      }
+      // Mission: consecutive platform landings
+      missionPlatformLandCount++;
+      advanceMission('land_platforms');
+    } else {
+      // Ground landing resets consecutive platform count AND mission progress for that type
+      if (missionPlatformLandCount > 0 && mission && mission.type === 'land_platforms' && !mission.done) {
+        mission.progress = 0;
+      }
+      missionPlatformLandCount = 0;
+    }
   }
 
   // Clamp player X (don't go off-screen too far left)
@@ -2750,6 +2921,16 @@ function update() {
       }
     }
   }
+
+  // ── Fun Pack v1: Combo timer decay ────────────────────
+  if (comboTimer > 0) {
+    comboTimer -= 1 / 60;
+    if (comboTimer <= 0) {
+      resetCombo();
+    }
+  }
+  if (comboPopupTimer > 0) comboPopupTimer--;
+  if (missionCompleteTimer > 0) missionCompleteTimer--;
 
   // ── Phase 4: Move obstacles in world coords ──────────
   // The sweep already accounted for scroll in collision detection.
@@ -2965,6 +3146,46 @@ function update() {
   } else {
     hudBoost.style.display = 'none';
   }
+
+  // ── Fun Pack v1: Combo HUD ──────────────────────────
+  if (comboPopupTimer > 0 && comboPopupText) {
+    hudCombo.textContent = comboPopupText;
+    hudCombo.style.display = 'block';
+    hudCombo.style.opacity = Math.min(1, comboPopupTimer / 15);
+    // Scale effect: bigger at start, shrinks
+    const scale = 1 + 0.3 * (comboPopupTimer / COMBO_POPUP_DURATION);
+    hudCombo.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(2)})`;
+  } else {
+    hudCombo.style.display = 'none';
+  }
+  // Persistent combo bar (top-right)
+  if (comboCount >= 2 && comboTimer > 0) {
+    const barPct = Math.round((comboTimer / COMBO_WINDOW) * 100);
+    hudComboBar.textContent = `COMBO x${comboCount} [${'█'.repeat(Math.ceil(barPct / 20))}${'░'.repeat(5 - Math.ceil(barPct / 20))}]`;
+    hudComboBar.style.display = 'block';
+  } else {
+    hudComboBar.style.display = 'none';
+  }
+
+  // ── Fun Pack v1: Mission HUD ────────────────────────
+  if (mission && !mission.done) {
+    let missionText = `任務: ${mission.desc}  [${mission.progress}/${mission.target}]`;
+    if (mission.timeLimit > 0) {
+      const remaining = Math.max(0, mission.timeLimit - (survivalTime - mission.startTime));
+      missionText += `  ${Math.ceil(remaining)}s`;
+    }
+    hudMission.textContent = missionText;
+    hudMission.style.display = 'block';
+  } else if (mission && mission.done) {
+    hudMission.style.display = 'none';
+  }
+  // Mission complete popup
+  if (missionCompleteTimer > 0) {
+    hudMissionComplete.style.display = 'block';
+    hudMissionComplete.style.opacity = Math.min(1, missionCompleteTimer / 20);
+  } else {
+    hudMissionComplete.style.display = 'none';
+  }
 }
 
 function draw() {
@@ -3120,6 +3341,7 @@ function draw() {
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
     ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount} RECOVER_STALL:${recoverStallFrames}`, 4, DESIGN_H - 14);
     ctx.fillText(`TARGET_X_DYNAMIC:${dynamicTargetX.toFixed(1)} PLAYER_X:${player.x.toFixed(1)} RECOVER_ERR:${(player.x - dynamicTargetX).toFixed(1)} STALL:${recoverStallFrames}`, 4, DESIGN_H - 24);
+    ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 34);
 
     ctx.restore();
   }
@@ -3144,6 +3366,10 @@ function showOverlay(title, msg, sc) {
   olBtn.textContent = state === 'title' ? 'START' : 'RESTART';
   overlay.style.display = 'flex';
   hudBoost.style.display = 'none';
+  hudCombo.style.display = 'none';
+  hudComboBar.style.display = 'none';
+  hudMission.style.display = 'none';
+  hudMissionComplete.style.display = 'none';
 }
 
 function hideOverlay() {
