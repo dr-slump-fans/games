@@ -105,15 +105,6 @@ canvas {
   width: 88px; height: 72px;
   font-size: 15px;
 }
-#hud-boost {
-  position: absolute; bottom: 120px; left: 50%;
-  transform: translateX(-50%);
-  font-family: monospace; font-size: 16px; font-weight: bold;
-  color: #ff6; text-shadow: 1px 1px 0 #000, 0 0 8px rgba(255,200,0,0.6);
-  pointer-events: none;
-  display: none;
-  z-index: 11;
-}
 #hud-combo {
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
@@ -210,11 +201,10 @@ canvas {
     <div class="mobile-btn" id="btn-right">&rarr;</div>
   </div>
   <div id="mobile-right">
-    <div class="mobile-btn wide" id="btn-run">RUN</div>
     <div class="mobile-btn wide" id="btn-jump">JUMP</div>
   </div>
 </div>
-<div id="hud-boost">RUN BOOST</div>
+<div id="hud-boost" style="display:none"></div>
 <div id="hud-combo"></div>
 <div id="hud-combo-bar"></div>
 <div id="hud-mission"></div>
@@ -228,7 +218,7 @@ canvas {
 <div id="ui">
   <div id="overlay">
     <h1 id="ol-title">Plumber Runner</h1>
-    <p id="ol-msg">MOVE: Arrows/AD  |  RUN: Shift/Z  |  JUMP: Space</p>
+    <p id="ol-msg">MOVE: Arrows/AD  |  JUMP: Space</p>
     <p id="ol-score"></p>
     <button id="ol-btn">START</button>
   </div>
@@ -258,19 +248,11 @@ const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
 const RECENTER_TARGET_X = DESIGN_W * 0.40; // fixed recenter target (320px) — must never drift
 
-// ── Manual Movement ─────────────────────────────────
-const PLAYER_WALK_SPEED = 2.5;       // base walk speed (pixels/frame)
-const PLAYER_RUN_SPEED = 4.5;        // max run speed when holding RUN
-const PLAYER_ACCEL = 0.18;           // acceleration per frame toward target speed
-const PLAYER_DECEL = 0.25;           // deceleration per frame when no input
+// ── Manual Movement (auto-acceleration) ─────────────
+const PLAYER_MAX_SPEED = 4.5;        // max speed when holding direction (auto ramps up)
+const PLAYER_ACCEL = 0.07;           // acceleration per frame toward max speed (smooth ramp ~1.1s)
+const PLAYER_DECEL = 0.22;           // deceleration per frame when no input
 const CAMERA_LEAD = DESIGN_W * 0.40; // camera keeps player at 40% from left edge
-
-// ── Run Boost ────────────────────────────────────────
-const RUN_BOOST_MULTIPLIER = 1.55;  // max speed multiplier when run button held
-const RUN_BOOST_JUMP_MULTIPLIER = 1.18; // jump initial velocity multiplier when run boost active at jump start
-const RUN_BOOST_RAMP_UP = 0.028;    // per-frame increment when holding run (~0.6s to full at 60fps)
-const RUN_BOOST_RAMP_DOWN = 0.045;  // per-frame decrement on release (~0.37s to zero at 60fps)
-const RUN_BOOST_FORWARD_SHIFT = DESIGN_W * 0.10; // +10% screen width forward shift when running
 
 // ── Lip Corner Forgiveness ──────────────────────────
 // When the player is beside a pipe and jumps upward, the lip overhang
@@ -564,8 +546,6 @@ let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
 let justJumped = false;    // true during the frame a jump was initiated; prevents swept movement from re-grounding
 let moveLeftPressed = false;  // true when left key/button is held
 let moveRightPressed = false; // true when right key/button is held
-let runBoostPressed = false;  // true when run/boost key or button is held
-let runBoostFactor = 0;       // 0..1 gradual boost level (ramps up while held, ramps down on release)
 let playerVX = 0;             // horizontal velocity (positive = right)
 let cameraX = 0;              // world X of camera left edge
 
@@ -2337,8 +2317,8 @@ function runCollisionSelfTest() {
     bricks = savedBricks;
   }
 
-  // Test 8: RUN boost forward shift must not penetrate pipe
-  // Simulates player at x=250, pipe body at x=270, RUN boost tries to push
+  // Test 8: Large horizontal shift must not penetrate pipe
+  // Simulates player at x=250, pipe body at x=270, tries to push
   // player forward via collisionSafeMoveX — must stop before pipe.
   {
     const savedX = player.x, savedY = player.y, savedVY = player.vy;
@@ -2355,7 +2335,7 @@ function runCollisionSelfTest() {
     pipes = [{ x: 270, h: 100, fromTop: false, scored: false }];
     bricks = [];
 
-    // Try to move forward by 80px (extreme RUN boost shift)
+    // Try to move forward by 80px (extreme shift)
     const actualDX = collisionSafeMoveX(80);
     const pb = getPlayerHitbox();
     const pipeRects = getPipeRects(pipes[0]);
@@ -2363,7 +2343,7 @@ function runCollisionSelfTest() {
     const hbRight = pb.x + pb.w;
     const penetrated = hbRight > bodyLeft + 1;
     results.push({
-      name: 'RUN boost 80px shift blocked by pipe',
+      name: '80px shift blocked by pipe',
       playerRight: hbRight.toFixed(1),
       pipeBodyLeft: bodyLeft,
       actualDX: actualDX.toFixed(1),
@@ -2377,7 +2357,7 @@ function runCollisionSelfTest() {
     bricks = savedBricks;
   }
 
-  // Test 9: Repeated RUN boost collisions (hold RUN, keep hitting same pipe)
+  // Test 9: Repeated horizontal collisions (keep pushing toward same pipe)
   {
     const savedX = player.x, savedY = player.y, savedVY = player.vy;
     const savedOnGround = player.onGround;
@@ -2392,7 +2372,7 @@ function runCollisionSelfTest() {
     bricks = [];
 
     let everPenetrated = false;
-    // Simulate 60 frames of RUN boost pushing toward pipe
+    // Simulate 60 frames of pushing toward pipe
     for (let i = 0; i < 60; i++) {
       player.x = 250 + i * 2; // approach pipe from left
       if (player.x > 350) player.x = 350; // cap beyond pipe
@@ -2405,7 +2385,7 @@ function runCollisionSelfTest() {
       }
     }
     results.push({
-      name: 'RUN boost 60-frame repeated pipe collision',
+      name: '60-frame repeated pipe collision',
       penetrated: everPenetrated,
       passed: !everPenetrated
     });
@@ -2622,8 +2602,6 @@ function resetGame() {
   wallNudgeUsed = false;
   moveLeftPressed = false;
   moveRightPressed = false;
-  runBoostPressed = false;
-  runBoostFactor = 0;
   playerVX = 0;
   cameraX = 0;
   edgeDebugMsgs = [];
@@ -3002,22 +2980,14 @@ function update() {
   survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
   const speedMul = getDiffParam('speedMul');
-  // Gradual boost ramp: smoothly accelerate while held, decelerate on release
-  if (runBoostPressed) {
-    runBoostFactor = Math.min(1, runBoostFactor + RUN_BOOST_RAMP_UP);
-  } else {
-    runBoostFactor = Math.max(0, runBoostFactor - RUN_BOOST_RAMP_DOWN);
-  }
-
-  // ── Manual horizontal movement ─────────────────────────
+  // ── Manual horizontal movement (auto-acceleration) ─────
   // Compute desired move direction from input
   let moveDir = 0;
   if (moveLeftPressed) moveDir -= 1;
   if (moveRightPressed) moveDir += 1;
 
-  // Target speed: walk or run
-  const maxSpeed = PLAYER_WALK_SPEED + runBoostFactor * (PLAYER_RUN_SPEED - PLAYER_WALK_SPEED);
-  const targetVX = moveDir * maxSpeed;
+  // Target speed: holding a direction auto-ramps toward max speed
+  const targetVX = moveDir * PLAYER_MAX_SPEED;
 
   // Accelerate / decelerate toward target
   if (moveDir !== 0) {
@@ -3070,8 +3040,7 @@ function update() {
   justJumped = false; // reset each frame; set below if a jump initiates
   // Jump initiation (requires fresh press — must release before next jump)
   if (jumpPressed && !jumpConsumed && player.onGround) {
-    const jumpBoost = 1.0 + runBoostFactor * (RUN_BOOST_JUMP_MULTIPLIER - 1.0);
-    player.vy = JUMP_INITIAL * jumpBoost;
+    player.vy = JUMP_INITIAL;
     player.onGround = false;
     jumpHoldFrames = 0;
     jumpConsumed = true;
@@ -3140,8 +3109,7 @@ function update() {
   // ── Double Jump (air jump) — requires active mushroom power ──
   // Air jump uses half initial velocity and half hold frames for ~50% height
   if (jumpPressed && !jumpConsumed && !player.onGround && doubleJumpTimer > 0 && airJumpsUsed < MAX_AIR_JUMPS) {
-    const airJumpBoost = 1.0 + runBoostFactor * (RUN_BOOST_JUMP_MULTIPLIER - 1.0);
-    player.vy = AIR_JUMP_INITIAL * airJumpBoost;
+    player.vy = AIR_JUMP_INITIAL;
     jumpHoldFrames = 0;
     jumpConsumed = true;
     isAirJump = true;
@@ -3204,9 +3172,10 @@ function update() {
   // Animation state machine
   updateAnimState();
 
-  // Animation frame (run cycle only advances on ground; faster when boosting)
+  // Animation frame (run cycle only advances on ground; faster at higher speed)
   if (player.animState === 'run') {
-    const runAnimInterval = Math.round(6 - 2 * runBoostFactor); // 6 (idle) → 4 (full boost)
+    const speedRatio = Math.min(1, Math.abs(playerVX) / PLAYER_MAX_SPEED);
+    const runAnimInterval = Math.round(6 - 2 * speedRatio); // 6 (slow) → 4 (full speed)
     if (frameCount % runAnimInterval === 0) player.frame = (player.frame + 1) % 4;
   }
 
@@ -3434,15 +3403,6 @@ function update() {
     hudMushroom.style.display = 'none';
   }
 
-  // Run Boost HUD — show boost percentage while ramping or active
-  if (runBoostFactor > 0.01 && state === 'playing') {
-    const pct = Math.round(runBoostFactor * 100);
-    hudBoost.textContent = `RUN ${pct}%`;
-    hudBoost.style.display = 'block';
-    hudBoost.style.opacity = 0.5 + 0.5 * runBoostFactor;
-  } else {
-    hudBoost.style.display = 'none';
-  }
 
   // ── Fun Pack v1: Combo HUD ──────────────────────────
   if (comboPopupTimer > 0 && comboPopupText) {
@@ -3667,7 +3627,7 @@ function draw() {
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
     ctx.fillText(`vx:${playerVX.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} cam:${cameraX.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
-    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount} boost:${runBoostFactor.toFixed(2)}`, 4, DESIGN_H - 14);
+    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 24);
     ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 34);
     ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported}`, 4, DESIGN_H - 44);
@@ -3728,12 +3688,6 @@ function onJumpUp() {
   jumpPressed = false;
   jumpConsumed = false;
 }
-function onRunDown() {
-  runBoostPressed = true;
-}
-function onRunUp() {
-  runBoostPressed = false;
-}
 function onMoveLeftDown() {
   if (state === 'dead') { startGame(); return; }
   if (state === 'title') { startGame(); }
@@ -3757,10 +3711,6 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     onJumpDown();
   }
-  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
-    e.preventDefault();
-    onRunDown();
-  }
   if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
     e.preventDefault();
     onMoveLeftDown();
@@ -3774,9 +3724,6 @@ document.addEventListener('keyup', (e) => {
   if (e.code === 'Space' || e.code === 'ArrowUp') {
     onJumpUp();
   }
-  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ') {
-    onRunUp();
-  }
   if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
     onMoveLeftUp();
   }
@@ -3788,13 +3735,11 @@ document.addEventListener('keyup', (e) => {
 // ── Mobile Buttons ─────────────────────────────────────
 const btnLeft = document.getElementById('btn-left');
 const btnRight = document.getElementById('btn-right');
-const btnRun = document.getElementById('btn-run');
 const btnJump = document.getElementById('btn-jump');
 
 // Track active touch IDs per button to handle multi-touch correctly
 let leftTouchIds = new Set();
 let rightTouchIds = new Set();
-let runTouchIds = new Set();
 let jumpTouchIds = new Set();
 
 // Helper: setup touch events for a mobile button
@@ -3826,14 +3771,13 @@ function setupMobileBtn(el, touchSet, downFn, upFn) {
 
 setupMobileBtn(btnLeft, leftTouchIds, onMoveLeftDown, onMoveLeftUp);
 setupMobileBtn(btnRight, rightTouchIds, onMoveRightDown, onMoveRightUp);
-setupMobileBtn(btnRun, runTouchIds, onRunDown, onRunUp);
 setupMobileBtn(btnJump, jumpTouchIds, onJumpDown, onJumpUp);
 
 // ── Init ───────────────────────────────────────────────
 loadSprite(); // attempt sprite mode; falls back to procedural on failure
 initClouds();
 initHills();
-showOverlay('Plumber Runner', 'MOVE: Arrows/AD  |  RUN: Shift/Z  |  JUMP: Space');
+showOverlay('Plumber Runner', 'MOVE: Arrows/AD  |  JUMP: Space');
 gameLoop();
 
 // Expose self-test globally for console access

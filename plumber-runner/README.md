@@ -7,8 +7,7 @@ A retro-style side-scrolling platformer game playable in the browser (desktop & 
 **The world auto-scrolls** — obstacles continuously move from right to left. You control the character's left/right movement and jumping while the world advances.
 
 - **The map keeps moving**: pipes, bricks, and obstacles scroll left automatically at increasing speed
-- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles within the screen
-- **Hold RUN** (Shift/Z or mobile RUN button) to sprint — movement speed increases with gradual acceleration
+- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles — holding a direction automatically accelerates to max speed
 - **Short tap JUMP** for a small jump, **long press** for a high jump — two distinct jump heights
 - **Must release before jumping again** — holding the button after landing will NOT auto-repeat the jump
 - You can **stand on top of pipes** — pipe tops are platforms!
@@ -320,7 +319,6 @@ This rule applies to both stepping-stone bricks (placed before pipes) and standa
 |--------|------|
 | Move Left | `Arrow Left` or `A` |
 | Move Right | `Arrow Right` or `D` |
-| Sprint (Run) | `Shift` or `Z` — hold to increase movement speed |
 | Jump | `Space` or `Arrow Up` — tap for small jump, hold for high jump |
 
 ### Mobile
@@ -328,31 +326,24 @@ This rule applies to both stepping-stone bricks (placed before pipes) and standa
 | Position | Buttons |
 |----------|---------|
 | Left side | **←** and **→** — move left/right |
-| Right side | **RUN** and **JUMP** — sprint and jump |
+| Right side | **JUMP** |
 
-All four buttons support multi-touch — you can hold right + RUN + JUMP simultaneously.
+All buttons support multi-touch — you can hold a direction + JUMP simultaneously.
 
-### Run Boost (Sprint)
+### Auto-Acceleration
 
-Hold the RUN button/key to increase movement speed — the character walks faster, with gradual acceleration and deceleration for smooth feel:
+Holding a direction key/button automatically accelerates from zero to max speed — no separate RUN button needed:
 
-- **Ramps up smoothly** over ~0.6 seconds to full speed while held — no jarring snap
-- **Decelerates smoothly** over ~0.37 seconds back to walk speed on release
-- **Walk speed**: 2.5 px/frame (base)
-- **Run speed**: 4.5 px/frame (max, at full boost)
-- **Jump height boost**: jumping while sprinting multiplies the jump's initial velocity by up to **1.18×**, proportional to the current boost level. Both ground jumps and air jumps benefit from this boost.
-- Run animation speed scales smoothly with the boost level
-- Displays a **"RUN XX%"** indicator at the bottom of the screen showing current boost level
+- **Smooth ramp-up** over ~1.1 seconds to max speed while held
+- **Smooth deceleration** back to zero on release
+- **Max speed**: 4.5 px/frame
+- Run animation speed scales with current velocity
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `PLAYER_WALK_SPEED` | `2.5` | Base walk speed (px/frame) |
-| `PLAYER_RUN_SPEED` | `4.5` | Max run speed at full boost (px/frame) |
-| `PLAYER_ACCEL` | `0.18` | Acceleration per frame toward target speed |
-| `PLAYER_DECEL` | `0.25` | Deceleration per frame when no input |
-| `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Max jump velocity multiplier at full boost |
-| `RUN_BOOST_RAMP_UP` | `0.028` | Per-frame boost increment (~0.6s to full at 60fps) |
-| `RUN_BOOST_RAMP_DOWN` | `0.045` | Per-frame boost decrement (~0.37s to zero at 60fps) |
+| `PLAYER_MAX_SPEED` | `4.5` | Max movement speed (px/frame) |
+| `PLAYER_ACCEL` | `0.07` | Acceleration per frame toward max speed |
+| `PLAYER_DECEL` | `0.22` | Deceleration per frame when no input |
 
 ## Collision System — Swept AABB (Continuous Collision Detection)
 
@@ -482,8 +473,8 @@ The test simulates 9 extreme scenarios:
 5. **Moving away** from obstacle — must NOT false-positive
 6. **Scroll-induced** collision — must detect horizontal approach
 7. **Full resolver test** — 80 px/frame fall onto pipe, verify no penetration
-8. **RUN boost 80px shift** blocked by adjacent pipe — must not penetrate pipe body
-9. **RUN boost 60-frame repeated collision** — sustained boost pushing into pipe must never penetrate
+8. **80px horizontal shift** blocked by adjacent pipe — must not penetrate pipe body
+9. **60-frame repeated collision** — sustained pushing into pipe must never penetrate
 
 Each test reports pass/fail with contact details. All tests must pass for the collision system to be considered valid.
 
@@ -704,7 +695,6 @@ Two obstacle patterns alternate each wave:
 - **Speed Wave**: amplitude is dampened to 30% during Boss Waves to prevent unfair speed spikes
 - **Combo System**: fully active during Boss Waves — chain brick breaks and perfect landings for multiplied bonus
 - **Mission System**: missions continue tracking during Boss Waves
-- **RUN Boost**: unchanged — player running ability works normally
 - **Collision**: all swept AABB collision detection and safety systems remain active
 
 ### HUD
