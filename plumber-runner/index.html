@@ -295,6 +295,8 @@ const MUSHROOM_W = 20;
 const MUSHROOM_H = 20;
 const MUSHROOM_SPEED = 1.8;          // horizontal movement speed
 const MUSHROOM_GRAVITY = 0.4;        // gravity for mushroom
+const MUSHROOM_POP_VY = -7;          // initial upward velocity (pop out of brick)
+const MUSHROOM_SPAWN_GRACE = 15;     // frames of collision immunity after spawn
 const DOUBLE_JUMP_DURATION = 25;     // seconds of double jump power after eating mushroom
 
 // ── Difficulty System ─────────────────────────────────
@@ -1332,12 +1334,14 @@ function spawnMushroom(bx, by) {
     x: spawnX,
     y: spawnY,
     vx: MUSHROOM_SPEED * dir,
-    vy: -3,  // pop up initially
+    vy: MUSHROOM_POP_VY,
     onGround: false,
     stuckFrames: 0,  // unstuck counter
+    graceTimer: MUSHROOM_SPAWN_GRACE,  // frames of collision immunity
+    state: 'pop',  // pop → fall → ground-run
   });
   if (DEBUG_MODE) {
-    console.log(`%c[Mushroom] Spawned at (${Math.round(spawnX)}, ${Math.round(spawnY)}), dir=${dir > 0 ? 'right' : 'left'}`, 'color: #e53935');
+    console.log(`%c[Mushroom] Spawned at (${Math.round(spawnX)}, ${Math.round(spawnY)}), dir=${dir > 0 ? 'right' : 'left'}, vy=${MUSHROOM_POP_VY}`, 'color: #e53935');
   }
 }
 
@@ -1383,17 +1387,37 @@ function updateMushrooms() {
     const prevMY = m.y;
     const prevPB = { x: pb.x - playerVX, y: pb.y - player.vy, w: pb.w, h: pb.h };
 
+    // ── Grace timer: skip solid collisions during spawn pop-out ──
+    const inGrace = m.graceTimer > 0;
+    if (inGrace) m.graceTimer--;
+
     // Apply gravity
     m.vy += MUSHROOM_GRAVITY;
     m.x += m.vx;
     m.y += m.vy;
 
-    // Ground collision
+    // ── Update state for debug ──
+    const prevState = m.state;
+    if (m.onGround) {
+      m.state = 'ground-run';
+    } else if (m.vy >= 0 && m.state === 'pop') {
+      m.state = 'fall';
+    }
+    if (DEBUG_MODE && m.state !== prevState) {
+      console.log(`%c[Mushroom] State: ${prevState} → ${m.state}`, 'color: #e53935');
+    }
+
+    // Ground collision (always active, even during grace)
     if (m.y + MUSHROOM_H >= groundY) {
       m.y = groundY - MUSHROOM_H;
       m.vy = 0;
       m.onGround = true;
+      m.graceTimer = 0; // end grace on landing
+      m.state = 'ground-run';
     }
+
+    // ── Skip brick/pipe collisions during grace period ──
+    if (!inGrace) {
 
     // Bounce off pipes
     for (const pipe of pipes) {
@@ -1407,6 +1431,7 @@ function updateMushrooms() {
             m.y = r.y - MUSHROOM_H;
             m.vy = 0;
             m.onGround = true;
+            m.state = 'ground-run';
           }
           // Side bounce
           else if (m.vx > 0 && m.x + MUSHROOM_W - m.vx <= r.x + 2) {
@@ -1429,6 +1454,7 @@ function updateMushrooms() {
           m.y = brick.y - MUSHROOM_H;
           m.vy = 0;
           m.onGround = true;
+          m.state = 'ground-run';
         }
         // Hit from below
         else if (m.vy < 0 && m.y - m.vy >= brick.y + brick.h - 2) {
@@ -1467,7 +1493,7 @@ function updateMushrooms() {
             if (overlapLeft < overlapRight) { m.x = r.x - MUSHROOM_W; m.vx = -Math.abs(m.vx); }
             else { m.x = r.x + r.w; m.vx = Math.abs(m.vx); }
           } else {
-            if (overlapTop < overlapBottom) { m.y = r.y - MUSHROOM_H; m.vy = 0; m.onGround = true; }
+            if (overlapTop < overlapBottom) { m.y = r.y - MUSHROOM_H; m.vy = 0; m.onGround = true; m.state = 'ground-run'; }
             else { m.y = r.y + r.h; m.vy = 0; }
           }
         }
@@ -1488,7 +1514,7 @@ function updateMushrooms() {
           if (overlapLeft < overlapRight) { m.x = brick.x - MUSHROOM_W; m.vx = -Math.abs(m.vx); }
           else { m.x = brick.x + brick.w; m.vx = Math.abs(m.vx); }
         } else {
-          if (overlapTop < overlapBottom) { m.y = brick.y - MUSHROOM_H; m.vy = 0; m.onGround = true; }
+          if (overlapTop < overlapBottom) { m.y = brick.y - MUSHROOM_H; m.vy = 0; m.onGround = true; m.state = 'ground-run'; }
           else { m.y = brick.y + brick.h; m.vy = 0; }
         }
       }
@@ -1500,12 +1526,15 @@ function updateMushrooms() {
         m.y = groundY - MUSHROOM_H;
         m.vy = 0;
         m.onGround = true;
+        m.state = 'ground-run';
         m.stuckFrames = 0;
         if (DEBUG_MODE) console.log('%c[Mushroom] Unstuck: teleported to ground', 'color: #ff6');
       }
     } else {
       m.stuckFrames = 0;
     }
+
+    } // end if (!inGrace)
 
     // Remove if far from camera
     if (m.x + MUSHROOM_W < cameraX - 100 || m.x > cameraX + DESIGN_W + 200 || m.y > DESIGN_H + 20) {
@@ -3613,6 +3642,10 @@ function draw() {
       ctx.moveTo(cx, cy);
       ctx.lineTo(cx + m.vx * 5, cy + m.vy * 2);
       ctx.stroke();
+      // Show mushroom state label above
+      ctx.font = '9px monospace';
+      ctx.fillStyle = m.state === 'pop' ? '#f0f' : m.state === 'fall' ? '#ff0' : '#0f0';
+      ctx.fillText(m.state + (m.graceTimer > 0 ? ' G' + m.graceTimer : ''), m.x, m.y - 4);
     }
 
     // Debug text (screen-space)

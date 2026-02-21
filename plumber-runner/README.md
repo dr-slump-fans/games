@@ -159,7 +159,9 @@ When a special brick is broken, a **red mushroom** pops out, **drops to the grou
 
 - Mushroom spawns centered on the broken brick, **direction biased toward the player** for reachability
 - If the spawn position overlaps another unbroken brick, the mushroom is pushed above it
-- Mushroom **pops upward** briefly then **falls under gravity** (0.4 px/frame²) until landing on the ground or a solid surface
+- Mushroom **pops upward with visible initial velocity** (vy=-7) — 先從磚塊中彈出再落地行走，類似經典 Mario 香菇行為
+- During the pop-out phase, the mushroom has **15 frames of collision grace** so it won't be immediately pushed back by neighboring bricks
+- After the arc, the mushroom **falls under gravity** (0.4 px/frame²) until landing on the ground or a solid surface
 - After landing, the mushroom **walks horizontally along the ground** at 1.8 px/frame in world-space
 - **Bounces off pipe walls AND unbroken bricks** (reverses horizontal direction on side collision, lands on top surfaces)
 - **Unstuck logic**: if a mushroom remains embedded in a solid for 30+ frames, it teleports to ground level
@@ -189,9 +191,10 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 - **Red outline**: mushroom hitbox (actual collision box)
 - **Pink dashed outline**: expanded pickup zone (with `MUSHROOM_PICKUP_MARGIN`)
 - **Yellow arrow**: mushroom velocity direction
+- **State label** above mushroom: `pop` (magenta) → `fall` (yellow) → `ground-run` (green), with `G<n>` suffix showing remaining grace frames
 - **`MUSHROOM PICKUP`** (red text, top-left): flashes for ~2s when a mushroom is collected
 - **Bottom status line**: shows `mush:N` (number of active mushrooms)
-- **Console logs**: spawn position, collection events, unstuck teleports
+- **Console logs**: spawn position, state transitions (`pop→fall→ground-run`), collection events, unstuck teleports
 
 ### Double Jump Rules
 
@@ -218,6 +221,8 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 | `SPECIAL_BRICK_CHANCE` | `0.25` | Chance a brick spawns as a special brick |
 | `MUSHROOM_SPEED` | `1.8` | Mushroom horizontal speed (px/frame) |
 | `MUSHROOM_GRAVITY` | `0.4` | Mushroom gravity (px/frame²) |
+| `MUSHROOM_POP_VY` | `-7` | Initial upward velocity when popping out of brick |
+| `MUSHROOM_SPAWN_GRACE` | `15` | Frames of collision immunity after spawn (pop-out protection) |
 | `DOUBLE_JUMP_DURATION` | `25` | Seconds of double jump ability after eating mushroom |
 | `MAX_AIR_JUMPS` | `1` | Maximum air jumps per airborne session |
 | `AIR_JUMP_INITIAL` | `-4.2` | Air jump initial velocity (60% of ground jump) |
