@@ -423,6 +423,28 @@ The test simulates 7 extreme scenarios:
 
 Each test reports pass/fail with contact details. All tests must pass for the collision system to be considered valid.
 
+### Depenetration Fallback (Anti-Clip Safety Net)
+
+Even with swept AABB and pre-sweep depenetration, edge cases can cause the player hitbox to overlap a pipe after all frame processing completes. Common causes include:
+
+- **Obstacle scroll**: pipes move left after the sweep resolves, potentially pushing the pipe into the player's final position.
+- **X-recovery**: the lerp-based position recovery could move the player into a pipe that just scrolled into range.
+- **Edge-protection nudges**: `EDGE-FORGIVE` and `WALL-NUDGE` sideways pushes could, in rare cases, place the player inside a neighboring obstacle.
+
+To guarantee the player is **never rendered inside a pipe**, a **frame-end depenetration fallback** runs after all movement (obstacle scroll, X-recovery, edge nudges) completes:
+
+1. Gather all solid collision AABBs (pipes, bricks — excluding ground).
+2. For up to 4 iterations, check if the player hitbox overlaps any rect.
+3. If overlap is found, compute the **minimum penetration vector** and push the player out along the smallest axis.
+4. Adjust velocity: if pushed upward, land the player; if pushed downward, zero upward velocity.
+5. Increment the `depenFixCount` counter for debug tracking.
+
+Additionally, all nudge systems (`EDGE-FORGIVE`, `WALL-NUDGE`, X-recovery) now verify the destination position is clear before applying the push. If the nudge would create a new overlap with another obstacle, it is **cancelled** (or falls back to the normal collision axis resolution).
+
+#### Debug: `DEPEN FIX` counter (`?debug=1`)
+
+In debug mode, the bottom-left status line displays `DEPEN FIX:N` — the cumulative number of times the frame-end depenetration fallback had to correct an overlap. Under normal play this should stay at 0 or increase very rarely. A rapidly increasing count indicates an edge case in the primary collision system that the fallback is catching.
+
 ## Running
 
 Open `index.html` in any modern browser. No build step, no server, no CDN required.

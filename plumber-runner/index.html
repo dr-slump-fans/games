@@ -289,6 +289,7 @@ let justJumped = false;    // true during the frame a jump was initiated; preven
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
 let edgeDebugMsgs = []; // { text, ttl (frames remaining) }
+let depenFixCount = 0;  // cumulative depenetration fallback fixes (debug display)
 let survivalTime = 0;       // seconds survived (includes bonus time)
 let bonusTime = 0;          // accumulated bonus seconds from breaking bricks
 let diffLevel = 0;          // current difficulty level index (0-4)
@@ -1475,11 +1476,47 @@ function depenetratePlayer(collisionRects) {
         }
       }
       if (forceSideways) {
-        edgeDebugMsgs.push({ text: 'EDGE-FORGIVE', ttl: 90 });
+        // Verify sideways push won't create a new overlap with another rect
+        const testHX = player.x + minX + HB_OX;
+        let sidewaysBlocked = false;
+        for (const cr of collisionRects) {
+          if (cr === r) continue;
+          if (rectsOverlap(testHX, hy, HB_W, HB_H, cr.x, cr.y, cr.w, cr.h)) {
+            sidewaysBlocked = true;
+            break;
+          }
+        }
+        if (sidewaysBlocked) {
+          forceSideways = false; // fall through to normal min-axis push
+        } else {
+          edgeDebugMsgs.push({ text: 'EDGE-FORGIVE', ttl: 90 });
+        }
       }
 
       if (forceSideways || Math.abs(minX) < Math.abs(minY)) {
-        player.x += minX;
+        // Verify the push direction won't create a new overlap
+        const testX = player.x + minX + HB_OX;
+        let xBlocked = false;
+        for (const cr of collisionRects) {
+          if (cr === r) continue;
+          if (rectsOverlap(testX, hy, HB_W, HB_H, cr.x, cr.y, cr.w, cr.h)) {
+            xBlocked = true;
+            break;
+          }
+        }
+        if (xBlocked && !forceSideways) {
+          // X push blocked, try Y push instead
+          player.y += minY;
+          if (minY < 0 && player.vy > 0 && !justJumped) {
+            player.vy = 0;
+            player.onGround = true;
+          }
+          if (minY > 0 && player.vy < 0) {
+            player.vy = 0;
+          }
+        } else {
+          player.x += minX;
+        }
       } else {
         player.y += minY;
         if (minY < 0 && player.vy > 0 && !justJumped) {
@@ -1632,17 +1669,31 @@ function resolveSweptMovement(playerVY, scrollDX) {
 
         if (minOverlap > 0 && (minOverlap <= LIP_CORNER_FORGIVE || !headCenterOverlaps)) {
           // Corner clip or head-center miss — nudge player sideways to clear the lip
+          // But ONLY if the nudge doesn't push into another obstacle.
+          let nudgeDX;
           if (overlapFromLeft < overlapFromRight) {
-            // Player is to the left of the lip — nudge left
-            player.x -= overlapFromLeft + 0.5;
+            nudgeDX = -(overlapFromLeft + 0.5);
           } else {
-            // Player is to the right of the lip — nudge right
-            player.x += overlapFromRight + 0.5;
+            nudgeDX = overlapFromRight + 0.5;
           }
-          // Do NOT stop the jump — let upward motion continue
-          edgeDebugMsgs.push({ text: 'EDGE-FORGIVE', ttl: 90 });
-          remainingT *= (1.0 - bestT);
-          continue;
+          // Safety: verify the nudged position doesn't overlap any other rect
+          const nudgedHX = player.x + nudgeDX + HB_OX;
+          let nudgeBlocked = false;
+          for (const cr of collisionRects) {
+            if (cr === bestRect) continue;
+            if (rectsOverlap(nudgedHX, player.y + HB_OY, HB_W, HB_H, cr.x, cr.y, cr.w, cr.h)) {
+              nudgeBlocked = true;
+              break;
+            }
+          }
+          if (!nudgeBlocked) {
+            player.x += nudgeDX;
+            // Do NOT stop the jump — let upward motion continue
+            edgeDebugMsgs.push({ text: 'EDGE-FORGIVE', ttl: 90 });
+            remainingT *= (1.0 - bestT);
+            continue;
+          }
+          // If nudge is blocked, fall through to normal ceiling hit handling
         }
       }
 
@@ -1970,6 +2021,7 @@ function resetGame() {
   justJumped = false;
   wallNudgeUsed = false;
   edgeDebugMsgs = [];
+  depenFixCount = 0;
   initClouds();
   initHills();
   // Seed first pipe pair far away
@@ -2358,16 +2410,43 @@ function update() {
       const gapLeft = hb.x - (body.x + body.w); // player right of pipe
       if (gapRight >= -1 && gapRight <= 2) {
         // Player is to the LEFT of pipe body — nudge left
-        player.x -= WALL_NUDGE_PX;
-        wallNudgeUsed = true;
-        edgeDebugMsgs.push({ text: 'WALL-NUDGE', ttl: 90 });
-        break;
+        // Safety: verify nudge doesn't push into another obstacle
+        const testX = player.x - WALL_NUDGE_PX;
+        const testHB = { x: testX + 4, y: hb.y, w: hb.w, h: hb.h };
+        let nudgeOK = true;
+        for (const p2 of pipes) {
+          if (p2 === pipe || p2.h <= 0) continue;
+          const pr2 = getPipeRects(p2);
+          if (rectsOverlap(testHB.x, testHB.y, testHB.w, testHB.h, pr2.lipRect.x, pr2.lipRect.y, pr2.lipRect.w, pr2.lipRect.h) ||
+              rectsOverlap(testHB.x, testHB.y, testHB.w, testHB.h, pr2.bodyRect.x, pr2.bodyRect.y, pr2.bodyRect.w, pr2.bodyRect.h)) {
+            nudgeOK = false; break;
+          }
+        }
+        if (nudgeOK) {
+          player.x = testX;
+          wallNudgeUsed = true;
+          edgeDebugMsgs.push({ text: 'WALL-NUDGE', ttl: 90 });
+          break;
+        }
       } else if (gapLeft >= -1 && gapLeft <= 2) {
         // Player is to the RIGHT of pipe body — nudge right
-        player.x += WALL_NUDGE_PX;
-        wallNudgeUsed = true;
-        edgeDebugMsgs.push({ text: 'WALL-NUDGE', ttl: 90 });
-        break;
+        const testX = player.x + WALL_NUDGE_PX;
+        const testHB = { x: testX + 4, y: hb.y, w: hb.w, h: hb.h };
+        let nudgeOK = true;
+        for (const p2 of pipes) {
+          if (p2 === pipe || p2.h <= 0) continue;
+          const pr2 = getPipeRects(p2);
+          if (rectsOverlap(testHB.x, testHB.y, testHB.w, testHB.h, pr2.lipRect.x, pr2.lipRect.y, pr2.lipRect.w, pr2.lipRect.h) ||
+              rectsOverlap(testHB.x, testHB.y, testHB.w, testHB.h, pr2.bodyRect.x, pr2.bodyRect.y, pr2.bodyRect.w, pr2.bodyRect.h)) {
+            nudgeOK = false; break;
+          }
+        }
+        if (nudgeOK) {
+          player.x = testX;
+          wallNudgeUsed = true;
+          edgeDebugMsgs.push({ text: 'WALL-NUDGE', ttl: 90 });
+          break;
+        }
       }
     }
   }
@@ -2543,7 +2622,69 @@ function update() {
     const speedRatio = scrollSpeed / SCROLL_SPEED_BASE; // ≥1.0
     const lerpFactor = Math.min(0.45, 0.12 * speedRatio);
     const minRecoverSpeed = 0.5 * speedRatio;
-    player.x += Math.min(diff, Math.max(minRecoverSpeed, diff * lerpFactor));
+    const recoverDX = Math.min(diff, Math.max(minRecoverSpeed, diff * lerpFactor));
+    // Safety: verify recovery doesn't push into an obstacle
+    const testPB = { x: player.x + recoverDX + 4, y: player.y + 2, w: player.w - 8, h: player.h - 4 };
+    let recoverBlocked = false;
+    for (const pipe of pipes) {
+      if (pipe.h <= 0) continue;
+      const rects = getPipeRects(pipe);
+      if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
+          rects.lipRect.x, rects.lipRect.y, rects.lipRect.w, rects.lipRect.h) ||
+          rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h,
+          rects.bodyRect.x, rects.bodyRect.y, rects.bodyRect.w, rects.bodyRect.h)) {
+        recoverBlocked = true;
+        break;
+      }
+    }
+    if (!recoverBlocked) {
+      for (const brick of bricks) {
+        if (brick.broken) continue;
+        if (rectsOverlap(testPB.x, testPB.y, testPB.w, testPB.h, brick.x, brick.y, brick.w, brick.h)) {
+          recoverBlocked = true;
+          break;
+        }
+      }
+    }
+    if (!recoverBlocked) {
+      player.x += recoverDX;
+    }
+  }
+
+  // ── Frame-End Depenetration Fallback ───────────────────
+  // After all movement (obstacles moved, X-recovery applied), run a final
+  // overlap check. If the player hitbox still overlaps any pipe AABB (lip or
+  // body), push them out by minimum displacement. This is the last safety net
+  // to prevent the player from ever being rendered inside a pipe.
+  {
+    const HB_OX = 4, HB_OY = 2, HB_W = player.w - 8, HB_H = player.h - 4;
+    const endRects = gatherCollisionRects();
+    for (let iter = 0; iter < 4; iter++) {
+      let fixed = false;
+      const hx = player.x + HB_OX;
+      const hy = player.y + HB_OY;
+      for (const r of endRects) {
+        if (r.type === 'ground') continue; // ground handled normally
+        if (!rectsOverlap(hx, hy, HB_W, HB_H, r.x, r.y, r.w, r.h)) continue;
+        // Compute minimum penetration vector
+        const oL = (hx + HB_W) - r.x;
+        const oR = (r.x + r.w) - hx;
+        const oT = (hy + HB_H) - r.y;
+        const oB = (r.y + r.h) - hy;
+        const mX = oL < oR ? -oL : oR;
+        const mY = oT < oB ? -oT : oB;
+        if (Math.abs(mX) < Math.abs(mY)) {
+          player.x += mX;
+        } else {
+          player.y += mY;
+          if (mY < 0 && player.vy > 0) { player.vy = 0; player.onGround = true; }
+          if (mY > 0 && player.vy < 0) { player.vy = 0; }
+        }
+        depenFixCount++;
+        fixed = true;
+      }
+      if (!fixed) break;
+    }
   }
 
   // Update clouds
@@ -2749,7 +2890,7 @@ function draw() {
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
     ctx.fillText(`spd:${scrollSpeed.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
-    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length}`, 4, DESIGN_H - 14);
+    ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
 
     ctx.restore();
   }
