@@ -296,7 +296,7 @@ const MUSHROOM_H = 20;
 const MUSHROOM_SPEED = 1.8;          // horizontal movement speed
 const MUSHROOM_GRAVITY = 0.4;        // gravity for mushroom
 const MUSHROOM_POP_VY = -7;          // initial upward velocity (pop out of brick)
-const MUSHROOM_SPAWN_GRACE = 15;     // frames of collision immunity after spawn
+const MUSHROOM_SPAWN_GRACE = 18;     // frames of collision + pickup immunity after spawn (~0.3s)
 const DOUBLE_JUMP_DURATION = 25;     // seconds of double jump power after eating mushroom
 
 // ── Difficulty System ─────────────────────────────────
@@ -1330,6 +1330,23 @@ function spawnMushroom(bx, by) {
   // Clamp: don't spawn above screen
   if (spawnY < 0) spawnY = 0;
 
+  // Ensure spawn position doesn't overlap player hitbox (prevents instant pickup)
+  const _pb = getPlayerHitbox();
+  if (rectsOverlap(spawnX, spawnY, MUSHROOM_W, MUSHROOM_H, _pb.x, _pb.y, _pb.w, _pb.h)) {
+    // Push mushroom horizontally away from player center
+    const safeGap = MUSHROOM_W + 4; // minimum clearance
+    if (player.x < spawnX) {
+      // Player is left of spawn → push mushroom right
+      spawnX = _pb.x + _pb.w + safeGap;
+    } else {
+      // Player is right of spawn → push mushroom left
+      spawnX = _pb.x - MUSHROOM_W - safeGap;
+    }
+    if (DEBUG_MODE) {
+      console.log(`%c[Mushroom] Spawn shifted to avoid player overlap → x=${Math.round(spawnX)}`, 'color: #ff6');
+    }
+  }
+
   mushrooms.push({
     x: spawnX,
     y: spawnY,
@@ -1542,9 +1559,13 @@ function updateMushrooms() {
       continue;
     }
 
+    // Pickup enabled only after grace expires AND mushroom left 'pop' state
+    const pickupEnabled = m.graceTimer <= 0 && m.state !== 'pop';
+
     // Check player pickup — enlarged hitbox + swept detection
-    const picked = mushroomPickupOverlap(pb, m.x, m.y) ||
-                   sweptMushroomPickup(pb, m, prevMX, prevMY, prevPB);
+    const picked = pickupEnabled &&
+                   (mushroomPickupOverlap(pb, m.x, m.y) ||
+                    sweptMushroomPickup(pb, m, prevMX, prevMY, prevPB));
     if (picked) {
       // Activate double jump
       doubleJumpTimer = DOUBLE_JUMP_DURATION;
@@ -3645,7 +3666,8 @@ function draw() {
       // Show mushroom state label above
       ctx.font = '9px monospace';
       ctx.fillStyle = m.state === 'pop' ? '#f0f' : m.state === 'fall' ? '#ff0' : '#0f0';
-      ctx.fillText(m.state + (m.graceTimer > 0 ? ' G' + m.graceTimer : ''), m.x, m.y - 4);
+      const pickupOk = m.graceTimer <= 0 && m.state !== 'pop';
+      ctx.fillText(m.state + (m.graceTimer > 0 ? ' G' + m.graceTimer : '') + (pickupOk ? ' PU' : ' NO'), m.x, m.y - 4);
     }
 
     // Debug text (screen-space)
