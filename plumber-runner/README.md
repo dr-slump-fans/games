@@ -296,6 +296,7 @@ Hold the run button/key to increase scroll speed by **55%** (`RUN_BOOST_MULTIPLI
 
 - Takes effect **immediately** while held, reverts instantly on release
 - Works simultaneously with jump — hold RUN + tap JUMP for boosted jump distances
+- **Jump height boost**: jumping while RUN is held multiplies the jump's initial velocity by **1.18×**, resulting in a noticeably higher jump. This applies at the **moment of jump initiation only** — holding or releasing RUN mid-air has no effect. Both ground jumps and air jumps (with mushroom) benefit from this boost, with air jumps remaining lower than ground jumps as usual.
 - Speeds up the run animation cycle to match the faster movement
 - Displays a **"RUN BOOST"** indicator at the bottom of the screen while active
 - Stacks with the natural difficulty speed scaling
@@ -303,6 +304,7 @@ Hold the run button/key to increase scroll speed by **55%** (`RUN_BOOST_MULTIPLI
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `RUN_BOOST_MULTIPLIER` | `1.55` | Speed multiplier when run button is held |
+| `RUN_BOOST_JUMP_MULTIPLIER` | `1.18` | Jump initial velocity multiplier when run boost active at jump start |
 
 ## Collision System — Swept AABB (Continuous Collision Detection)
 

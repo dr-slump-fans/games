@@ -163,7 +163,10 @@ const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
 
 // ── Run Boost ────────────────────────────────────────
-const RUN_BOOST_MULTIPLIER = 1.55;  // speed multiplier when run button held
+const RUN_BOOST_MULTIPLIER = 1.55;  // max speed multiplier when run button held
+const RUN_BOOST_JUMP_MULTIPLIER = 1.18; // jump initial velocity multiplier when run boost active at jump start
+const RUN_BOOST_RAMP_UP = 0.028;    // per-frame increment when holding run (~0.6s to full at 60fps)
+const RUN_BOOST_RAMP_DOWN = 0.045;  // per-frame decrement on release (~0.37s to zero at 60fps)
 
 // ── Lip Corner Forgiveness ──────────────────────────
 // When the player is beside a pipe and jumps upward, the lip overhang
@@ -330,6 +333,7 @@ let jumpHoldFrames = 0;
 let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
 let justJumped = false;    // true during the frame a jump was initiated; prevents swept movement from re-grounding
 let runBoostPressed = false; // true when run/boost key or left button is held
+let runBoostFactor = 0;       // 0..1 gradual boost level (ramps up while held, ramps down on release)
 
 // ── Edge-Protection Debug Overlay ──────────────────────
 // Stores short-lived messages like "EDGE-FORGIVE" / "WALL-NUDGE" for display
@@ -2066,6 +2070,7 @@ function resetGame() {
   justJumped = false;
   wallNudgeUsed = false;
   runBoostPressed = false;
+  runBoostFactor = 0;
   edgeDebugMsgs = [];
   depenFixCount = 0;
   initClouds();
@@ -2424,7 +2429,13 @@ function update() {
   survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
   const speedMul = getDiffParam('speedMul');
-  const boostMul = (runBoostPressed && state === 'playing') ? RUN_BOOST_MULTIPLIER : 1.0;
+  // Gradual boost ramp: smoothly accelerate while held, decelerate on release
+  if (runBoostPressed) {
+    runBoostFactor = Math.min(1, runBoostFactor + RUN_BOOST_RAMP_UP);
+  } else {
+    runBoostFactor = Math.max(0, runBoostFactor - RUN_BOOST_RAMP_DOWN);
+  }
+  const boostMul = 1.0 + runBoostFactor * (RUN_BOOST_MULTIPLIER - 1.0);
   scrollSpeed = (SCROLL_SPEED_BASE + frameCount * SCROLL_ACCEL) * speedMul * boostMul;
   groundOffset += scrollSpeed;
 
@@ -2432,7 +2443,8 @@ function update() {
   justJumped = false; // reset each frame; set below if a jump initiates
   // Jump initiation (requires fresh press — must release before next jump)
   if (jumpPressed && !jumpConsumed && player.onGround) {
-    player.vy = JUMP_INITIAL;
+    const jumpBoost = 1.0 + runBoostFactor * (RUN_BOOST_JUMP_MULTIPLIER - 1.0);
+    player.vy = JUMP_INITIAL * jumpBoost;
     player.onGround = false;
     jumpHoldFrames = 0;
     jumpConsumed = true;
@@ -2501,7 +2513,8 @@ function update() {
   // ── Double Jump (air jump) — requires active mushroom power ──
   // Air jump uses half initial velocity and half hold frames for ~50% height
   if (jumpPressed && !jumpConsumed && !player.onGround && doubleJumpTimer > 0 && airJumpsUsed < MAX_AIR_JUMPS) {
-    player.vy = AIR_JUMP_INITIAL;
+    const airJumpBoost = (runBoostPressed && state === 'playing') ? RUN_BOOST_JUMP_MULTIPLIER : 1.0;
+    player.vy = AIR_JUMP_INITIAL * airJumpBoost;
     jumpHoldFrames = 0;
     jumpConsumed = true;
     isAirJump = true;
@@ -2549,7 +2562,7 @@ function update() {
 
   // Animation frame (run cycle only advances on ground; faster when boosting)
   if (player.animState === 'run') {
-    const runAnimInterval = runBoostPressed ? 4 : 6;
+    const runAnimInterval = Math.round(6 - 2 * runBoostFactor); // 6 (idle) → 4 (full boost)
     if (frameCount % runAnimInterval === 0) player.frame = (player.frame + 1) % 4;
   }
 
