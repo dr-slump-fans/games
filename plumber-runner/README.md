@@ -4,17 +4,19 @@ A retro-style side-scrolling platformer game playable in the browser (desktop & 
 
 ## How to Play
 
-The world auto-scrolls at a fixed slow speed (obstacles move right to left) but **never speeds up**. **The player is carried by the scrolling ground** — standing idle causes the player to drift left with the floor. Press right to counteract the drift and move forward.
+The map does **not auto-scroll**. The player moves freely using left/right controls. When the player reaches the **center of the screen (50% width)**, the camera begins scrolling forward to follow them. The camera **never scrolls backward** — you can only move left within the visible area, but the world won't rewind.
 
-- **The map scrolls at a fixed slow pace**: pipes, bricks, and obstacles scroll left automatically at a constant speed that does not increase over time
-- **Floor drift**: the ground scrolls with the scene; when the player is not pressing left/right, they are carried leftward by the floor (like standing on a conveyor belt)
-- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles — holding a direction automatically accelerates to max speed; final horizontal displacement = player input speed + floor drift
+- **No auto-scroll**: the map stays still until the player pushes forward past the screen midpoint
+- **Camera follows at midpoint**: when the player crosses the center of the screen, the camera begins tracking them, keeping the player near the center
+- **Forward only**: the camera offset only increases (monotonic) — pressing left moves the player within the screen but never scrolls the map backward
+- **No floor drift**: standing idle keeps the player stationary (no conveyor belt effect)
+- **Move left/right** (Arrow keys, A/D, or mobile left/right buttons) to dodge obstacles — holding a direction automatically accelerates to max speed
 - **Short tap JUMP** for a small jump, **long press** for a high jump — two distinct jump heights
 - **Must release before jumping again** — holding the button after landing will NOT auto-repeat the jump
 - You can **stand on top of pipes** — pipe tops are platforms!
 - **Side collisions block you** — you stop when walking into a pipe
 - **Standing on pipes/bricks does NOT give score** — score only comes from passing pipes, breaking bricks, completing missions, and clearing boss waves
-- You die when you get **crushed/squeezed** between a scrolling obstacle and the left screen edge, or pushed off-screen
+- You die when you get **crushed/squeezed** between an obstacle and the left camera edge, or pushed off-screen
 - Your score increases each time a pipe scrolls past you
 - Obstacles get harder over time (difficulty scales with survival time)
 - **HUD** shows survival time, current difficulty level (Lv.1~Lv.5), and progress bar
@@ -32,7 +34,7 @@ Difficulty scales **smoothly** over survival time across 5 levels. All transitio
 | Lv.5 | INSANE | 240s | 2.15x | 175–245 px | 240 px | 55% | 28% |
 
 **What changes with difficulty:**
-- **Scroll speed**: Fixed slow constant — does not change with difficulty (difficulty only affects obstacle layout)
+- **Scroll speed**: No auto-scroll — camera follows player (difficulty only affects obstacle layout)
 - **Pipe spacing**: Horizontal gap between obstacles shrinks, making the world denser
 - **Pipe height cap**: Later levels unlock taller bottom/ceiling pipes that require more precise jumping
 - **Pair frequency**: More top+bottom pipe combinations appear, creating tighter squeeze corridors
@@ -158,9 +160,8 @@ When a special brick is broken, a **red mushroom** pops out, **drops to the grou
 - Mushroom spawns centered on the broken brick, **direction biased toward the player** for reachability
 - If the spawn position overlaps another unbroken brick, the mushroom is pushed above it
 - Mushroom **pops upward** briefly then **falls under gravity** (0.4 px/frame²) until landing on the ground or a solid surface
-- After landing, the mushroom **walks horizontally along the ground** at 1.8 px/frame (relative to the ground)
+- After landing, the mushroom **walks horizontally along the ground** at 1.8 px/frame in world-space
 - **Bounces off pipe walls AND unbroken bricks** (reverses horizontal direction on side collision, lands on top surfaces)
-- Scrolls left with the world (auto-scroll) — the mushroom's walking speed is relative to the scrolling ground
 - **Unstuck logic**: if a mushroom remains embedded in a solid for 30+ frames, it teleports to ground level
 - Removed when off-screen
 
@@ -232,7 +233,7 @@ Together, these two methods ensure that mushrooms can be reliably collected even
 
 - You can **stand on top** of intact bricks (they act as platforms from above)
 - Bricks are placed before pipes as launch platforms — use them to reach tall pipe tops
-- Bricks scroll left with the world like pipes
+- Bricks remain stationary in world-space like pipes
 - Broken bricks are removed immediately — fragments are cosmetic only
 
 ## Player Character — "Pippo" the Plumber
@@ -295,15 +296,14 @@ Transitions happen automatically every frame in `updateAnimState()`:
 
 ## Player Position & Camera
 
-The player starts at screen position X=320 on each new game. The camera is fixed — the world auto-scrolls left instead of the camera following the player.
+The player starts at world position X=160 on each new game. The camera follows the player when they push past the screen midpoint.
 
-- **Auto-scroll**: obstacles (pipes, bricks, mushrooms) move left each frame at a fixed slow constant speed (does not increase over time)
-- **Ground scrolls with the scene**: the floor brick pattern visually scrolls left in sync with obstacles
-- **Floor drift**: the player is carried left by the scrolling ground when not pressing any movement keys — standing idle means drifting left with the world
-- When pressing left/right, the player's final screen velocity = input velocity + floor drift (−scrollSpeed)
-- The player moves within screen bounds using left/right controls
-- If a scrolling obstacle pushes the player to the left screen edge and overlaps them, the player is **crushed and dies**
-- Player is clamped to the visible screen area (cannot walk off-screen)
+- **No auto-scroll**: obstacles remain stationary in world-space; the player walks through the world
+- **Camera trigger**: when the player's world X exceeds `cameraX + SCREEN_HALF_X` (50% screen width), the camera advances to keep the player at the midpoint
+- **Forward-only camera**: `cameraX` is monotonically increasing — pressing left moves the player within the visible area but never rewinds the camera
+- **No floor drift**: standing idle keeps the player stationary
+- The player is clamped to the camera-visible area (`cameraX` to `cameraX + DESIGN_W`)
+- If the player is pushed against the left camera edge by an obstacle, they are **crushed and die**
 
 ## Minimum Brick Height Rule
 
@@ -336,7 +336,7 @@ All buttons support multi-touch — you can hold a direction + JUMP simultaneous
 
 ### Auto-Acceleration
 
-Holding a direction key/button automatically accelerates from zero to max speed — no separate RUN button needed:
+Holding a direction key/button automatically accelerates from zero to max speed — no separate RUN button needed. Standing still keeps the player stationary (no floor drift):
 
 - **Smooth ramp-up** over ~1.1 seconds to max speed while held
 - **Smooth deceleration** back to zero on release
@@ -370,9 +370,9 @@ Instead of moving the player and then checking for overlap (discrete collision),
      - Resolve collision normal: zero the normal-axis velocity, keep tangent velocity
      - Special handling: brick hit from below → break brick, bounce player down
      - Consume used time fraction, repeat with remaining movement
-3. **Auto-scroll** — move all obstacles left by `scrollSpeed`; push player left if overlapping
+3. **Camera follow** — update `cameraX` based on player position (forward-only, midpoint trigger); push player out if overlapping
 4. **Post-move checks** — standing support loss, crush detection, off-screen death
-5. **Cleanup** — remove off-screen obstacles, spawn new ones
+5. **Cleanup** — remove obstacles behind camera, spawn new ones ahead
 
 #### Key Functions
 
@@ -400,7 +400,7 @@ This works for **any velocity magnitude** — even if `dy = 500` pixels/frame, i
 
 ### Player Movement Handling
 
-The player's manual horizontal velocity (`playerVX`) is passed directly to the swept collision resolver along with vertical velocity. Obstacles auto-scroll left each frame; after scrolling, any resulting overlap pushes the player left. When the player hits a wall, their horizontal velocity is zeroed.
+The player's manual horizontal velocity (`playerVX`) is passed directly to the swept collision resolver along with vertical velocity. Obstacles are stationary in world-space; the camera follows the player. When the player hits a wall, their horizontal velocity is zeroed.
 
 ### Edge-Jump Protection (Lip Forgiveness + Wall-Kick Nudge + Head-Center Rule)
 

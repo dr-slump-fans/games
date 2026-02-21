@@ -236,8 +236,9 @@ const JUMP_HOLD_MAX_T = 16;        // long-press: more frames of boost
 const AIR_JUMP_INITIAL = JUMP_INITIAL * 0.6;   // air jump: 60% initial velocity (slightly stronger than half)
 const AIR_JUMP_HOLD_MAX_T = Math.floor(JUMP_HOLD_MAX_T * 0.55); // air jump: 55% hold frames
 const TALL_PIPE_THRESHOLD = 140;   // pipes >= this height trigger staircase logic
-const SCROLL_SPEED_BASE = 1.8;      // fixed slow scroll — no acceleration
+const SCROLL_SPEED_BASE = 0;          // no auto-scroll — camera follows player
 const SCROLL_ACCEL = 0;              // disabled: scroll speed no longer increases
+const SCREEN_HALF_X = DESIGN_W * 0.5; // camera trigger: player at 50% screen width
 const PIPE_MIN_GAP = 240;
 const PIPE_MAX_GAP = 360;
 const PIPE_HEIGHTS_BOTTOM = [60, 90, 120, 150, 75, 105];
@@ -246,7 +247,7 @@ const PIPE_W = 48;
 const LIP_W = 56;
 const LIP_H = 16;
 const CRUSH_THRESHOLD = 4; // pixels of squeeze to count as crushed
-const RECENTER_TARGET_X = DESIGN_W * 0.40; // fixed recenter target (320px) — must never drift
+const RECENTER_TARGET_X = DESIGN_W * 0.20; // player start position (160px from left)
 
 // ── Manual Movement (auto-acceleration) ─────────────
 const PLAYER_MAX_SPEED = 4.5;        // max speed when holding direction (auto ramps up)
@@ -538,7 +539,7 @@ let state = 'title'; // title | playing | dead
 let score = 0;
 let highScore = 0;
 let frameCount = 0;
-let scrollSpeed = SCROLL_SPEED_BASE;
+let scrollSpeed = 0;  // no auto-scroll; kept for API compat
 let jumpPressed = false;
 let jumpConsumed = false;  // true after jump initiated; must release to jump again
 let jumpHoldFrames = 0;
@@ -1156,8 +1157,8 @@ function drawGround() {
   ctx.fillRect(drawLeft, groundY, drawW, GROUND_H);
   const brickW = 32;
   const brickH = 16;
-  // Align bricks to world grid, offset by groundOffset to scroll with scene
-  const startX = Math.floor(drawLeft / brickW) * brickW - groundOffset;
+  // Align bricks to world grid (camera transform handles visual scrolling)
+  const startX = Math.floor(drawLeft / brickW) * brickW;
   ctx.fillStyle = '#a0603a';
   for (let row = 0; row < Math.ceil(GROUND_H / brickH); row++) {
     const rowOffset = (row % 2) * (brickW / 2);
@@ -2152,7 +2153,7 @@ function checkCrush() {
   const pb = getPlayerHitbox();
 
   // 1) Crushed against left screen edge by pipe/brick pushing from right
-  if (player.x <= 0) {
+  if (player.x <= cameraX) {
     for (const pipe of pipes) {
       const rects = getPipeRects(pipe);
       if (rectsOverlap(pb.x, pb.y, pb.w, pb.h,
@@ -2594,7 +2595,7 @@ function resetGame() {
   isAirJump = false;
   diffLevel = 0;
   diffProgress = 0;
-  scrollSpeed = SCROLL_SPEED_BASE;
+  scrollSpeed = 0;
   groundOffset = 0;
   jumpHoldFrames = 0;
   jumpConsumed = false;
@@ -3027,8 +3028,7 @@ function update() {
 
   // Fun Pack v1: Speed wave phase (kept for HUD/debug display)
   speedWavePhase = (survivalTime / SPEED_WAVE_PERIOD) * Math.PI * 2;
-  // scrollSpeed drives auto-scroll: fixed slow constant (no acceleration, no difficulty/wave scaling)
-  scrollSpeed = SCROLL_SPEED_BASE;
+  // No auto-scroll: camera follows player instead
 
   // ── Phase 1: Compute desired velocity vector ──────────
   justJumped = false; // reset each frame; set below if a jump initiates
@@ -3159,9 +3159,9 @@ function update() {
     }
   }
 
-  // Clamp player X within screen bounds
-  if (player.x < 0) player.x = 0;
-  if (player.x + player.w > DESIGN_W) player.x = DESIGN_W - player.w;
+  // Clamp player X within camera-visible bounds (world coords)
+  if (player.x < cameraX) player.x = cameraX;
+  if (player.x + player.w > cameraX + DESIGN_W) player.x = cameraX + DESIGN_W - player.w;
 
   // Animation state machine
   updateAnimState();
@@ -3204,43 +3204,39 @@ function update() {
   if (comboPopupTimer > 0) comboPopupTimer--;
   if (missionCompleteTimer > 0) missionCompleteTimer--;
 
-  // ── Phase 4: Auto-scroll — move obstacles left ───────
-  for (const pipe of pipes) pipe.x -= scrollSpeed;
-  for (const brick of bricks) brick.x -= scrollSpeed;
-  for (const m of mushrooms) m.x -= scrollSpeed;
-  for (const f of fragments) f.x -= scrollSpeed;
-  for (const sp of scorePopups) sp.x -= scrollSpeed;
-  for (const tp of timeBonusPopups) tp.x -= scrollSpeed;
+  // ── Phase 4: Camera follow (no auto-scroll) ─────────
+  // No auto-scroll: obstacles stay in world-space.
+  // Camera advances only when player pushes past screen midpoint.
+  {
+    const playerScreenX = player.x - cameraX;
+    if (playerScreenX > SCREEN_HALF_X) {
+      const newCam = player.x - SCREEN_HALF_X;
+      cameraX = Math.max(cameraX, newCam); // monotonic: never decrease
+    }
+    // Ground texture offset tracks camera world position
+    groundOffset = cameraX % 32;
+  }
 
-  // Scroll ground texture in sync with obstacles
-  groundOffset = (groundOffset + scrollSpeed) % 32;
-
-  // Floor drift: player is carried left by the scrolling ground
-  player.x -= scrollSpeed;
-
-  // After scroll, push player left if an obstacle scrolled into them
+  // Safety: push player out if overlapping an obstacle after camera move
   {
     const pb = getPlayerHitbox();
     const rects = gatherCollisionRects();
     for (const r of rects) {
       if (r.type === 'ground') continue;
       if (!rectsOverlap(pb.x, pb.y, pb.w, pb.h, r.x, r.y, r.w, r.h)) continue;
-      // Compute minimum penetration on each axis
-      const overlapL = (pb.x + pb.w) - r.x;   // how far player extends into obstacle from left
-      const overlapR = (r.x + r.w) - pb.x;     // how far obstacle extends past player from right
+      const overlapL = (pb.x + pb.w) - r.x;
+      const overlapR = (r.x + r.w) - pb.x;
       const overlapT = (pb.y + pb.h) - r.y;
       const overlapB = (r.y + r.h) - pb.y;
       const minH = Math.min(overlapL, overlapR);
       const minV = Math.min(overlapT, overlapB);
-      // Only push horizontally if horizontal overlap is the smaller axis (side hit)
       if (minH <= minV && overlapL < overlapR) {
-        // Obstacle is to player's right — push player left
         player.x -= overlapL;
         playerVX = Math.min(playerVX, 0);
       }
     }
-    // Re-clamp after push
-    if (player.x < 0) player.x = 0;
+    // Clamp player to camera left edge (can't go behind camera)
+    if (player.x < cameraX) player.x = cameraX;
   }
 
   // Check if player fell off a platform edge (pipe/brick scrolled away)
@@ -3263,8 +3259,8 @@ function update() {
     return;
   }
 
-  // If player goes off left edge of screen, die
-  if (player.x + player.w < -20) {
+  // If player goes off left edge of camera view, die
+  if (player.x + player.w < cameraX - 20) {
     state = 'dead';
     if (score > highScore) highScore = score;
     const tMins = Math.floor(survivalTime / 60);
@@ -3310,8 +3306,7 @@ function update() {
     }
   }
 
-  // ── Camera: fixed at 0 (auto-scroll moves obstacles instead) ──
-  cameraX = 0;
+  // cameraX already updated in Phase 4 (camera follow)
 
   // ── Frame-End Depenetration Fallback ───────────────────
   // After all movement (obstacles moved, X-recovery applied), run a final
@@ -3347,24 +3342,24 @@ function update() {
       }
       if (!fixed) break;
     }
-    // Re-clamp after depenetration
-    if (player.x < 0) player.x = 0;
-    if (player.x + player.w > DESIGN_W) player.x = DESIGN_W - player.w;
+    // Re-clamp after depenetration (world-space, camera bounds)
+    if (player.x < cameraX) player.x = cameraX;
+    if (player.x + player.w > cameraX + DESIGN_W) player.x = cameraX + DESIGN_W - player.w;
   }
 
-  // Update clouds
+  // Update clouds (screen-space drifting, independent of camera)
   for (const c of clouds) {
     c.x -= c.speed;
-    if (c.x + c.w < 0) {
+    if (c.x + c.w < -50) {
       c.x = DESIGN_W + Math.random() * 100;
       c.y = 20 + Math.random() * 100;
     }
   }
 
-  // Hills auto-scroll at 30% of obstacle speed for parallax effect
+  // Hills: parallax based on cameraX (30% scroll rate), recycle when off-screen
   for (const h of hills) {
-    h.x -= scrollSpeed * 0.3;
-    if (h.x + h.w < -100) {
+    const screenX = h.x - cameraX * 0.3;
+    if (screenX + h.w < -100) {
       const last = hills.reduce((a, b) => a.x > b.x ? a : b);
       h.x = last.x + 200 + Math.random() * 100;
       h.w = 180 + Math.random() * 100;
@@ -3480,9 +3475,9 @@ function draw() {
     drawCloud(c.x, c.y, c.w);
   }
 
-  // Hills (parallax — scroll at 30% speed, handled in update)
+  // Hills (parallax — 30% of camera scroll rate)
   for (const h of hills) {
-    drawHill(h.x, h.w, h.h);
+    drawHill(h.x - cameraX * 0.3, h.w, h.h);
   }
 
   // ── Camera transform for world objects ──────────────────
