@@ -87,10 +87,10 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 
 - **Replace chance** scales with difficulty: 15% (EASY) → 28% (INSANE), interpolated smoothly
 - When triggered, **no pipe is generated** — instead, 1–3 bricks form a small obstacle cluster
-- Bricks are arranged in height tiers:
-  - **Low** (30–55 px above ground) — clearable with a small jump
-  - **Mid** (70–100 px above ground) — needs a medium-hold jump
-  - **High** (110–140 px above ground) — requires a full jump
+- Bricks are arranged in height tiers (all respect the **minimum height rule**: brick top ≥ 2× player height above ground = 72 px):
+  - **Low** (72–95 px above ground) — clearable with a jump
+  - **Mid** (100–130 px above ground) — needs a medium-hold jump
+  - **High** (135–165 px above ground) — requires a full jump
 - Bricks are spaced 35–55 px apart horizontally, creating a compact formation
 - Standalone bricks follow the same break/stand/score rules as stepping-stone bricks
 - Overlap prevention ensures bricks never clip into existing pipes or other bricks
@@ -101,7 +101,7 @@ On each pipe spawn, there is a chance the pipe is replaced entirely by a standal
 - Bricks spawn **40–140 px to the left** of a bottom pipe (never on top of or touching a pipe)
 - **Tall pipes** (≥ 140 px) **always** get stepping-stone bricks; shorter pipes have a 30% chance
 - **Very tall pipes** (≥ 180 px) get **2 stepping stones** at different heights; others get 1
-- Lower bricks are placed ~40–70 px above ground (reachable with a small jump)
+- Lower bricks are placed ~72–92 px above ground (respects minimum height rule: ≥ 2× player height)
 - Higher bricks (second stone) are placed at 40–65% of the pipe's height for bridging
 - Bricks and pipes maintain a minimum gap (no overlapping or flush contact)
 
@@ -176,6 +176,20 @@ Transitions happen automatically every frame in `updateAnimState()`:
 - **Rising → Falling**: when `vy` crosses the threshold → state becomes `fall`
 - **Air → Ground**: landing detected via `wasOnGround` flag → state becomes `land` for 6 frames
 - **Land → Run**: after land timer expires → state becomes `run`
+
+## Player Default Position
+
+The player's default horizontal position is set to **40% of the canvas width** (320 px on an 800 px canvas). This places the character near the center of the screen rather than far left, giving players better reaction time and a clearer view of upcoming obstacles. The position resets to 40% on each game restart.
+
+## Minimum Brick Height Rule
+
+All breakable bricks must have their **top surface at least 2× the player's height above the ground** (72 px minimum, since the player is 36 px tall). This prevents bricks from spawning too close to ground level, ensuring they always appear as elevated obstacles that require a jump to interact with.
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `BRICK_MIN_HEIGHT_ABOVE_GROUND` | `72` (2 × 36) | Minimum distance from ground to brick top surface |
+
+This rule applies to both stepping-stone bricks (placed before pipes) and standalone brick groups (pipe replacements).
 
 ## Controls
 

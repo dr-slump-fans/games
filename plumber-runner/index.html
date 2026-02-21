@@ -148,6 +148,9 @@ const BRICK_FRAGMENT_COUNT = 6;   // number of debris fragments
 const BRICK_SPAWN_CHANCE = 0.30;  // chance to spawn brick with pipe group
 const STANDALONE_BRICK_MIN_COUNT = 1;
 const STANDALONE_BRICK_MAX_COUNT = 3;
+// Minimum brick height above ground: brick top must be at least 2× player height from ground.
+// This prevents bricks from appearing too close to ground level.
+const BRICK_MIN_HEIGHT_ABOVE_GROUND = 36 * 2; // 72px (2× player.h)
 
 // ── Difficulty System ─────────────────────────────────
 // 5 levels with smooth interpolation between them
@@ -278,7 +281,7 @@ let diffProgress = 0;       // 0..1 progress within current level toward next
 
 // ── Player ─────────────────────────────────────────────
 const player = {
-  x: 120, y: 0, w: 28, h: 36,
+  x: DESIGN_W * 0.40, y: 0, w: 28, h: 36,
   vy: 0, onGround: true, frame: 0,
   animState: 'idle',  // idle | run | jump_up | fall | land
   landTimer: 0,       // frames remaining in land animation
@@ -1574,7 +1577,7 @@ let groundOffset = 0;
 
 function resetGame() {
   player.y = DESIGN_H - GROUND_H - player.h;
-  player.x = 120;
+  player.x = DESIGN_W * 0.40;
   player.vy = 0;
   player.onGround = true;
   player.frame = 0;
@@ -1732,14 +1735,15 @@ function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
       const ratio = 0.40 + Math.random() * 0.25;
       brickTopY = groundY - Math.round(pipeH * ratio);
     } else {
-      // Lower stepping stone — reachable from ground with small jump
-      // Player can small-jump about 45px, so brick top at groundY - 40~70
-      const stepH = 40 + Math.random() * 30;
+      // Lower stepping stone — reachable from ground with a jump
+      // Must be at least BRICK_MIN_HEIGHT_ABOVE_GROUND (72px) above ground
+      const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 20; // 72~92px
       brickTopY = groundY - stepH;
     }
 
-    // Clamp: don't place too high (above screen) or too low (at ground)
-    brickTopY = Math.max(30, Math.min(brickTopY, groundY - BRICK_H - 10));
+    // Clamp: don't place too high (above screen) or too low
+    // Brick top must be at least BRICK_MIN_HEIGHT_ABOVE_GROUND above ground
+    brickTopY = Math.max(30, Math.min(brickTopY, groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND));
 
     // Prevent overlapping with existing pipes
     const brickRight = brickX + BRICK_W;
@@ -1799,13 +1803,14 @@ function spawnStandaloneBricks(anchorX) {
     Math.floor(Math.random() * (STANDALONE_BRICK_MAX_COUNT - STANDALONE_BRICK_MIN_COUNT + 1));
 
   // Predefined height tiers (top-of-brick Y measured from groundY upward)
-  // Low: 30–55 px above ground — reachable with small jump
-  // Mid: 70–100 px above ground — reachable with medium hold
-  // High: 110–140 px above ground — needs full jump
+  // All tiers respect BRICK_MIN_HEIGHT_ABOVE_GROUND (72px = 2× player height)
+  // Low: 72–95 px above ground — reachable with jump
+  // Mid: 100–130 px above ground — reachable with medium hold
+  // High: 135–165 px above ground — needs full jump
   const tiers = [
-    { minH: 30, maxH: 55 },   // low
-    { minH: 70, maxH: 100 },  // mid
-    { minH: 110, maxH: 140 }, // high
+    { minH: BRICK_MIN_HEIGHT_ABOVE_GROUND, maxH: 95 },  // low
+    { minH: 100, maxH: 130 },                            // mid
+    { minH: 135, maxH: 165 },                            // high
   ];
 
   // Horizontal spread: bricks are spaced 35–55 px apart
@@ -1817,8 +1822,8 @@ function spawnStandaloneBricks(anchorX) {
     const brickTopY = groundY - heightAboveGround;
     const brickX = startX + i * (35 + Math.random() * 20);
 
-    // Clamp within screen bounds
-    const clampedY = Math.max(30, Math.min(brickTopY, groundY - BRICK_H - 10));
+    // Clamp within screen bounds; enforce minimum height above ground
+    const clampedY = Math.max(30, Math.min(brickTopY, groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND));
 
     // Prevent overlapping with existing bricks
     let overlaps = false;
