@@ -255,6 +255,7 @@ const JUMP_HOLD_ACCEL = -0.55;     // long-press: stronger boost per frame
 const JUMP_HOLD_MAX_T = 16;        // long-press: more frames of boost
 const AIR_JUMP_INITIAL = JUMP_INITIAL * 0.6;   // air jump: 60% initial velocity (slightly stronger than half)
 const AIR_JUMP_HOLD_MAX_T = Math.floor(JUMP_HOLD_MAX_T * 0.55); // air jump: 55% hold frames
+const COYOTE_FRAMES = 6;              // ~100ms at 60fps jump forgiveness after leaving ground
 const TALL_PIPE_THRESHOLD = 140;   // pipes >= this height trigger staircase logic
 const SCROLL_SPEED_BASE = 0;          // no auto-scroll — camera follows player
 const SCROLL_ACCEL = 0;              // disabled: scroll speed no longer increases
@@ -1279,6 +1280,7 @@ let scrollSpeed = 0;  // no auto-scroll; kept for API compat
 let jumpPressed = false;
 let jumpConsumed = false;  // true after jump initiated; must release to jump again
 let jumpHoldFrames = 0;
+let coyoteFrames = 0;      // jump forgiveness after leaving ground (Mario-like coyote time)
 let wallNudgeUsed = false; // true after wall-kick nudge fires; reset on landing
 let justJumped = false;    // true during the frame a jump was initiated; prevents swept movement from re-grounding
 let moveLeftPressed = false;  // true when left key/button is held
@@ -3794,6 +3796,7 @@ function resetGame() {
   groundOffset = 0;
   jumpHoldFrames = 0;
   jumpConsumed = false;
+  coyoteFrames = 0;
   justJumped = false;
   wallNudgeUsed = false;
   moveLeftPressed = false;
@@ -4280,12 +4283,16 @@ function update() {
 
   // ── Phase 1: Compute desired velocity vector ──────────
   justJumped = false; // reset each frame; set below if a jump initiates
+  if (player.onGround) coyoteFrames = COYOTE_FRAMES;
+  else if (coyoteFrames > 0) coyoteFrames--;
+
   // Jump initiation (requires fresh press — must release before next jump)
-  if (jumpPressed && !jumpConsumed && player.onGround) {
+  if (jumpPressed && !jumpConsumed && (player.onGround || coyoteFrames > 0)) {
     player.vy = JUMP_INITIAL;
     player.onGround = false;
     jumpHoldFrames = 0;
     jumpConsumed = true;
+    coyoteFrames = 0;
     justJumped = true;    // prevent swept movement from re-grounding this frame
     isAirJump = false;    // ground jump uses full height
     wallNudgeUsed = false; // allow one wall-kick nudge this jump
@@ -4387,6 +4394,7 @@ function update() {
   // Reset hold counter on landing
   if (result.landedThisFrame) {
     jumpHoldFrames = 0;
+    coyoteFrames = COYOTE_FRAMES;
     wallNudgeUsed = false;
     airJumpsUsed = 0; // reset air jump count on landing
     isAirJump = false; // reset air jump flag on landing
