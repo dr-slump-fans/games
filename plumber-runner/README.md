@@ -48,6 +48,75 @@ The difficulty curve is designed so:
 - **140–240s**: Expert territory — requires precise jump timing
 - **240s+**: Maximum difficulty reached, stays constant
 
+## Platformer Level Generator (Chunk System)
+
+The level is generated using a **chunk-based system** that produces playable, reachable platformer segments with good rhythm. Instead of spawning individual obstacles, the generator builds the world from fixed-width **chunks** (600–900 px each), each drawn from a template pool.
+
+### Chunk Types
+
+| Type | Description | Danger Level |
+|------|-------------|--------------|
+| `rest` | Flat ground with maybe 1 low pipe + optional brick. Breathing room. | Safe |
+| `single_platform` | 1 bottom pipe as platform + optional stepping bricks | Low |
+| `double_platform` | 2 bottom pipes at staggered heights — staircase platforming | Medium |
+| `pipe_mix` | Mixed obstacles: bottom pipe + optional ceiling pipe, bricks | High |
+| `turtle_zone` | Flat/low terrain with turtle enemies — room for stomping | Low |
+| `reward` | Brick cluster (2–4 bricks) with high special brick chance | Safe |
+
+### Reachability Constraints
+
+Every chunk is validated against player physics limits before being committed to the world:
+
+| Constraint | Value | Source |
+|------------|-------|--------|
+| Max jump height | 150 px | `JUMP_INITIAL` + `JUMP_HOLD_ACCEL` × `JUMP_HOLD_MAX_T` |
+| Max horizontal jump range | 240 px | Full jump airtime × `PLAYER_MAX_SPEED` |
+| Min clearance for ceiling pipes | 42 px | Player height (36) + margin |
+| Min gap in pipe pairs | player.h + 20 px | Passable vertical space |
+
+If a generated chunk fails reachability validation, it is **rerolled** (up to 5 times). After 2 failed attempts, the generator falls back to simpler chunk types (`rest` or `single_platform`). After all rerolls fail, a `rest` chunk is forced.
+
+### Difficulty Curve
+
+Chunk selection weights shift over survival time across 4 phases:
+
+| Phase | Time | Max Pipe Height | Focus |
+|-------|------|-----------------|-------|
+| Tutorial | 0–60s | 100 px | Mostly `rest` + `single_platform`, low obstacles |
+| Medium | 60–180s | 140 px | Add `double_platform`, `pipe_mix`, `turtle_zone` |
+| Hard | 180–300s | 200 px | All types, higher complexity |
+| Max | 300s+ | 240 px | Full difficulty, `pipe_mix` dominant |
+
+Difficulty increases through **segment complexity and element combinations**, not raw speed.
+
+### Safety Rules
+
+- **Max 2 consecutive danger chunks** (`double_platform` or `pipe_mix`), then a forced rest/easy chunk
+- **Every 5 chunks**, at least one `rest` or `reward` chunk is guaranteed
+- **Turtle placement**: only on surfaces with ≥60 px clear ground on each side, validated against nearby pipes
+- **Bricks**: placed at reachable heights (≥72 px above ground, ≤150 px)
+- **No instant-death traps**: ceiling pipes require minimum 42 px clearance; pipe pairs require gap ≥ player height + 20 px
+
+### Debug Overlay (`?debug=1`)
+
+When debug mode is active, the chunk system adds:
+
+- **Chunk boundary markers**: yellow dashed vertical lines at each chunk start, with chunk ID and type label
+- **Reroll indicators**: orange label showing reroll count when a chunk needed regeneration
+- **Bottom status line**: `CHUNK:#N type PHASE:Name REROLLS:N NEXT_X:N TOTAL:N CONSEC_DANGER:N`
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `CHUNK_MIN_WIDTH` | `600` | Minimum chunk width (px) |
+| `CHUNK_MAX_WIDTH` | `900` | Maximum chunk width (px) |
+| `CHUNK_PLAYER_MAX_JUMP_H` | `150` | Conservative max jump height for validation |
+| `CHUNK_PLAYER_MAX_JUMP_X` | `240` | Conservative max horizontal jump range |
+| `CHUNK_MAX_CONSEC_DANGER` | `2` | Max consecutive danger chunks before forced rest |
+| `CHUNK_SAFE_INTERVAL` | `5` | Every N chunks, guarantee a safe chunk |
+| `CHUNK_MAX_REROLLS` | `5` | Max rerolls per chunk for reachability |
+
 ## Jump Mechanics
 
 The jump system uses a **short-tap / long-press** design:
@@ -621,6 +690,7 @@ Ground-walking turtle enemies add a new threat and scoring mechanic. Turtles wal
 | `walk` | Walks leftward on ground, reverses at walls/edges | Green-shelled turtle with animated legs |
 | `shell_idle` | Stationary shell on ground, waiting to be kicked | Compact green dome, no movement |
 | `shell_move` | Shell sliding at high speed, deadly to player and other turtles | Green dome with speed lines |
+| `shell_bounce_dead` | Stomped shell bouncing upward then falling off-screen | Green dome, rising then falling |
 | `dead` | Defeated turtle, fading upside-down shell | Flipping shell, fades out |
 
 ### Collision Rules
@@ -669,9 +739,9 @@ This prevents side-collisions from registering as stomps. On stomp, the player r
 
 ### Debug (`?debug=1`)
 
-- **Hitbox overlays**: Lime = walking turtle, Teal = idle shell, Red = moving shell
+- **Hitbox overlays**: Lime = walking turtle, Teal = idle shell, Red = moving shell, Grey = bounce dead
 - **State labels**: Each turtle shows its current state above the hitbox
-- **Bottom status line**: `TURTLES:N walk:N idle:N move:N dead:N walkVx:V dir:D`
+- **Bottom status line**: `TURTLES:N walk:N idle:N move:N bdead:N dead:N | ...`
 
 ### Constants
 

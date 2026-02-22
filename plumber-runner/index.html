@@ -336,6 +336,505 @@ const DIFFICULTY_LEVELS = [
   { name: 'INSANE', time: 240, speedMul: 2.15, gapMin: 175, gapMax: 245, pipeMaxH: 240, topMaxH: 200, pairChance: 0.55, brickReplace: 0.28 },
 ];
 
+// ── Chunk-Based Level Generation ─────────────────────
+// Player physics-derived reachability limits
+// Full jump height ≈ 156px, short jump ≈ 45px
+// Full jump horizontal range at max speed ≈ 258px
+const CHUNK_PLAYER_MAX_JUMP_H = 150;    // conservative max jump height (px)
+const CHUNK_PLAYER_MAX_JUMP_X = 240;    // conservative max horizontal jump range (px)
+const CHUNK_PLAYER_SHORT_JUMP_H = 40;   // short tap jump height (px)
+const CHUNK_MIN_WIDTH = 600;
+const CHUNK_MAX_WIDTH = 900;
+const CHUNK_MAX_CONSEC_DANGER = 2;      // max consecutive danger chunks before forced rest
+const CHUNK_SAFE_INTERVAL = 5;          // every N chunks, guarantee a safe/reward chunk
+const CHUNK_MAX_REROLLS = 5;            // max rerolls per chunk for reachability
+
+// Chunk types:
+// 'rest'            – flat ground, no obstacles (breathing room)
+// 'single_platform' – 1 bottom pipe as platform + optional bricks
+// 'double_platform' – 2 bottom pipes at different heights (staircase)
+// 'pipe_mix'        – pipe pair (bottom+top) or mixed obstacles
+// 'turtle_zone'     – flat ground with turtle enemies + low obstacles
+// 'reward'          – brick clusters with high special chance + easy spacing
+const CHUNK_TYPES = ['rest', 'single_platform', 'double_platform', 'pipe_mix', 'turtle_zone', 'reward'];
+
+// Difficulty phase definitions for chunk system
+// Phase 0: Tutorial (0-60s) – mostly rest + single_platform
+// Phase 1: Medium (60-180s) – add double_platform, pipe_mix, turtle_zone
+// Phase 2: Hard (180s+) – all types, higher complexity, still reachable
+const CHUNK_DIFFICULTY_PHASES = [
+  { time: 0,   maxPipeH: 100, maxTopH: 80,  weights: { rest: 35, single_platform: 40, double_platform: 5, pipe_mix: 0,  turtle_zone: 15, reward: 5 } },
+  { time: 60,  maxPipeH: 140, maxTopH: 120, weights: { rest: 15, single_platform: 25, double_platform: 15, pipe_mix: 15, turtle_zone: 15, reward: 15 } },
+  { time: 180, maxPipeH: 200, maxTopH: 170, weights: { rest: 10, single_platform: 20, double_platform: 20, pipe_mix: 25, turtle_zone: 10, reward: 15 } },
+  { time: 300, maxPipeH: 240, maxTopH: 200, weights: { rest: 8,  single_platform: 18, double_platform: 22, pipe_mix: 30, turtle_zone: 10, reward: 12 } },
+];
+
+// Chunk state tracking
+let chunkIdCounter = 0;           // unique chunk ID
+let chunkHistory = [];            // recent chunk records: { id, type, x, width, diffPhase, rerolls, reachable }
+let consecutiveDangerChunks = 0;  // tracks consecutive danger chunks
+let chunksSinceLastSafe = 0;      // tracks chunks since last safe/reward chunk
+let nextChunkX = 0;               // world X where next chunk starts
+let chunkDebugInfo = null;        // latest chunk debug info for overlay
+
+// Get interpolated chunk difficulty parameters at current survival time
+function getChunkDiffPhase() {
+  const t = survivalTime;
+  const phases = CHUNK_DIFFICULTY_PHASES;
+  for (let i = phases.length - 1; i >= 0; i--) {
+    if (t >= phases[i].time) {
+      if (i === phases.length - 1) return { phase: i, ...phases[i] };
+      const curr = phases[i];
+      const next = phases[i + 1];
+      const frac = (t - curr.time) / (next.time - curr.time);
+      const s = frac * frac * (3 - 2 * frac); // smoothstep
+      const result = { phase: i, time: curr.time };
+      result.maxPipeH = Math.round(curr.maxPipeH + (next.maxPipeH - curr.maxPipeH) * s);
+      result.maxTopH = Math.round(curr.maxTopH + (next.maxTopH - curr.maxTopH) * s);
+      // Interpolate weights
+      result.weights = {};
+      for (const type of CHUNK_TYPES) {
+        result.weights[type] = curr.weights[type] + (next.weights[type] - curr.weights[type]) * s;
+      }
+      return result;
+    }
+  }
+  return { phase: 0, ...phases[0] };
+}
+
+// Weighted random selection from chunk types
+function selectChunkType(weights) {
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (const type of CHUNK_TYPES) {
+    r -= weights[type];
+    if (r <= 0) return type;
+  }
+  return 'rest'; // fallback
+}
+
+// Check if a chunk type is "dangerous" (can potentially kill the player)
+function isChunkDangerous(type) {
+  return type === 'double_platform' || type === 'pipe_mix';
+}
+
+// Check if a chunk type is "safe" (breathing room)
+function isChunkSafe(type) {
+  return type === 'rest' || type === 'reward';
+}
+
+// Validate reachability within a chunk's obstacles
+// Returns true if all platforms are reachable from the entry point
+function validateChunkReachability(chunkObstacles, chunkX, chunkWidth) {
+  const groundY = DESIGN_H - GROUND_H;
+  // Player enters chunk at ground level from the left
+  // Check each obstacle is reachable
+  let prevStandY = groundY; // player stands on ground
+  let prevX = chunkX;
+
+  for (const obs of chunkObstacles) {
+    if (obs.type === 'pipe_bottom') {
+      const pipeTopY = groundY - obs.h;
+      // Player must be able to jump over or onto this pipe
+      // Check: can player jump high enough from ground?
+      if (obs.h > CHUNK_PLAYER_MAX_JUMP_H) return false;
+      // Check: is the horizontal gap from previous obstacle reachable?
+      const horizDist = obs.x - prevX;
+      if (horizDist < 30) return false; // too close, no room to jump
+      // If there's a gap to cross, check horizontal range
+      prevStandY = Math.min(prevStandY, pipeTopY);
+      prevX = obs.x + LIP_W;
+    } else if (obs.type === 'pipe_top') {
+      // Ceiling pipe — player must pass under
+      const ceilingBottomY = obs.h; // from top of screen
+      const clearance = groundY - ceilingBottomY;
+      // Player height is 36px, need at least 40px clearance
+      if (clearance < 42) return false;
+    } else if (obs.type === 'pipe_pair') {
+      // Bottom + top pipe — check the gap is passable
+      const bottomTopY = groundY - obs.bottomH;
+      const topBottomY = obs.topH;
+      const gap = bottomTopY - topBottomY;
+      // Gap must be at least player height + margin
+      if (gap < player.h + 20) return false;
+      // Bottom pipe must be jumpable
+      if (obs.bottomH > CHUNK_PLAYER_MAX_JUMP_H) return false;
+      prevStandY = Math.min(prevStandY, bottomTopY);
+      prevX = obs.x + LIP_W;
+    } else if (obs.type === 'brick') {
+      // Brick must be reachable from ground
+      const brickHeight = groundY - obs.y;
+      if (brickHeight > CHUNK_PLAYER_MAX_JUMP_H) return false;
+    }
+  }
+
+  // Check that the chunk exit is reachable (player can walk to the right edge)
+  // This is generally true if individual obstacles are passable
+  return true;
+}
+
+// Generate a single chunk of level content
+// Returns: { pipes: [], bricks: [], turtleSpawns: [], width, type, obstacles (for validation) }
+function generateChunk(chunkX, type, diffParams) {
+  const groundY = DESIGN_H - GROUND_H;
+  const width = CHUNK_MIN_WIDTH + Math.random() * (CHUNK_MAX_WIDTH - CHUNK_MIN_WIDTH);
+  const result = { pipes: [], bricks: [], turtleSpawns: [], width, type, obstacles: [] };
+  const maxPipeH = diffParams.maxPipeH;
+  const maxTopH = diffParams.maxTopH;
+
+  // Helper: random pipe height within limits
+  const randBottomH = (maxH) => {
+    const pool = PIPE_HEIGHTS_BOTTOM.filter(h => h <= maxH);
+    if (maxH >= 170) pool.push(170);
+    if (maxH >= 195) pool.push(195);
+    if (maxH >= 220) pool.push(220);
+    return pool[Math.floor(Math.random() * pool.length)] || 60;
+  };
+  const randTopH = (maxH) => {
+    const pool = PIPE_HEIGHTS_TOP.filter(h => h <= maxH);
+    if (maxH >= 155) pool.push(155);
+    if (maxH >= 170) pool.push(170);
+    return pool[Math.floor(Math.random() * pool.length)] || 60;
+  };
+
+  switch (type) {
+    case 'rest': {
+      // Flat ground with maybe 1 very low pipe for visual variety
+      if (Math.random() < 0.3) {
+        const x = chunkX + 200 + Math.random() * (width - 400);
+        const h = 40 + Math.floor(Math.random() * 30); // very low: 40-70px
+        result.pipes.push({ x, h, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x, h });
+      }
+      // Maybe a reward brick
+      if (Math.random() < 0.4) {
+        const bx = chunkX + 150 + Math.random() * (width - 300);
+        const by = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 20);
+        result.bricks.push({ x: bx, y: by, w: BRICK_W, h: BRICK_H, broken: false, special: Math.random() < 0.4 });
+        result.obstacles.push({ type: 'brick', x: bx, y: by });
+      }
+      break;
+    }
+
+    case 'single_platform': {
+      // 1 bottom pipe as platform + optional stepping bricks
+      const pipeX = chunkX + 150 + Math.random() * (width - 350);
+      const pipeH = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
+      result.pipes.push({ x: pipeX, h: pipeH, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: pipeX, h: pipeH });
+
+      // Stepping brick if pipe is tall
+      if (pipeH >= 100) {
+        const bx = pipeX - 60 - Math.random() * 60;
+        const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 15;
+        const by = groundY - stepH;
+        result.bricks.push({ x: bx, y: by, w: BRICK_W, h: BRICK_H, broken: false, special: Math.random() < SPECIAL_BRICK_CHANCE });
+        result.obstacles.push({ type: 'brick', x: bx, y: by });
+      }
+
+      // Optional second brick at different position
+      if (Math.random() < 0.35) {
+        const bx2 = pipeX + LIP_W + 30 + Math.random() * 80;
+        const stepH2 = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 30;
+        const by2 = groundY - stepH2;
+        if (bx2 < chunkX + width - 50) {
+          result.bricks.push({ x: bx2, y: by2, w: BRICK_W, h: BRICK_H, broken: false, special: Math.random() < SPECIAL_BRICK_CHANCE });
+          result.obstacles.push({ type: 'brick', x: bx2, y: by2 });
+        }
+      }
+      break;
+    }
+
+    case 'double_platform': {
+      // 2 pipes at staggered heights — staircase platforming
+      const gap = 120 + Math.random() * 100; // horizontal gap between pipes
+      const pipe1X = chunkX + 100 + Math.random() * 100;
+      const pipe2X = pipe1X + gap;
+      // First pipe: lower
+      const h1 = randBottomH(Math.min(maxPipeH, 120));
+      // Second pipe: higher but reachable from first pipe top
+      const maxH2 = Math.min(maxPipeH, h1 + CHUNK_PLAYER_MAX_JUMP_H - 20);
+      const h2 = Math.max(h1 + 20, randBottomH(maxH2));
+
+      result.pipes.push({ x: pipe1X, h: h1, fromTop: false, scored: false });
+      result.pipes.push({ x: pipe2X, h: h2, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: pipe1X, h: h1 });
+      result.obstacles.push({ type: 'pipe_bottom', x: pipe2X, h: h2 });
+
+      // Optional brick between pipes for extra platforming
+      if (Math.random() < 0.4 && gap > 160) {
+        const midX = (pipe1X + pipe2X) / 2 - BRICK_W / 2;
+        const midH = (h1 + h2) / 2;
+        const by = groundY - midH;
+        result.bricks.push({ x: midX, y: by, w: BRICK_W, h: BRICK_H, broken: false, special: Math.random() < SPECIAL_BRICK_CHANCE });
+        result.obstacles.push({ type: 'brick', x: midX, y: by });
+      }
+
+      // Make sure pipe2 is still within chunk bounds
+      if (pipe2X + LIP_W > chunkX + width) {
+        result.width = pipe2X + LIP_W + 60 - chunkX;
+      }
+      break;
+    }
+
+    case 'pipe_mix': {
+      // Mixed obstacles: bottom pipe + optional top pipe (pair), bricks
+      const pipeX = chunkX + 150 + Math.random() * (width - 400);
+      const bottomH = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
+
+      result.pipes.push({ x: pipeX, h: bottomH, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: pipeX, h: bottomH });
+
+      // Stepping bricks for taller pipes
+      if (bottomH >= TALL_PIPE_THRESHOLD) {
+        const bx = pipeX - 50 - Math.random() * 60;
+        const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 15;
+        result.bricks.push({ x: bx, y: groundY - stepH, w: BRICK_W, h: BRICK_H, broken: false, special: Math.random() < SPECIAL_BRICK_CHANCE });
+        result.obstacles.push({ type: 'brick', x: bx, y: groundY - stepH });
+      }
+
+      // Add ceiling pipe? (50% chance if difficulty allows)
+      if (Math.random() < 0.5 && maxTopH >= 60) {
+        // Place ceiling pipe at a different X to avoid instant death trap
+        const topX = pipeX + (Math.random() < 0.5 ? -(120 + Math.random() * 100) : (120 + Math.random() * 100));
+        const topH = randTopH(maxTopH);
+        // Ensure clearance: ceiling bottom must be above ground with enough gap
+        const ceilingBottomY = topH;
+        const clearance = groundY - ceilingBottomY;
+        if (clearance >= player.h + 25 && topX > chunkX + 50 && topX < chunkX + width - 50) {
+          result.pipes.push({ x: topX, h: topH, fromTop: true, scored: false });
+          result.obstacles.push({ type: 'pipe_top', x: topX, h: topH });
+        }
+      }
+
+      // Possible second bottom pipe farther in the chunk
+      if (Math.random() < 0.4 && width > 650) {
+        const pipe2X = pipeX + 200 + Math.random() * 150;
+        if (pipe2X + LIP_W < chunkX + width - 60) {
+          const h2 = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
+          result.pipes.push({ x: pipe2X, h: h2, fromTop: false, scored: false });
+          result.obstacles.push({ type: 'pipe_bottom', x: pipe2X, h: h2 });
+        }
+      }
+      break;
+    }
+
+    case 'turtle_zone': {
+      // Flat/low terrain with turtle enemies — enough ground space for turtle interaction
+      // Maybe 1 low pipe for variety
+      if (Math.random() < 0.5) {
+        const pipeX = chunkX + 250 + Math.random() * (width - 400);
+        const pipeH = 40 + Math.floor(Math.random() * 40); // very low: 40-80px
+        result.pipes.push({ x: pipeX, h: pipeH, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: pipeX, h: pipeH });
+      }
+      // Spawn 1-2 turtles with adequate spacing
+      const turtleCount = 1 + Math.floor(Math.random() * 2);
+      const spacing = width / (turtleCount + 1);
+      for (let i = 0; i < turtleCount; i++) {
+        const tx = chunkX + spacing * (i + 1) + (Math.random() - 0.5) * 60;
+        // Validate turtle position: must have at least 80px clear ground on each side
+        let turtleOK = true;
+        for (const p of result.pipes) {
+          const pr = getPipeRects(p);
+          if (rectsOverlap(tx, groundY - TURTLE_H, TURTLE_W, TURTLE_H,
+            pr.lipRect.x, pr.lipRect.y, pr.lipRect.w, pr.lipRect.h) ||
+            rectsOverlap(tx, groundY - TURTLE_H, TURTLE_W, TURTLE_H,
+            pr.bodyRect.x, pr.bodyRect.y, pr.bodyRect.w, pr.bodyRect.h)) {
+            turtleOK = false;
+          }
+          // Also check turtle has room to walk (not wedged against pipe)
+          if (Math.abs(tx - pr.lipRect.x) < 60 || Math.abs(tx - (pr.lipRect.x + pr.lipRect.w)) < 60) {
+            // Close to pipe — check more carefully
+            const pipeLeft = pr.bodyRect.x;
+            const pipeRight = pr.bodyRect.x + pr.bodyRect.w;
+            if (tx + TURTLE_W > pipeLeft - 40 && tx < pipeRight + 40) {
+              // Too close, but may still be OK if on the open side
+              if (tx >= pipeLeft && tx + TURTLE_W <= pipeRight) turtleOK = false; // inside pipe
+            }
+          }
+        }
+        if (turtleOK && tx > chunkX + 60 && tx < chunkX + width - 60) {
+          result.turtleSpawns.push(tx);
+        }
+      }
+      // Maybe a brick for scoring
+      if (Math.random() < 0.4) {
+        const bx = chunkX + 100 + Math.random() * (width - 200);
+        const by = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 20);
+        result.bricks.push({ x: bx, y: by, w: BRICK_W, h: BRICK_H, broken: false, special: Math.random() < SPECIAL_BRICK_CHANCE });
+      }
+      break;
+    }
+
+    case 'reward': {
+      // Brick cluster with high special chance — easy spacing, lots of pickups
+      const brickCount = 2 + Math.floor(Math.random() * 3); // 2-4 bricks
+      const startX = chunkX + 100 + Math.random() * 100;
+      const spread = (width - 300) / brickCount;
+      for (let i = 0; i < brickCount; i++) {
+        const bx = startX + i * spread + Math.random() * 40;
+        // Heights in reachable tiers
+        const tierIdx = i % 3;
+        const tiers = [
+          { minH: BRICK_MIN_HEIGHT_ABOVE_GROUND, maxH: 95 },
+          { minH: 100, maxH: 130 },
+          { minH: BRICK_MIN_HEIGHT_ABOVE_GROUND, maxH: 110 },
+        ];
+        const tier = tiers[tierIdx];
+        const heightAboveGround = tier.minH + Math.random() * (tier.maxH - tier.minH);
+        const by = groundY - heightAboveGround;
+
+        if (bx < chunkX + width - 50) {
+          // Higher special chance in reward chunks
+          result.bricks.push({ x: bx, y: by, w: BRICK_W, h: BRICK_H, broken: false, special: Math.random() < 0.45 });
+          result.obstacles.push({ type: 'brick', x: bx, y: by });
+        }
+      }
+      // Optional low pipe as visual anchor
+      if (Math.random() < 0.3) {
+        const px = chunkX + width / 2 + Math.random() * 100;
+        const ph = 50 + Math.floor(Math.random() * 30);
+        result.pipes.push({ x: px, h: ph, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: px, h: ph });
+      }
+      break;
+    }
+  }
+
+  return result;
+}
+
+// Spawn a complete chunk into the game world
+function spawnChunk() {
+  const diffParams = getChunkDiffPhase();
+  let weights = { ...diffParams.weights };
+
+  // Force rest chunk after too many consecutive danger chunks
+  if (consecutiveDangerChunks >= CHUNK_MAX_CONSEC_DANGER) {
+    weights = { rest: 70, single_platform: 15, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 5 };
+  }
+
+  // Force safe/reward chunk periodically
+  if (chunksSinceLastSafe >= CHUNK_SAFE_INTERVAL) {
+    weights = { rest: 30, single_platform: 10, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 50 };
+  }
+
+  let type = selectChunkType(weights);
+  let chunk = null;
+  let rerolls = 0;
+
+  // Generate and validate, reroll if unreachable
+  for (let attempt = 0; attempt <= CHUNK_MAX_REROLLS; attempt++) {
+    chunk = generateChunk(nextChunkX, type, diffParams);
+    if (validateChunkReachability(chunk.obstacles, nextChunkX, chunk.width)) {
+      rerolls = attempt;
+      break;
+    }
+    rerolls = attempt + 1;
+    // On reroll, try a simpler type
+    if (attempt >= 2) {
+      type = Math.random() < 0.5 ? 'rest' : 'single_platform';
+    }
+    chunk = null;
+  }
+
+  // Final fallback: force rest chunk
+  if (!chunk) {
+    type = 'rest';
+    chunk = generateChunk(nextChunkX, type, diffParams);
+    rerolls = CHUNK_MAX_REROLLS + 1;
+  }
+
+  // Commit chunk to game world
+  for (const p of chunk.pipes) {
+    pipes.push(p);
+  }
+  for (const b of chunk.bricks) {
+    // Prevent overlap with existing bricks/pipes
+    let overlaps = false;
+    for (const existing of bricks) {
+      if (existing.broken) continue;
+      if (rectsOverlap(b.x, b.y, b.w, b.h, existing.x - 8, existing.y - 8, existing.w + 16, existing.h + 16)) {
+        overlaps = true; break;
+      }
+    }
+    if (!overlaps) bricks.push(b);
+  }
+  // Spawn turtles from chunk
+  for (const tx of chunk.turtleSpawns) {
+    if (tx - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP) {
+      spawnTurtle(tx);
+    }
+  }
+
+  // We need at least one marker pipe for scoring/spawn tracking
+  if (chunk.pipes.length === 0) {
+    pipes.push({ x: nextChunkX + chunk.width / 2, h: 0, fromTop: false, scored: false });
+  }
+
+  // Update tracking state
+  const chunkId = ++chunkIdCounter;
+  const chunkRecord = {
+    id: chunkId,
+    type: type,
+    x: nextChunkX,
+    width: chunk.width,
+    diffPhase: diffParams.phase,
+    rerolls: rerolls,
+    reachable: true,
+  };
+  chunkHistory.push(chunkRecord);
+  // Keep only recent history (last 20 chunks)
+  if (chunkHistory.length > 20) chunkHistory.shift();
+
+  // Update danger/safe counters
+  if (isChunkDangerous(type)) {
+    consecutiveDangerChunks++;
+  } else {
+    consecutiveDangerChunks = 0;
+  }
+  if (isChunkSafe(type)) {
+    chunksSinceLastSafe = 0;
+  } else {
+    chunksSinceLastSafe++;
+  }
+
+  // Debug info
+  chunkDebugInfo = chunkRecord;
+  if (DEBUG_MODE) {
+    console.log(`%c[Chunk] #${chunkId} type=${type} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} rerolls=${rerolls}`, 'color: #42d4f4');
+  }
+
+  nextChunkX += chunk.width;
+}
+
+// Initialize first chunks at game start
+function spawnInitialChunks() {
+  // Reset chunk state
+  chunkIdCounter = 0;
+  chunkHistory = [];
+  consecutiveDangerChunks = 0;
+  chunksSinceLastSafe = 0;
+  nextChunkX = cameraX + DESIGN_W * 0.3; // start generating a bit ahead of player
+  chunkDebugInfo = null;
+
+  // Generate first rest chunk (safe start)
+  const firstChunk = generateChunk(nextChunkX, 'rest', getChunkDiffPhase());
+  for (const p of firstChunk.pipes) pipes.push(p);
+  for (const b of firstChunk.bricks) bricks.push(b);
+  if (firstChunk.pipes.length === 0) {
+    pipes.push({ x: nextChunkX + firstChunk.width / 2, h: 0, fromTop: false, scored: false });
+  }
+  chunkIdCounter++;
+  chunkHistory.push({ id: 1, type: 'rest', x: nextChunkX, width: firstChunk.width, diffPhase: 0, rerolls: 0, reachable: true });
+  nextChunkX += firstChunk.width;
+
+  // Generate a couple more chunks ahead
+  spawnChunk();
+  spawnChunk();
+}
+
 // ── Swept AABB Settings ──────────────────────────────
 const SWEEP_MAX_ITERATIONS = 4;   // max resolve iterations per frame
 const SWEEP_EPSILON = 0.001;      // floating-point tolerance for contact
@@ -3113,8 +3612,8 @@ function resetGame() {
   bossCountdownLastSec = -1;
   initClouds();
   initHills();
-  // Seed first pipe pair far away
-  spawnInitialPipes();
+  // Seed initial chunks (replaces old spawnInitialPipes)
+  spawnInitialChunks();
 }
 
 function spawnInitialPipes() {
@@ -3828,16 +4327,15 @@ function update() {
 
   // Remove off-screen turtles handled inside updateTurtles()
 
-  // Try spawning a turtle ahead of camera
+  // Supplemental random turtle spawning (reduced — chunks also place turtles)
   {
     const turtleSpawnX = cameraX + DESIGN_W + 80 + Math.random() * 120;
-    if (turtleSpawnX - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP && Math.random() < TURTLE_SPAWN_CHANCE * FIXED_DT) {
+    if (turtleSpawnX - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP && Math.random() < TURTLE_SPAWN_CHANCE * FIXED_DT * 0.4) {
       spawnTurtle(turtleSpawnX);
     }
   }
 
-  // Spawn pipes (or boss wave obstacles during boss wave)
-  // Spawn when rightmost pipe is within camera view + margin
+  // Spawn chunks or boss wave obstacles
   const spawnEdge = cameraX + DESIGN_W;
   if (bossWaveActive) {
     const rightmostBossX = pipes.length > 0
@@ -3848,13 +4346,16 @@ function update() {
       spawnBossWaveObstacle();
     }
   } else {
+    // After boss wave, ensure nextChunkX is ahead of all existing pipes
     if (pipes.length > 0) {
-      const rightmost = pipes.reduce((a, b) => a.x > b.x ? a : b);
-      if (rightmost.x < spawnEdge) {
-        spawnPipe();
+      const rightmostX = pipes.reduce((a, b) => a.x > b.x ? a : b).x;
+      if (nextChunkX < rightmostX + 100) {
+        nextChunkX = rightmostX + 100;
       }
-    } else {
-      spawnInitialPipes();
+    }
+    // Chunk-based spawning: generate new chunk when nextChunkX is within view range
+    if (nextChunkX < spawnEdge + CHUNK_MAX_WIDTH) {
+      spawnChunk();
     }
   }
 
@@ -4172,6 +4673,30 @@ function draw() {
       ctx.fillText(t.state, t.x, t.y - 2);
     }
 
+    // Chunk boundary markers (vertical lines with labels)
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 1;
+    ctx.font = '9px monospace';
+    for (const ch of chunkHistory) {
+      const chunkScreenX = ch.x;
+      if (chunkScreenX > cameraX - 100 && chunkScreenX < cameraX + DESIGN_W + 100) {
+        ctx.strokeStyle = '#ff0';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(chunkScreenX, 0);
+        ctx.lineTo(chunkScreenX, DESIGN_H);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ff0';
+        ctx.fillText(`#${ch.id} ${ch.type}`, chunkScreenX + 3, 12);
+        if (ch.rerolls > 0) {
+          ctx.fillStyle = '#f80';
+          ctx.fillText(`reroll:${ch.rerolls}`, chunkScreenX + 3, 22);
+        }
+      }
+    }
+    ctx.globalAlpha = 0.45;
+
     // Debug text (screen-space)
     ctx.restore(); // pop camera transform
     ctx.save();
@@ -4193,6 +4718,10 @@ function draw() {
     const tInfo = tSample ? `vx:${tSample.vx.toFixed(1)} dir:${tSample.direction} st:${tSample.state} y:${tSample.y.toFixed(0)} gnd:${tSample.onGround?1:0}` : '-';
     ctx.fillText(`TURTLES:${turtles.length} walk:${tWalk} idle:${tShellIdle} move:${tShellMove} bdead:${tBounceDead} dead:${tDead} | ${tInfo}`, 4, DESIGN_H - 54);
     ctx.fillText(`dt:${(_debugDt * 1000).toFixed(1)}ms logicSteps:${_debugLogicSteps} fps(est):${_debugFps.toFixed(1)}`, 4, DESIGN_H - 64);
+    // Chunk-based level generation debug info
+    const cdi = chunkDebugInfo;
+    const chunkPhaseNames = ['Tutorial', 'Medium', 'Hard', 'Max'];
+    ctx.fillText(`CHUNK:${cdi ? '#' + cdi.id + ' ' + cdi.type : '-'} PHASE:${cdi ? chunkPhaseNames[cdi.diffPhase] || cdi.diffPhase : '-'} REROLLS:${cdi ? cdi.rerolls : 0} NEXT_X:${Math.round(nextChunkX)} TOTAL:${chunkIdCounter} CONSEC_DANGER:${consecutiveDangerChunks}`, 4, DESIGN_H - 74);
     ctx.restore();
   }
 }
