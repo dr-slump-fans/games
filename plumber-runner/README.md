@@ -610,6 +610,83 @@ The default sprite sheet is a **single-row PNG** with transparent background (RG
 
 The bundled `assets/sprite.png` is an **original character** ("Pippo" the Plumber) created for this project. If you replace it, ensure you have the right to use your replacement art.
 
+## Turtle Enemy System
+
+Ground-walking turtle enemies add a new threat and scoring mechanic. Turtles walk along the ground, interact with terrain, and can be defeated by stomping.
+
+### Enemy States
+
+| State | Behavior | Visual |
+|-------|----------|--------|
+| `walk` | Walks leftward on ground, reverses at walls/edges | Green-shelled turtle with animated legs |
+| `shell_idle` | Stationary shell on ground, waiting to be kicked | Compact green dome, no movement |
+| `shell_move` | Shell sliding at high speed, deadly to player and other turtles | Green dome with speed lines |
+| `dead` | Defeated turtle, fading upside-down shell | Flipping shell, fades out |
+
+### Collision Rules
+
+| Situation | Result |
+|-----------|--------|
+| Player stomps walking turtle (falling from above) | Turtle → `shell_idle`, player bounces up, **+10 points** |
+| Player touches walking turtle from side/below | **Player dies** (Game Over) |
+| Player touches idle shell | Shell starts sliding in kick direction (`shell_move`), **player safe** |
+| Moving shell hits player | **Player dies** (Game Over) |
+| Moving shell hits walking turtle | Other turtle dies, **+20 points** with score popup |
+| Moving shell hits pipe/brick wall | Shell bounces back (reverses direction) |
+
+### Stomp Detection
+
+A stomp is registered when:
+- Player is falling (`vy > 0`)
+- Player's bottom edge is above 40% of the turtle's height
+
+This prevents side-collisions from registering as stomps. On stomp, the player receives a bounce (`vy = -5.5`).
+
+### Shell Mechanics
+
+- **Kick grace**: After stomping, a brief grace period (10 frames) prevents immediately kicking the shell
+- **Kick direction**: Shell slides away from the player's center
+- **Shell speed**: 5.5 px/frame — fast enough to be visually exciting and dangerous
+- **Wall bounce**: Shells reverse direction on pipe/brick contact
+- **Chain kills**: A moving shell can defeat multiple turtles in a row, each awarding +20 points
+
+### Spawning
+
+- Turtles spawn randomly ahead of the camera on ground level
+- Spawn chance: ~30% per frame (throttled by spawn gap)
+- Minimum gap between spawns: 400 px
+- Spawn position is validated to avoid overlapping pipes or bricks
+- Turtles are removed when they move far off-screen
+
+### Scoring
+
+| Action | Points |
+|--------|--------|
+| Stomp a turtle | +10 (`TURTLE_STOMP_SCORE`) |
+| Shell kills another turtle | +20 (`TURTLE_SHELL_KILL_SCORE`) |
+
+### Debug (`?debug=1`)
+
+- **Hitbox overlays**: Lime = walking turtle, Teal = idle shell, Red = moving shell
+- **State labels**: Each turtle shows its current state above the hitbox
+- **Bottom status line**: `TURTLES:N walk:N shell_idle:N shell_move:N dead:N`
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `TURTLE_W` | `24` | Walking turtle width (px) |
+| `TURTLE_H` | `28` | Walking turtle height (px) |
+| `SHELL_W` | `24` | Shell width (px) |
+| `SHELL_H` | `16` | Shell height (px) |
+| `TURTLE_WALK_SPEED` | `1.0` | Walking speed (px/frame) |
+| `SHELL_MOVE_SPEED` | `5.5` | Shell sliding speed (px/frame) |
+| `TURTLE_STOMP_SCORE` | `10` | Points for stomping |
+| `TURTLE_SHELL_KILL_SCORE` | `20` | Points for shell killing another turtle |
+| `TURTLE_STOMP_BOUNCE_VY` | `-5.5` | Player bounce velocity on stomp |
+| `TURTLE_SPAWN_CHANCE` | `0.30` | Per-frame spawn probability (throttled) |
+| `TURTLE_MIN_SPAWN_GAP` | `400` | Minimum px between turtle spawns |
+
 ## Fun Pack v1
 
 Three new systems that add depth, replayability, and satisfying feedback to every run.
