@@ -612,7 +612,7 @@ The bundled `assets/sprite.png` is an **original character** ("Pippo" the Plumbe
 
 ## Turtle Enemy System
 
-Ground-walking turtle enemies add a new threat and scoring mechanic. Turtles walk along the ground, interact with terrain, and can be defeated by stomping.
+Ground-walking turtle enemies add a new threat and scoring mechanic. Turtles walk along the ground, interact with terrain, and can be defeated by stomping. Turtle head direction always matches its movement direction. After stomping an idle shell, it pops upward, then falls below the ground and disappears.
 
 ### Enemy States
 
@@ -629,7 +629,7 @@ Ground-walking turtle enemies add a new threat and scoring mechanic. Turtles wal
 |-----------|--------|
 | Player stomps walking turtle (falling from above) | Turtle → `shell_idle`, player bounces up, **+10 points** |
 | Player touches walking turtle from side/below | **Player dies** (Game Over) |
-| Player stomps idle shell (falling from above) | **+5 points**, shell kicked (`shell_move`), player bounces |
+| Player stomps idle shell (falling from above) | **+5 points**, shell enters `shell_bounce_dead` (pops up then falls off-screen), player bounces |
 | Player touches idle shell from side | Shell kicked (`shell_move`), **player safe**, no score |
 | Moving shell hits player | **Player dies** (Game Over) |
 | Moving shell hits walking turtle | Other turtle dies, **+20 points** with score popup |

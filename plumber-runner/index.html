@@ -623,7 +623,7 @@ const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is acti
 
 // ── Turtle Enemy State ──────────────────────────────────
 // Each turtle: { x, y, vx, vy, onGround, state, direction, animFrame, deadTimer, kickGrace }
-// States: 'walk', 'shell_idle', 'shell_move', 'dead'
+// States: 'walk', 'shell_idle', 'shell_move', 'shell_bounce_dead', 'dead'
 let turtles = [];
 let lastTurtleSpawnX = -9999;  // tracks X of last turtle spawn to enforce gap
 
@@ -1417,7 +1417,8 @@ function drawTurtleWalk(tx, ty, direction, animFrame) {
   const x = Math.round(tx);
   const y = Math.round(ty);
   ctx.save();
-  // Flip if facing right
+  // Flip based on movement direction: unflipped sprite faces left (head at x+0)
+  // direction > 0 means moving right → flip sprite so head faces right
   if (direction > 0) {
     ctx.translate(x + TURTLE_W / 2, 0);
     ctx.scale(-1, 1);
@@ -1769,6 +1770,16 @@ function updateTurtles() {
       continue;
     }
 
+    // ── Shell bounce dead: rises then falls off-screen, no collisions ──
+    if (t.state === 'shell_bounce_dead') {
+      t.vy += TURTLE_GRAVITY;
+      t.y += t.vy;
+      if (t.y > DESIGN_H + 50) {
+        turtles.splice(i, 1);
+      }
+      continue;
+    }
+
     // ── Kick grace timer ──
     if (t.kickGrace > 0) t.kickGrace--;
 
@@ -1777,7 +1788,7 @@ function updateTurtles() {
 
     // ── Horizontal movement ──
     if (t.state === 'walk') {
-      t.vx = -TURTLE_WALK_SPEED * t.direction;
+      t.vx = TURTLE_WALK_SPEED * t.direction;  // direction matches vx sign
     } else if (t.state === 'shell_idle') {
       t.vx = 0;
     }
@@ -1888,7 +1899,7 @@ function updateTurtles() {
       for (let j = turtles.length - 1; j >= 0; j--) {
         if (j === i) continue;
         const other = turtles[j];
-        if (other.state === 'dead') continue;
+        if (other.state === 'dead' || other.state === 'shell_bounce_dead') continue;
         const ow = (other.state === 'walk') ? TURTLE_W : SHELL_W;
         const oh = (other.state === 'walk') ? TURTLE_H : SHELL_H;
         if (rectsOverlap(t.x, t.y, tw, th, other.x, other.y, ow, oh)) {
@@ -1917,9 +1928,13 @@ function updateTurtles() {
         const oldY = t.y;
         t.state = 'shell_idle';
         t.vx = 0;
+        t.vy = 0;  // stop vertical movement so shell stays on surface
         t.kickGrace = TURTLE_SHELL_IDLE_KICK_GRACE;
         // Reposition: shell is shorter, keep it on ground
         t.y = oldY + (TURTLE_H - SHELL_H);
+        // Clamp to ground so shell never sinks below
+        if (t.y + SHELL_H > groundY) t.y = groundY - SHELL_H;
+        t.onGround = (t.y + SHELL_H >= groundY - 1);
         // Bounce player
         player.vy = TURTLE_STOMP_BOUNCE_VY;
         player.onGround = false;
@@ -1932,23 +1947,29 @@ function updateTurtles() {
       }
     } else if (t.state === 'shell_idle') {
       if (t.kickGrace > 0) continue; // still in grace period, ignore
-      // Check if stomp from above: award score, bounce, then kick
       const playerBottom = pb.y + pb.h;
       const shellCenter = t.y + SHELL_H * 0.4;
       if (player.vy > 0 && playerBottom <= shellCenter + 4) {
-        // Stomp score + bounce
+        // STOMP from above → score + shell bounces up and falls off-screen
         score += TURTLE_SHELL_STOMP_SCORE;
         spawnScorePopup(t.x, t.y - 10, TURTLE_SHELL_STOMP_SCORE);
         player.vy = TURTLE_STOMP_BOUNCE_VY;
         player.onGround = false;
-        if (DEBUG_MODE) console.log(`%c[Turtle] Shell stomped! +${TURTLE_SHELL_STOMP_SCORE} → kick`, 'color: #4caf50');
+        t.state = 'shell_bounce_dead';
+        t.vy = -7;  // upward bounce
+        t.vx = 0;
+        if (DEBUG_MODE) console.log(`%c[Turtle] Shell stomped! +${TURTLE_SHELL_STOMP_SCORE} → bounce dead`, 'color: #4caf50');
+      } else {
+        // Side touch → kick the shell into shell_move
+        t.state = 'shell_move';
+        t.vy = 0;
+        if (t.y + SHELL_H > groundY) t.y = groundY - SHELL_H;
+        const playerCX = pb.x + pb.w / 2;
+        const shellCX = t.x + SHELL_W / 2;
+        t.vx = (shellCX >= playerCX) ? SHELL_MOVE_SPEED : -SHELL_MOVE_SPEED;
+        t.kickGrace = TURTLE_SHELL_IDLE_KICK_GRACE;
+        if (DEBUG_MODE) console.log(`%c[Turtle] Shell kicked! dir=${t.vx > 0 ? 'right' : 'left'}`, 'color: #ff9800');
       }
-      // Kick the shell (stomp or side touch both kick)
-      t.state = 'shell_move';
-      const playerCX = pb.x + pb.w / 2;
-      const shellCX = t.x + SHELL_W / 2;
-      t.vx = (shellCX >= playerCX) ? SHELL_MOVE_SPEED : -SHELL_MOVE_SPEED;
-      if (DEBUG_MODE) console.log(`%c[Turtle] Shell kicked! dir=${t.vx > 0 ? 'right' : 'left'}`, 'color: #ff9800');
     } else if (t.state === 'shell_move') {
       // Moving shell hits player → death
       return true; // signal death
@@ -1985,7 +2006,7 @@ function spawnTurtle(spawnX) {
     vy: 0,
     onGround: true,
     state: 'walk',
-    direction: 1, // faces left (movement is -direction * speed)
+    direction: -1, // faces left (direction sign = vx sign)
     animFrame: 0,
     deadTimer: 0,
     kickGrace: 0,
@@ -4047,11 +4068,13 @@ function draw() {
   // Turtles
   for (const t of turtles) {
     if (t.state === 'walk') {
-      drawTurtleWalk(t.x, t.y, t.direction, t.animFrame);
+      drawTurtleWalk(t.x, t.y, t.vx, t.animFrame);  // use vx for flip (same sign as direction)
     } else if (t.state === 'shell_idle') {
       drawTurtleShell(t.x, t.y, false, t.animFrame, 0);
     } else if (t.state === 'shell_move') {
       drawTurtleShell(t.x, t.y, true, t.animFrame, t.vx);
+    } else if (t.state === 'shell_bounce_dead') {
+      drawTurtleShell(t.x, t.y, false, t.animFrame, 0);
     } else if (t.state === 'dead') {
       drawTurtleDead(t.x, t.y, t.deadTimer);
     }
@@ -4137,11 +4160,11 @@ function draw() {
 
     // (Mushroom hitbox / pickup box overlays disabled)
 
-    // Turtle hitboxes (lime = walk, teal = shell_idle, red = shell_move)
+    // Turtle hitboxes (lime = walk, teal = shell_idle, red = shell_move, grey = dead/bounce)
     for (const t of turtles) {
       const tw = (t.state === 'walk') ? TURTLE_W : SHELL_W;
       const th = (t.state === 'walk') ? TURTLE_H : SHELL_H;
-      ctx.strokeStyle = t.state === 'walk' ? '#8f8' : t.state === 'shell_idle' ? '#0ff' : t.state === 'shell_move' ? '#f44' : '#888';
+      ctx.strokeStyle = t.state === 'walk' ? '#8f8' : t.state === 'shell_idle' ? '#0ff' : t.state === 'shell_move' ? '#f44' : t.state === 'shell_bounce_dead' ? '#aaa' : '#888';
       ctx.strokeRect(t.x, t.y, tw, th);
       // State label
       ctx.font = '8px monospace';
@@ -4160,15 +4183,15 @@ function draw() {
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 24);
     ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 34);
     ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported} CONTACT_PICKUP:ON mush:${mushrooms.length}`, 4, DESIGN_H - 44);
-    // Turtle debug info
+    // Turtle debug info — summary + sample turtle detail
     const tWalk = turtles.filter(t => t.state === 'walk').length;
     const tShellIdle = turtles.filter(t => t.state === 'shell_idle').length;
     const tShellMove = turtles.filter(t => t.state === 'shell_move').length;
+    const tBounceDead = turtles.filter(t => t.state === 'shell_bounce_dead').length;
     const tDead = turtles.filter(t => t.state === 'dead').length;
-    const tWalkSample = turtles.find(t => t.state === 'walk');
-    const tWalkVx = tWalkSample ? tWalkSample.vx.toFixed(1) : '-';
-    const tWalkDir = tWalkSample ? tWalkSample.direction : '-';
-    ctx.fillText(`TURTLES:${turtles.length} walk:${tWalk} idle:${tShellIdle} move:${tShellMove} dead:${tDead} walkVx:${tWalkVx} dir:${tWalkDir}`, 4, DESIGN_H - 54);
+    const tSample = turtles.find(t => t.state !== 'dead' && t.state !== 'shell_bounce_dead');
+    const tInfo = tSample ? `vx:${tSample.vx.toFixed(1)} dir:${tSample.direction} st:${tSample.state} y:${tSample.y.toFixed(0)} gnd:${tSample.onGround?1:0}` : '-';
+    ctx.fillText(`TURTLES:${turtles.length} walk:${tWalk} idle:${tShellIdle} move:${tShellMove} bdead:${tBounceDead} dead:${tDead} | ${tInfo}`, 4, DESIGN_H - 54);
     ctx.fillText(`dt:${(_debugDt * 1000).toFixed(1)}ms logicSteps:${_debugLogicSteps} fps(est):${_debugFps.toFixed(1)}`, 4, DESIGN_H - 64);
     ctx.restore();
   }
