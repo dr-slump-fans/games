@@ -190,11 +190,7 @@ Mushrooms are collected **only when the player's inset pickup box overlaps the m
 
 #### Debug Features (`?debug=1`)
 
-- **Red outline**: mushroom visual box (full sprite bounds)
-- **Cyan dashed outline**: mushroom inset pickup box (actual collision for pickup)
-- **Magenta dashed outline**: player inset pickup box
-- **Yellow arrow**: mushroom velocity direction
-- **State label** above mushroom: `<state> G<n> sep<n> armed:0/1` — shows state, grace frames, separation frame count, and armed status (green when armed, orange when ground-run but unarmed)
+- ~~Mushroom hitbox / pickup box overlays~~ — disabled (collision logic unchanged)
 - **`MUSHROOM PICKUP`** (red text, top-left): flashes for ~2s when a mushroom is collected
 - **Bottom status line**: shows `mush:N` (number of active mushrooms)
 - **Console logs**: spawn position, state transitions (`pop→fall→ground-run`), collection events, unstuck teleports

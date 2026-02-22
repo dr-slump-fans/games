@@ -3692,42 +3692,7 @@ function draw() {
       ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
     }
 
-    // Mushroom hitboxes: visual (red), inset pickup (cyan dashed), velocity arrow, state label
-    for (const m of mushrooms) {
-      // Layer 1: Visual box (red solid)
-      ctx.strokeStyle = '#f44';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(m.x, m.y, MUSHROOM_W, MUSHROOM_H);
-      // Layer 2: Inset pickup box (cyan dashed)
-      const mp = getMushroomPickupBox(m.x, m.y);
-      ctx.strokeStyle = '#0ff';
-      ctx.setLineDash([3, 3]);
-      ctx.strokeRect(mp.x, mp.y, mp.w, mp.h);
-      ctx.setLineDash([]);
-      ctx.lineWidth = 1;
-      // Show velocity direction arrow
-      ctx.strokeStyle = '#ff0';
-      const cx = m.x + MUSHROOM_W / 2;
-      const cy = m.y + MUSHROOM_H / 2;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + m.vx * 5, cy + m.vy * 2);
-      ctx.stroke();
-      // Show mushroom state label above
-      ctx.font = '9px monospace';
-      const mOverlap = mushroomPickupOverlap(getPlayerHitbox(), m.x, m.y) ? 1 : 0;
-      const canPickup = m.graceTimer <= 0 && mOverlap;
-      ctx.fillStyle = canPickup ? '#0f0' : (m.graceTimer > 0 ? '#ff0' : '#fa0');
-      ctx.fillText('CONTACT_PICKUP:ON overlap:' + mOverlap + ' grace:' + m.graceTimer, m.x, m.y - 4);
-    }
-
-    // Layer 3: Player pickup box (magenta dashed)
-    const playerPB = getPlayerPickupBox(dbPb);
-    ctx.strokeStyle = '#f0f';
-    ctx.setLineDash([2, 2]);
-    ctx.lineWidth = 1;
-    ctx.strokeRect(playerPB.x, playerPB.y, playerPB.w, playerPB.h);
-    ctx.setLineDash([]);
+    // (Mushroom hitbox / pickup box overlays disabled)
 
     // Debug text (screen-space)
     ctx.restore(); // pop camera transform
