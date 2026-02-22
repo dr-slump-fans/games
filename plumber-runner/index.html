@@ -279,6 +279,11 @@ const BRAKE_DECEL_MIN = 0.10;        // min decel per frame (prevents infinite b
 const BRAKE_DECEL_MAX = 0.60;        // max decel per frame (cap at very high speed)
 const AIR_BRAKE_DECEL = 0.30;        // weaker brake when reversing in air (no time constraint)
 const CAMERA_LEAD = DESIGN_W * 0.40; // camera keeps player at 40% from left edge
+// ── Coin Rush (Mario-style mini buff) ───────────────
+const COIN_RUSH_WINDOW = 6.0;      // seconds to chain 3 coin pickups
+const COIN_RUSH_TARGET = 3;        // coins needed to trigger rush
+const COIN_RUSH_DURATION = 4.0;    // seconds of temporary speed boost
+const COIN_RUSH_SPEED_MUL = 1.25;  // +25% move speed during rush
 
 // ── Lip Corner Forgiveness ──────────────────────────
 // When the player is beside a pipe and jumps upward, the lip overhang
@@ -1304,6 +1309,9 @@ let comboCount = 0;           // current combo level (0 = no combo)
 let comboTimer = 0;           // seconds remaining in combo window
 let comboPopupTimer = 0;      // frames remaining for combo popup display
 let comboPopupText = '';      // text to show in popup
+let coinRushWindowTimer = 0;  // seconds left to continue coin chain
+let coinRushChain = 0;        // coins collected in current chain
+let coinRushTimer = 0;        // seconds left for active rush buff
 
 // ── Fun Pack v1: Speed Wave State ───────────────────
 let speedWavePhase = 0;       // current wave phase in radians
@@ -3267,6 +3275,15 @@ function resolveSweptMovement(playerVY, playerDX) {
           score += BRICK_SCORE;
           triggerCombo(BRICK_SCORE);
           advanceMission('break_bricks');
+          // Coin Rush: treat each broken brick as a coin pickup for a small speed buff chain.
+          coinRushChain = (coinRushWindowTimer > 0) ? (coinRushChain + 1) : 1;
+          coinRushWindowTimer = COIN_RUSH_WINDOW;
+          if (coinRushChain >= COIN_RUSH_TARGET) {
+            coinRushTimer = COIN_RUSH_DURATION;
+            coinRushChain = 0;
+            coinRushWindowTimer = 0;
+            hudBoost.textContent = 'COIN RUSH! SPEED UP';
+          }
           // Time bonus: add seconds to survival timer
           bonusTime += BRICK_TIME_BONUS;
           if (DEBUG_MODE) {
@@ -3811,6 +3828,9 @@ function resetGame() {
   depenFixCount = 0;
   // Fun Pack v1 resets
   resetCombo();
+  coinRushWindowTimer = 0;
+  coinRushChain = 0;
+  coinRushTimer = 0;
   speedWavePhase = 0;
   initMission();
   mission.startTime = 0;
@@ -4182,6 +4202,9 @@ function update() {
   // Compute base elapsed time; bonusTime is added after sweep resolves bricks
   survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
+  if (coinRushWindowTimer > 0) coinRushWindowTimer = Math.max(0, coinRushWindowTimer - FIXED_DT);
+  if (coinRushTimer > 0) coinRushTimer = Math.max(0, coinRushTimer - FIXED_DT);
+  if (coinRushWindowTimer <= 0 && coinRushTimer <= 0) coinRushChain = 0;
   // ── Manual horizontal movement (auto-acceleration + reverse brake) ─────
   // Compute desired move direction from input
   let moveDir = 0;
@@ -4189,7 +4212,8 @@ function update() {
   if (moveRightPressed) moveDir += 1;
 
   // Target speed: holding a direction auto-ramps toward max speed
-  const targetVX = moveDir * PLAYER_MAX_SPEED;
+  const rushMul = coinRushTimer > 0 ? COIN_RUSH_SPEED_MUL : 1.0;
+  const targetVX = moveDir * PLAYER_MAX_SPEED * rushMul;
 
   // Detect reverse-braking: input opposes current velocity
   const reversing = moveDir !== 0 && moveDir * playerVX < 0;
@@ -4704,6 +4728,18 @@ function update() {
     hudComboBar.style.display = 'block';
   } else {
     hudComboBar.style.display = 'none';
+  }
+
+  // ── Coin Rush HUD ───────────────────────────────────
+  if (coinRushTimer > 0) {
+    const secLeft = coinRushTimer.toFixed(1);
+    hudBoost.textContent = `COIN RUSH ⚡ ${secLeft}s`;
+    hudBoost.style.display = 'block';
+  } else if (coinRushWindowTimer > 0 && coinRushChain > 0) {
+    hudBoost.textContent = `Coin chain ${coinRushChain}/${COIN_RUSH_TARGET}`;
+    hudBoost.style.display = 'block';
+  } else {
+    hudBoost.style.display = 'none';
   }
 
   // ── Fun Pack v1: Mission HUD ────────────────────────
