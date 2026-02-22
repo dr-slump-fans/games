@@ -318,6 +318,7 @@ const SHELL_H = 16;
 const SHELL_MOVE_SPEED = 5.5;        // shell sliding speed
 const TURTLE_STOMP_SCORE = 10;       // points for stomping a turtle
 const TURTLE_SHELL_KILL_SCORE = 20;  // points for shell killing another turtle
+const TURTLE_SHELL_STOMP_SCORE = 5;  // points for stomping an idle shell
 const TURTLE_STOMP_BOUNCE_VY = -5.5; // bounce velocity when player stomps turtle
 const TURTLE_SPAWN_CHANCE = 0.30;    // chance to spawn turtle per pipe spawn
 const TURTLE_MIN_SPAWN_GAP = 400;    // min px between turtle spawns
@@ -1841,7 +1842,8 @@ function updateTurtles() {
     }
 
     // ── Edge detection: if walking turtle reaches platform edge, reverse ──
-    if (t.state === 'walk' && t.onGround && t.y < groundY - 5) {
+    // Only for turtles on elevated platforms (feet above main ground level)
+    if (t.state === 'walk' && t.onGround && t.y + th < groundY - 2) {
       // Check if there's ground ahead
       const checkX = t.vx < 0 ? t.x - 2 : t.x + tw + 2;
       const checkY = t.y + th + 4;
@@ -1929,15 +1931,24 @@ function updateTurtles() {
         return true; // signal death
       }
     } else if (t.state === 'shell_idle') {
-      // Kick the shell (if grace period expired)
-      if (t.kickGrace <= 0) {
-        t.state = 'shell_move';
-        // Kick direction: away from player center
-        const playerCX = pb.x + pb.w / 2;
-        const shellCX = t.x + SHELL_W / 2;
-        t.vx = (shellCX >= playerCX) ? SHELL_MOVE_SPEED : -SHELL_MOVE_SPEED;
-        if (DEBUG_MODE) console.log(`%c[Turtle] Shell kicked! dir=${t.vx > 0 ? 'right' : 'left'}`, 'color: #ff9800');
+      if (t.kickGrace > 0) continue; // still in grace period, ignore
+      // Check if stomp from above: award score, bounce, then kick
+      const playerBottom = pb.y + pb.h;
+      const shellCenter = t.y + SHELL_H * 0.4;
+      if (player.vy > 0 && playerBottom <= shellCenter + 4) {
+        // Stomp score + bounce
+        score += TURTLE_SHELL_STOMP_SCORE;
+        spawnScorePopup(t.x, t.y - 10, TURTLE_SHELL_STOMP_SCORE);
+        player.vy = TURTLE_STOMP_BOUNCE_VY;
+        player.onGround = false;
+        if (DEBUG_MODE) console.log(`%c[Turtle] Shell stomped! +${TURTLE_SHELL_STOMP_SCORE} → kick`, 'color: #4caf50');
       }
+      // Kick the shell (stomp or side touch both kick)
+      t.state = 'shell_move';
+      const playerCX = pb.x + pb.w / 2;
+      const shellCX = t.x + SHELL_W / 2;
+      t.vx = (shellCX >= playerCX) ? SHELL_MOVE_SPEED : -SHELL_MOVE_SPEED;
+      if (DEBUG_MODE) console.log(`%c[Turtle] Shell kicked! dir=${t.vx > 0 ? 'right' : 'left'}`, 'color: #ff9800');
     } else if (t.state === 'shell_move') {
       // Moving shell hits player → death
       return true; // signal death
@@ -4154,7 +4165,10 @@ function draw() {
     const tShellIdle = turtles.filter(t => t.state === 'shell_idle').length;
     const tShellMove = turtles.filter(t => t.state === 'shell_move').length;
     const tDead = turtles.filter(t => t.state === 'dead').length;
-    ctx.fillText(`TURTLES:${turtles.length} walk:${tWalk} shell_idle:${tShellIdle} shell_move:${tShellMove} dead:${tDead}`, 4, DESIGN_H - 54);
+    const tWalkSample = turtles.find(t => t.state === 'walk');
+    const tWalkVx = tWalkSample ? tWalkSample.vx.toFixed(1) : '-';
+    const tWalkDir = tWalkSample ? tWalkSample.direction : '-';
+    ctx.fillText(`TURTLES:${turtles.length} walk:${tWalk} idle:${tShellIdle} move:${tShellMove} dead:${tDead} walkVx:${tWalkVx} dir:${tWalkDir}`, 4, DESIGN_H - 54);
     ctx.fillText(`dt:${(_debugDt * 1000).toFixed(1)}ms logicSteps:${_debugLogicSteps} fps(est):${_debugFps.toFixed(1)}`, 4, DESIGN_H - 64);
     ctx.restore();
   }

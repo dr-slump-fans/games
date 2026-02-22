@@ -629,7 +629,8 @@ Ground-walking turtle enemies add a new threat and scoring mechanic. Turtles wal
 |-----------|--------|
 | Player stomps walking turtle (falling from above) | Turtle → `shell_idle`, player bounces up, **+10 points** |
 | Player touches walking turtle from side/below | **Player dies** (Game Over) |
-| Player touches idle shell | Shell starts sliding in kick direction (`shell_move`), **player safe** |
+| Player stomps idle shell (falling from above) | **+5 points**, shell kicked (`shell_move`), player bounces |
+| Player touches idle shell from side | Shell kicked (`shell_move`), **player safe**, no score |
 | Moving shell hits player | **Player dies** (Game Over) |
 | Moving shell hits walking turtle | Other turtle dies, **+20 points** with score popup |
 | Moving shell hits pipe/brick wall | Shell bounces back (reverses direction) |
@@ -663,13 +664,14 @@ This prevents side-collisions from registering as stomps. On stomp, the player r
 | Action | Points |
 |--------|--------|
 | Stomp a turtle | +10 (`TURTLE_STOMP_SCORE`) |
+| Stomp an idle shell | +5 (`TURTLE_SHELL_STOMP_SCORE`) |
 | Shell kills another turtle | +20 (`TURTLE_SHELL_KILL_SCORE`) |
 
 ### Debug (`?debug=1`)
 
 - **Hitbox overlays**: Lime = walking turtle, Teal = idle shell, Red = moving shell
 - **State labels**: Each turtle shows its current state above the hitbox
-- **Bottom status line**: `TURTLES:N walk:N shell_idle:N shell_move:N dead:N`
+- **Bottom status line**: `TURTLES:N walk:N idle:N move:N dead:N walkVx:V dir:D`
 
 ### Constants
 
@@ -682,6 +684,7 @@ This prevents side-collisions from registering as stomps. On stomp, the player r
 | `TURTLE_WALK_SPEED` | `1.0` | Walking speed (px/frame) |
 | `SHELL_MOVE_SPEED` | `5.5` | Shell sliding speed (px/frame) |
 | `TURTLE_STOMP_SCORE` | `10` | Points for stomping |
+| `TURTLE_SHELL_STOMP_SCORE` | `5` | Points for stomping an idle shell |
 | `TURTLE_SHELL_KILL_SCORE` | `20` | Points for shell killing another turtle |
 | `TURTLE_STOMP_BOUNCE_VY` | `-5.5` | Player bounce velocity on stomp |
 | `TURTLE_SPAWN_CHANCE` | `0.30` | Per-frame spawn probability (throttled) |
