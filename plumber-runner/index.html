@@ -2652,7 +2652,8 @@ function updateTurtles() {
         player.onGround = false;
         score += TURTLE_STOMP_SCORE;
         spawnScorePopup(t.x, t.y - 10, TURTLE_STOMP_SCORE);
-        if (DEBUG_MODE) console.log(`%c[Turtle] Stomped! → shell_idle +${TURTLE_STOMP_SCORE}`, 'color: #4caf50');
+        triggerCombo(TURTLE_STOMP_SCORE);
+        if (DEBUG_MODE) console.log(`%c[Turtle] Stomped! → shell_idle +${TURTLE_STOMP_SCORE} combo:${comboCount}`, 'color: #4caf50');
       } else {
         // Side/bottom collision with walking turtle → player dies
         return true; // signal death
@@ -2665,12 +2666,13 @@ function updateTurtles() {
         // STOMP from above → score + shell bounces up and falls off-screen
         score += TURTLE_SHELL_STOMP_SCORE;
         spawnScorePopup(t.x, t.y - 10, TURTLE_SHELL_STOMP_SCORE);
+        triggerCombo(TURTLE_SHELL_STOMP_SCORE);
         player.vy = TURTLE_STOMP_BOUNCE_VY;
         player.onGround = false;
         t.state = 'shell_bounce_dead';
         t.vy = -7;  // upward bounce
         t.vx = 0;
-        if (DEBUG_MODE) console.log(`%c[Turtle] Shell stomped! +${TURTLE_SHELL_STOMP_SCORE} → bounce dead`, 'color: #4caf50');
+        if (DEBUG_MODE) console.log(`%c[Turtle] Shell stomped! +${TURTLE_SHELL_STOMP_SCORE} combo:${comboCount} → bounce dead`, 'color: #4caf50');
       } else {
         // Side touch → kick the shell into shell_move
         t.state = 'shell_move';
@@ -3613,7 +3615,7 @@ function triggerCombo(eventScore) {
   comboTimer = COMBO_WINDOW;
   const bonus = eventScore * comboCount;
   score += bonus;
-  comboPopupText = comboCount >= 2 ? `COMBO x${comboCount}!` : '';
+  comboPopupText = comboCount >= 2 ? `COMBO x${comboCount}! +${bonus}` : '';
   comboPopupTimer = comboCount >= 2 ? COMBO_POPUP_DURATION : 0;
   if (comboCount >= 2) {
     spawnScorePopup(player.x, player.y - 20, bonus);
