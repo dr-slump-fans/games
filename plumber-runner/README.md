@@ -356,6 +356,19 @@ Holding a direction key/button automatically accelerates from zero to max speed 
 | `PLAYER_MAX_SPEED` | `4.5` | Max movement speed (px/frame) |
 | `PLAYER_ACCEL` | `0.07` | Acceleration per frame toward max speed |
 | `PLAYER_DECEL` | `0.22` | Deceleration per frame when no input |
+| `GROUND_BRAKE_DECEL` | `0.55` | Strong reverse-brake deceleration on ground (~2.5× `PLAYER_DECEL`) |
+| `AIR_BRAKE_DECEL` | `0.30` | Weaker reverse-brake deceleration in air |
+
+### Braking & Reverse Movement (Mario-style)
+
+When the player inputs the **opposite direction** of their current velocity (`inputDir × vx < 0`), a dedicated braking phase activates:
+
+- **Ground brake** — uses `GROUND_BRAKE_DECEL` (much stronger than passive decel). The player skids to a stop with a visible `brake` animation showing a skidding pose and dust particles, then accelerates in the new direction. This mimics Mario's turnaround slide.
+- **Air brake** — uses `AIR_BRAKE_DECEL` (weaker than ground but stronger than normal decel). Provides noticeable air-control drag without the abrupt ground stop. No brake animation in air — jump/fall poses are preserved.
+- **Same-direction input** — unchanged smooth ramp-up toward `PLAYER_MAX_SPEED`.
+- **No input** — unchanged passive decel via `PLAYER_DECEL`.
+
+Debug overlay (`debug=1`) shows `vx`, `brake:0/1`, and `onGround:0/1` on the bottom status line.
 
 ## Collision System — Swept AABB (Continuous Collision Detection)
 

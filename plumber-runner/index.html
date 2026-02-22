@@ -253,6 +253,8 @@ const RECENTER_TARGET_X = DESIGN_W * 0.20; // player start position (160px from 
 const PLAYER_MAX_SPEED = 4.5;        // max speed when holding direction (auto ramps up)
 const PLAYER_ACCEL = 0.07;           // acceleration per frame toward max speed (smooth ramp ~1.1s)
 const PLAYER_DECEL = 0.22;           // deceleration per frame when no input
+const GROUND_BRAKE_DECEL = 0.55;     // strong brake when reversing on ground (~2.5x PLAYER_DECEL)
+const AIR_BRAKE_DECEL = 0.30;        // weaker brake when reversing in air
 const CAMERA_LEAD = DESIGN_W * 0.40; // camera keeps player at 40% from left edge
 
 // ── Lip Corner Forgiveness ──────────────────────────
@@ -555,6 +557,7 @@ let justJumped = false;    // true during the frame a jump was initiated; preven
 let moveLeftPressed = false;  // true when left key/button is held
 let moveRightPressed = false; // true when right key/button is held
 let playerVX = 0;             // horizontal velocity (positive = right)
+let playerBraking = false;    // true when reverse-braking (for anim & debug)
 let cameraX = 0;              // world X of camera left edge
 
 // ── Edge-Protection Debug Overlay ──────────────────────
@@ -602,7 +605,7 @@ const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is acti
 const player = {
   x: RECENTER_TARGET_X, y: 0, w: 28, h: 36,
   vy: 0, onGround: true, frame: 0,
-  animState: 'idle',  // idle | run | jump_up | fall | land
+  animState: 'idle',  // idle | run | jump_up | fall | land | brake
   landTimer: 0,       // frames remaining in land animation
   wasOnGround: true,  // track previous frame for landing detection
 };
@@ -658,7 +661,7 @@ function drawPixelRect(x, y, w, h, color) {
 }
 
 // ── Animation State Machine ───────────────────────────
-// States: idle, run, jump_up, fall, land
+// States: idle, run, jump_up, fall, land, brake
 const LAND_DURATION = 6; // frames for land squash animation
 
 function updateAnimState() {
@@ -694,7 +697,11 @@ function updateAnimState() {
   }
 
   // On ground and not landing
-  player.animState = Math.abs(playerVX) > 0.3 ? 'run' : 'idle';
+  if (playerBraking) {
+    player.animState = 'brake';
+  } else {
+    player.animState = Math.abs(playerVX) > 0.3 ? 'run' : 'idle';
+  }
 }
 
 // Draw the player character — original "Pippo" the plumber
@@ -967,6 +974,67 @@ function drawPlayer(px, py, frame) {
     drawPixelRect(x + 15, y + 32, 8, 4, BOOTS_C);
     drawPixelRect(x + 6, y + 32, 3, 1, BOOTS_H);
     drawPixelRect(x + 16, y + 32, 3, 1, BOOTS_H);
+    return;
+  }
+
+  // ── BRAKE: skidding pose, leaning back, one foot forward, dust puffs ──
+  if (st === 'brake') {
+    // Cap — tilted back slightly
+    drawPixelRect(x + 5, y - 2, 18, 3, CAP);
+    drawPixelRect(x + 7, y - 4, 14, 3, CAP);
+    drawPixelRect(x + 9, y - 5, 8, 2, CAP_HI);
+    drawPixelRect(x + 3, y + 1, 22, 2, CAP_SH);
+    drawPixelRect(x + 12, y - 3, 4, 2, BADGE);
+    // Head — leaning back
+    drawPixelRect(x + 6, y + 3, 16, 11, SKIN);
+    drawPixelRect(x + 6, y + 10, 3, 4, SKIN_SH);
+    // Eyes — wide, surprised
+    drawPixelRect(x + 8, y + 4, 4, 4, EYE_W);
+    drawPixelRect(x + 16, y + 4, 4, 4, EYE_W);
+    drawPixelRect(x + 9, y + 5, 2, 3, EYES);
+    drawPixelRect(x + 17, y + 5, 2, 3, EYES);
+    // Nose
+    drawPixelRect(x + 12, y + 7, 5, 4, NOSE);
+    drawPixelRect(x + 13, y + 6, 3, 1, NOSE);
+    // Mustache
+    drawPixelRect(x + 8, y + 10, 12, 2, STACHE);
+    // Mouth — gritting teeth
+    drawPixelRect(x + 11, y + 12, 6, 2, MOUTH);
+    drawPixelRect(x + 12, y + 12, 1, 1, '#ffffff');
+    drawPixelRect(x + 15, y + 12, 1, 1, '#ffffff');
+    // Shirt — leaning back
+    drawPixelRect(x + 7, y + 14, 14, 3, SHIRT);
+    // Overalls — wide stance, skidding
+    drawPixelRect(x + 6, y + 16, 16, 8, OVERALL);
+    drawPixelRect(x + 6, y + 16, 3, 6, OVER_HI);
+    // Straps
+    drawPixelRect(x + 8, y + 14, 3, 3, STRAP);
+    drawPixelRect(x + 17, y + 14, 3, 3, STRAP);
+    drawPixelRect(x + 9, y + 14, 1, 1, BUTTON);
+    drawPixelRect(x + 18, y + 14, 1, 1, BUTTON);
+    // Arms — bracing backward
+    drawPixelRect(x + 22, y + 14, 5, 5, SHIRT);
+    drawPixelRect(x + 24, y + 19, 4, 3, GLOVE);
+    drawPixelRect(x + 1, y + 15, 5, 5, SHIRT);
+    drawPixelRect(x + 0, y + 20, 4, 2, GLOVE);
+    // Front leg — extended forward, skidding
+    drawPixelRect(x + 2, y + 24, 9, 6, OVERALL);
+    drawPixelRect(x + 4, y + 26, 2, 2, OVER_HI);
+    drawPixelRect(x + 0, y + 30, 11, 4, BOOTS_C);
+    drawPixelRect(x + 1, y + 30, 3, 1, BOOTS_H);
+    // Back leg — planted under body
+    drawPixelRect(x + 16, y + 24, 6, 8, OVERALL);
+    drawPixelRect(x + 18, y + 26, 2, 2, OVER_HI);
+    drawPixelRect(x + 16, y + 32, 8, 4, BOOTS_C);
+    drawPixelRect(x + 17, y + 32, 3, 1, BOOTS_H);
+    // Dust puffs from skidding
+    const dustAlpha = 0.4 + Math.sin(frameCount * 0.4) * 0.2;
+    ctx.fillStyle = `rgba(180,160,130,${dustAlpha})`;
+    ctx.fillRect(x - 3, y + 32, 4, 3);
+    ctx.fillRect(x - 5, y + 30, 3, 2);
+    ctx.fillStyle = `rgba(180,160,130,${dustAlpha * 0.6})`;
+    ctx.fillRect(x - 7, y + 31, 3, 2);
+    if (facingLeft) ctx.restore();
     return;
   }
 
@@ -2617,6 +2685,7 @@ function resetGame() {
   moveLeftPressed = false;
   moveRightPressed = false;
   playerVX = 0;
+  playerBraking = false;
   cameraX = 0;
   edgeDebugMsgs = [];
   depenFixCount = 0;
@@ -2993,7 +3062,7 @@ function update() {
   // Compute base elapsed time; bonusTime is added after sweep resolves bricks
   survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
-  // ── Manual horizontal movement (auto-acceleration) ─────
+  // ── Manual horizontal movement (auto-acceleration + reverse brake) ─────
   // Compute desired move direction from input
   let moveDir = 0;
   if (moveLeftPressed) moveDir -= 1;
@@ -3002,16 +3071,35 @@ function update() {
   // Target speed: holding a direction auto-ramps toward max speed
   const targetVX = moveDir * PLAYER_MAX_SPEED;
 
+  // Detect reverse-braking: input opposes current velocity
+  const reversing = moveDir !== 0 && moveDir * playerVX < 0;
+  playerBraking = reversing && Math.abs(playerVX) > 0.15;
+
   // Accelerate / decelerate toward target
   if (moveDir !== 0) {
-    // Accelerating toward target
-    if (playerVX < targetVX) {
-      playerVX = Math.min(targetVX, playerVX + PLAYER_ACCEL);
-    } else if (playerVX > targetVX) {
-      playerVX = Math.max(targetVX, playerVX - PLAYER_ACCEL);
+    if (reversing) {
+      // Reverse brake: strong decel until speed reaches ~0, then normal accel
+      const brakeDecel = player.onGround ? GROUND_BRAKE_DECEL : AIR_BRAKE_DECEL;
+      if (playerVX > 0) {
+        playerVX = Math.max(0, playerVX - brakeDecel);
+      } else {
+        playerVX = Math.min(0, playerVX + brakeDecel);
+      }
+      // Once braked to zero, allow normal acceleration in new direction
+      if (playerVX === 0) {
+        playerVX = moveDir * PLAYER_ACCEL;
+      }
+    } else {
+      // Same direction or starting from zero — normal acceleration
+      if (playerVX < targetVX) {
+        playerVX = Math.min(targetVX, playerVX + PLAYER_ACCEL);
+      } else if (playerVX > targetVX) {
+        playerVX = Math.max(targetVX, playerVX - PLAYER_ACCEL);
+      }
     }
   } else {
-    // No input — decelerate to 0
+    // No input — decelerate to 0 (unchanged)
+    playerBraking = false;
     if (playerVX > 0) {
       playerVX = Math.max(0, playerVX - PLAYER_DECEL);
     } else if (playerVX < 0) {
@@ -3647,7 +3735,7 @@ function draw() {
     ctx.globalAlpha = 1;
     ctx.font = '10px monospace';
     ctx.fillStyle = '#0f0';
-    ctx.fillText(`vx:${playerVX.toFixed(1)} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} cam:${cameraX.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
+    ctx.fillText(`vx:${playerVX.toFixed(1)} brake:${playerBraking ? 1 : 0} onGround:${player.onGround ? 1 : 0} vy:${player.vy.toFixed(1)} y:${player.y.toFixed(0)} cam:${cameraX.toFixed(0)} [SweptAABB]`, 4, DESIGN_H - 4);
     ctx.fillText(`onGround:${player.onGround} x:${player.x.toFixed(0)} dj:${doubleJumpTimer.toFixed(0)}s mush:${mushrooms.length} DEPEN FIX:${depenFixCount}`, 4, DESIGN_H - 14);
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 24);
     ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 34);
