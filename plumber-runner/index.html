@@ -176,6 +176,24 @@ canvas {
   display: none;
   z-index: 13;
 }
+/* ── Theme Chunk System HUD ──────────────────────── */
+#hud-theme {
+  position: absolute; top: 56px; right: 16px;
+  font-family: monospace; font-size: 12px; font-weight: bold;
+  color: #adf; text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+  z-index: 11;
+}
+#hud-theme-announce {
+  position: absolute; top: 22%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 22px; font-weight: bold;
+  color: #fff; text-shadow: 2px 2px 0 #000, 0 0 14px rgba(255,255,255,0.6);
+  pointer-events: none;
+  display: none;
+  z-index: 12;
+  transition: opacity 0.5s ease;
+}
 </style>
 </head>
 <body>
@@ -211,6 +229,8 @@ canvas {
 <div id="hud-mission-complete">MISSION COMPLETE!</div>
 <div id="hud-boss-wave"></div>
 <div id="hud-boss-clear"></div>
+<div id="hud-theme"></div>
+<div id="hud-theme-announce"></div>
 <div id="hud-settings">
   <div class="toggle-btn" id="btn-sfx">SFX ON</div>
   <div class="toggle-btn" id="btn-vib">VIB ON</div>
@@ -348,6 +368,170 @@ const CHUNK_MAX_WIDTH = 900;
 const CHUNK_MAX_CONSEC_DANGER = 2;      // max consecutive danger chunks before forced rest
 const CHUNK_SAFE_INTERVAL = 5;          // every N chunks, guarantee a safe/reward chunk
 const CHUNK_MAX_REROLLS = 5;            // max rerolls per chunk for reachability
+
+// ── Theme Chunk System ──────────────────────────────
+// Themes define visual style and generation biases for sequences of chunks.
+// Each theme lasts 4-8 chunks, then transitions to the next.
+const THEME_NAMES = ['PLAINS', 'CAVE', 'TOWER'];
+const THEME_MIN_CHUNKS = 4;
+const THEME_MAX_CHUNKS = 8;
+const THEME_TRANSITION_CHUNKS = 1;  // first chunk of a new theme is a smooth transition
+const THEME_ANNOUNCE_DURATION = 120; // frames to show theme transition announcement
+
+// Theme-specific weight multipliers (applied on top of difficulty phase weights)
+// Values > 1 increase that chunk type's weight, < 1 decrease it
+const THEME_WEIGHT_MULTS = {
+  PLAINS: { rest: 1.8, single_platform: 1.2, double_platform: 0.5, pipe_mix: 0.3, turtle_zone: 0.7, reward: 1.5 },
+  CAVE:   { rest: 0.5, single_platform: 1.0, double_platform: 1.5, pipe_mix: 1.8, turtle_zone: 0.8, reward: 0.8 },
+  TOWER:  { rest: 0.4, single_platform: 1.3, double_platform: 1.8, pipe_mix: 1.0, turtle_zone: 0.5, reward: 1.2 },
+};
+
+// Theme-specific parameter offsets (added to difficulty phase params)
+const THEME_PARAM_OFFSETS = {
+  PLAINS: { maxPipeH: -20, maxTopH: -20, turtleChanceMult: 0.6, rewardChanceMult: 1.4 },
+  CAVE:   { maxPipeH: 10,  maxTopH: 30,  turtleChanceMult: 1.0, rewardChanceMult: 0.8 },
+  TOWER:  { maxPipeH: 20,  maxTopH: -10, turtleChanceMult: 0.5, rewardChanceMult: 1.1 },
+};
+
+// Theme-specific sky gradient colors for visual distinction
+const THEME_SKY_COLORS = {
+  PLAINS: { top: '#5c94fc', bottom: '#92c4f8' },  // default blue sky
+  CAVE:   { top: '#2a2a3e', bottom: '#3d3d5c' },  // dark cave ceiling
+  TOWER:  { top: '#4a3a6e', bottom: '#7a6a9e' },  // twilight purple
+};
+
+// Theme-specific ground colors
+const THEME_GROUND_COLORS = {
+  PLAINS: { fill: '#c0784a', line: '#a0603a', top: '#8B4513' },
+  CAVE:   { fill: '#555566', line: '#444455', top: '#333344' },
+  TOWER:  { fill: '#887766', line: '#776655', top: '#665544' },
+};
+
+// Theme-specific hill colors
+const THEME_HILL_COLORS = {
+  PLAINS: '#3a9d5c',
+  CAVE:   '#2a3a4c',
+  TOWER:  '#5a4a6c',
+};
+
+// Theme-specific announce text and color
+const THEME_ANNOUNCE = {
+  PLAINS: { text: 'OPEN PLAINS', color: '#5cfc5c' },
+  CAVE:   { text: 'ENTER CAVE',  color: '#8888ff' },
+  TOWER:  { text: 'HIGH TOWER',  color: '#ffaa44' },
+};
+
+// Theme state variables
+let currentTheme = 'PLAINS';
+let themeChunksRemaining = 0;
+let nextTheme = null;
+let themeTransitionActive = false; // true during the first chunk of a new theme
+let themeAnnounceTimer = 0;        // countdown for theme announcement HUD
+let themeAnnounceName = '';        // theme name being announced
+let themeColorLerp = 0;            // 0-1 lerp factor for smooth color transitions
+let themeColorFrom = 'PLAINS';     // previous theme for color interpolation
+let themeColorTarget = 'PLAINS';   // target theme for color interpolation
+
+// Pick a random theme different from the current one
+function pickNextTheme() {
+  const candidates = THEME_NAMES.filter(t => t !== currentTheme);
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+// Initialize theme state for a new game
+function initThemeState() {
+  currentTheme = 'PLAINS';
+  themeChunksRemaining = THEME_MIN_CHUNKS + Math.floor(Math.random() * (THEME_MAX_CHUNKS - THEME_MIN_CHUNKS + 1));
+  nextTheme = pickNextTheme();
+  themeTransitionActive = false;
+  themeAnnounceTimer = 0;
+  themeAnnounceName = '';
+  themeColorLerp = 1;
+  themeColorFrom = 'PLAINS';
+  themeColorTarget = 'PLAINS';
+}
+
+// Advance theme state after each chunk spawn
+function advanceThemeState() {
+  themeChunksRemaining--;
+  themeTransitionActive = false;
+  if (themeChunksRemaining <= 0) {
+    // Switch to next theme
+    themeColorFrom = currentTheme;
+    currentTheme = nextTheme || pickNextTheme();
+    themeColorTarget = currentTheme;
+    themeColorLerp = 0;
+    nextTheme = pickNextTheme();
+    themeChunksRemaining = THEME_MIN_CHUNKS + Math.floor(Math.random() * (THEME_MAX_CHUNKS - THEME_MIN_CHUNKS + 1));
+    themeTransitionActive = true; // first chunk is a transition
+    themeAnnounceTimer = THEME_ANNOUNCE_DURATION;
+    themeAnnounceName = currentTheme;
+  }
+}
+
+// Apply theme weight multipliers to base weights
+function applyThemeWeights(baseWeights, theme, isTransition) {
+  const mults = THEME_WEIGHT_MULTS[theme];
+  const result = {};
+  for (const type of CHUNK_TYPES) {
+    let w = baseWeights[type] * (mults[type] || 1);
+    // During transition, blend toward neutral (reduce extreme biases)
+    if (isTransition) {
+      w = baseWeights[type] * 0.6 + w * 0.4;
+    }
+    result[type] = Math.max(0, w);
+  }
+  return result;
+}
+
+// Apply theme parameter offsets to difficulty params
+function applyThemeParams(diffParams, theme, isTransition) {
+  const offsets = THEME_PARAM_OFFSETS[theme];
+  const result = { ...diffParams };
+  const blend = isTransition ? 0.4 : 1.0;
+  result.maxPipeH = Math.max(60, result.maxPipeH + Math.round(offsets.maxPipeH * blend));
+  result.maxTopH = Math.max(40, result.maxTopH + Math.round(offsets.maxTopH * blend));
+  // Clamp to reachability limits
+  result.maxPipeH = Math.min(result.maxPipeH, CHUNK_PLAYER_MAX_JUMP_H);
+  result.maxTopH = Math.min(result.maxTopH, DESIGN_H - GROUND_H - 42);
+  return result;
+}
+
+// Lerp hex color helper
+function lerpColor(c1, c2, t) {
+  const r1 = parseInt(c1.slice(1, 3), 16), g1 = parseInt(c1.slice(3, 5), 16), b1 = parseInt(c1.slice(5, 7), 16);
+  const r2 = parseInt(c2.slice(1, 3), 16), g2 = parseInt(c2.slice(3, 5), 16), b2 = parseInt(c2.slice(5, 7), 16);
+  const r = Math.round(r1 + (r2 - r1) * t), g = Math.round(g1 + (g2 - g1) * t), b = Math.round(b1 + (b2 - b1) * t);
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
+
+// Get current sky colors (with smooth transition)
+function getThemeSkyColors() {
+  const from = THEME_SKY_COLORS[themeColorFrom];
+  const to = THEME_SKY_COLORS[themeColorTarget];
+  const t = themeColorLerp;
+  return {
+    top: lerpColor(from.top, to.top, t),
+    bottom: lerpColor(from.bottom, to.bottom, t),
+  };
+}
+
+// Get current ground colors (with smooth transition)
+function getThemeGroundColors() {
+  const from = THEME_GROUND_COLORS[themeColorFrom];
+  const to = THEME_GROUND_COLORS[themeColorTarget];
+  const t = themeColorLerp;
+  return {
+    fill: lerpColor(from.fill, to.fill, t),
+    line: lerpColor(from.line, to.line, t),
+    top: lerpColor(from.top, to.top, t),
+  };
+}
+
+// Get current hill color (with smooth transition)
+function getThemeHillColor() {
+  return lerpColor(THEME_HILL_COLORS[themeColorFrom], THEME_HILL_COLORS[themeColorTarget], themeColorLerp);
+}
 
 // Chunk types:
 // 'rest'            – flat ground, no obstacles (breathing room)
@@ -708,7 +892,12 @@ function generateChunk(chunkX, type, diffParams) {
 // Spawn a complete chunk into the game world
 function spawnChunk() {
   const diffParams = getChunkDiffPhase();
+  // Apply theme parameter offsets (pipe heights etc.)
+  const themedParams = applyThemeParams(diffParams, currentTheme, themeTransitionActive);
   let weights = { ...diffParams.weights };
+
+  // Apply theme weight multipliers
+  weights = applyThemeWeights(weights, currentTheme, themeTransitionActive);
 
   // Force rest chunk after too many consecutive danger chunks
   if (consecutiveDangerChunks >= CHUNK_MAX_CONSEC_DANGER) {
@@ -720,13 +909,20 @@ function spawnChunk() {
     weights = { rest: 30, single_platform: 10, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 50 };
   }
 
+  // During theme transition, bias toward safe chunk types
+  if (themeTransitionActive) {
+    weights.rest = Math.max(weights.rest, 25);
+    weights.pipe_mix *= 0.5;
+    weights.double_platform *= 0.5;
+  }
+
   let type = selectChunkType(weights);
   let chunk = null;
   let rerolls = 0;
 
   // Generate and validate, reroll if unreachable
   for (let attempt = 0; attempt <= CHUNK_MAX_REROLLS; attempt++) {
-    chunk = generateChunk(nextChunkX, type, diffParams);
+    chunk = generateChunk(nextChunkX, type, themedParams);
     if (validateChunkReachability(chunk.obstacles, nextChunkX, chunk.width)) {
       rerolls = attempt;
       break;
@@ -742,7 +938,7 @@ function spawnChunk() {
   // Final fallback: force rest chunk
   if (!chunk) {
     type = 'rest';
-    chunk = generateChunk(nextChunkX, type, diffParams);
+    chunk = generateChunk(nextChunkX, type, themedParams);
     rerolls = CHUNK_MAX_REROLLS + 1;
   }
 
@@ -761,10 +957,13 @@ function spawnChunk() {
     }
     if (!overlaps) bricks.push(b);
   }
-  // Spawn turtles from chunk
+  // Spawn turtles from chunk — apply theme turtle chance multiplier
+  const turtleMult = THEME_PARAM_OFFSETS[currentTheme].turtleChanceMult;
   for (const tx of chunk.turtleSpawns) {
     if (tx - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP) {
-      spawnTurtle(tx);
+      if (turtleMult >= 1 || Math.random() < turtleMult) {
+        spawnTurtle(tx);
+      }
     }
   }
 
@@ -783,6 +982,7 @@ function spawnChunk() {
     diffPhase: diffParams.phase,
     rerolls: rerolls,
     reachable: true,
+    theme: currentTheme,
   };
   chunkHistory.push(chunkRecord);
   // Keep only recent history (last 20 chunks)
@@ -803,10 +1003,13 @@ function spawnChunk() {
   // Debug info
   chunkDebugInfo = chunkRecord;
   if (DEBUG_MODE) {
-    console.log(`%c[Chunk] #${chunkId} type=${type} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} rerolls=${rerolls}`, 'color: #42d4f4');
+    console.log(`%c[Chunk] #${chunkId} type=${type} theme=${currentTheme} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} rerolls=${rerolls} themeRemain=${themeChunksRemaining}`, 'color: #42d4f4');
   }
 
   nextChunkX += chunk.width;
+
+  // Advance theme state machine
+  advanceThemeState();
 }
 
 // Initialize first chunks at game start
@@ -819,6 +1022,9 @@ function spawnInitialChunks() {
   nextChunkX = cameraX + DESIGN_W * 0.3; // start generating a bit ahead of player
   chunkDebugInfo = null;
 
+  // Initialize theme state machine
+  initThemeState();
+
   // Generate first rest chunk (safe start)
   const firstChunk = generateChunk(nextChunkX, 'rest', getChunkDiffPhase());
   for (const p of firstChunk.pipes) pipes.push(p);
@@ -827,8 +1033,9 @@ function spawnInitialChunks() {
     pipes.push({ x: nextChunkX + firstChunk.width / 2, h: 0, fromTop: false, scored: false });
   }
   chunkIdCounter++;
-  chunkHistory.push({ id: 1, type: 'rest', x: nextChunkX, width: firstChunk.width, diffPhase: 0, rerolls: 0, reachable: true });
+  chunkHistory.push({ id: 1, type: 'rest', x: nextChunkX, width: firstChunk.width, diffPhase: 0, rerolls: 0, reachable: true, theme: currentTheme });
   nextChunkX += firstChunk.width;
+  advanceThemeState(); // count first chunk
 
   // Generate a couple more chunks ahead
   spawnChunk();
@@ -1044,6 +1251,8 @@ const hudMission = document.getElementById('hud-mission');
 const hudMissionComplete = document.getElementById('hud-mission-complete');
 const hudBossWave = document.getElementById('hud-boss-wave');
 const hudBossClear = document.getElementById('hud-boss-clear');
+const hudTheme = document.getElementById('hud-theme');
+const hudThemeAnnounce = document.getElementById('hud-theme-announce');
 const btnSfx = document.getElementById('btn-sfx');
 const btnVib = document.getElementById('btn-vib');
 
@@ -1750,16 +1959,17 @@ function drawTopPipe(px, ph) {
 // Draw ground with brick pattern
 function drawGround() {
   const groundY = DESIGN_H - GROUND_H;
+  const gc = getThemeGroundColors();
   // Draw ground covering the camera-visible area (in world coords)
   const drawLeft = cameraX - 32;
   const drawW = DESIGN_W + 96;
-  ctx.fillStyle = '#c0784a';
+  ctx.fillStyle = gc.fill;
   ctx.fillRect(drawLeft, groundY, drawW, GROUND_H);
   const brickW = 32;
   const brickH = 16;
   // Align bricks to world grid (camera transform handles visual scrolling)
   const startX = Math.floor(drawLeft / brickW) * brickW;
-  ctx.fillStyle = '#a0603a';
+  ctx.fillStyle = gc.line;
   for (let row = 0; row < Math.ceil(GROUND_H / brickH); row++) {
     const rowOffset = (row % 2) * (brickW / 2);
     for (let col = 0; col < Math.ceil(drawW / brickW) + 4; col++) {
@@ -1769,7 +1979,7 @@ function drawGround() {
       ctx.fillRect(bx, by, 1, brickH);
     }
   }
-  ctx.fillStyle = '#8B4513';
+  ctx.fillStyle = gc.top;
   ctx.fillRect(drawLeft, groundY, drawW, 3);
 }
 
@@ -1789,7 +1999,7 @@ function drawCloud(cx, cy, cw) {
 
 function drawHill(hx, hw, hh) {
   const groundY = DESIGN_H - GROUND_H;
-  ctx.fillStyle = '#3a9d5c';
+  ctx.fillStyle = getThemeHillColor();
   ctx.beginPath();
   ctx.moveTo(hx, groundY);
   ctx.quadraticCurveTo(hx + hw / 2, groundY - hh, hx + hw, groundY);
@@ -4055,6 +4265,13 @@ function update() {
   // Boss clear popup countdown
   if (bossWaveClearTimer > 0) bossWaveClearTimer--;
 
+  // Theme announce timer countdown
+  if (themeAnnounceTimer > 0) themeAnnounceTimer--;
+  // Smooth theme color transition (lerp toward 1 over ~2 seconds)
+  if (themeColorLerp < 1) {
+    themeColorLerp = Math.min(1, themeColorLerp + 0.008); // ~125 frames ≈ 2s
+  }
+
   // Fun Pack v1: Speed wave phase (kept for HUD/debug display)
   speedWavePhase = (survivalTime / SPEED_WAVE_PERIOD) * Math.PI * 2;
   // No auto-scroll: camera follows player instead
@@ -4513,13 +4730,30 @@ function update() {
   } else {
     hudBossClear.style.display = 'none';
   }
+
+  // ── Theme Chunk System HUD ──────────────────────────
+  hudTheme.textContent = `THEME: ${currentTheme}`;
+  const themeAnnInfo = THEME_ANNOUNCE[currentTheme];
+  hudTheme.style.color = themeAnnInfo ? themeAnnInfo.color : '#adf';
+
+  // Theme transition announcement
+  if (themeAnnounceTimer > 0 && themeAnnounceName) {
+    const ann = THEME_ANNOUNCE[themeAnnounceName];
+    hudThemeAnnounce.textContent = ann ? ann.text : themeAnnounceName;
+    hudThemeAnnounce.style.color = ann ? ann.color : '#fff';
+    hudThemeAnnounce.style.display = 'block';
+    hudThemeAnnounce.style.opacity = Math.min(1, themeAnnounceTimer / 30);
+  } else {
+    hudThemeAnnounce.style.display = 'none';
+  }
 }
 
 function draw() {
-  // Sky gradient
+  // Sky gradient (theme-aware)
+  const themeSky = getThemeSkyColors();
   const grad = ctx.createLinearGradient(0, 0, 0, DESIGN_H - GROUND_H);
-  grad.addColorStop(0, '#5c94fc');
-  grad.addColorStop(1, '#92c4f8');
+  grad.addColorStop(0, themeSky.top);
+  grad.addColorStop(1, themeSky.bottom);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
 
@@ -4689,9 +4923,13 @@ function draw() {
         ctx.setLineDash([]);
         ctx.fillStyle = '#ff0';
         ctx.fillText(`#${ch.id} ${ch.type}`, chunkScreenX + 3, 12);
+        if (ch.theme) {
+          ctx.fillStyle = '#adf';
+          ctx.fillText(ch.theme, chunkScreenX + 3, 22);
+        }
         if (ch.rerolls > 0) {
           ctx.fillStyle = '#f80';
-          ctx.fillText(`reroll:${ch.rerolls}`, chunkScreenX + 3, 22);
+          ctx.fillText(`reroll:${ch.rerolls}`, chunkScreenX + 3, ch.theme ? 32 : 22);
         }
       }
     }
@@ -4722,6 +4960,7 @@ function draw() {
     const cdi = chunkDebugInfo;
     const chunkPhaseNames = ['Tutorial', 'Medium', 'Hard', 'Max'];
     ctx.fillText(`CHUNK:${cdi ? '#' + cdi.id + ' ' + cdi.type : '-'} PHASE:${cdi ? chunkPhaseNames[cdi.diffPhase] || cdi.diffPhase : '-'} REROLLS:${cdi ? cdi.rerolls : 0} NEXT_X:${Math.round(nextChunkX)} TOTAL:${chunkIdCounter} CONSEC_DANGER:${consecutiveDangerChunks}`, 4, DESIGN_H - 74);
+    ctx.fillText(`THEME:${currentTheme} REMAIN:${themeChunksRemaining} NEXT:${nextTheme || '-'} TRANSITION:${themeTransitionActive ? 'YES' : 'NO'} COLOR_LERP:${themeColorLerp.toFixed(2)}`, 4, DESIGN_H - 84);
     ctx.restore();
   }
 }
@@ -4796,6 +5035,7 @@ function showOverlay(title, msg, sc) {
   hudMissionComplete.style.display = 'none';
   hudBossWave.style.display = 'none';
   hudBossClear.style.display = 'none';
+  hudThemeAnnounce.style.display = 'none';
 }
 
 function hideOverlay() {

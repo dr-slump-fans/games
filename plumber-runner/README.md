@@ -117,6 +117,93 @@ When debug mode is active, the chunk system adds:
 | `CHUNK_SAFE_INTERVAL` | `5` | Every N chunks, guarantee a safe chunk |
 | `CHUNK_MAX_REROLLS` | `5` | Max rerolls per chunk for reachability |
 
+## Theme Chunk System
+
+The level generator uses a **theme state machine** to create distinct visual and gameplay segments. Instead of uniform difficulty throughout, the world cycles through three themes that alter chunk selection weights, obstacle parameters, and visual style.
+
+### Themes
+
+| Theme | Style | Key Characteristics |
+|-------|-------|---------------------|
+| **PLAINS** | Open, relaxed | More rest/reward chunks, lower pipe heights (-20 px), fewer turtles (60%), wider spacing |
+| **CAVE** | Claustrophobic, rhythmic | More pipe_mix and double_platform, higher ceiling pipes (+30 px maxTopH), short-distance rhythm jumps |
+| **TOWER** | Vertical, layered | Taller bottom pipes (+20 px), more double_platform (staircase), fewer turtles (50%), clear vertical layers |
+
+### Theme Cycling
+
+- Each theme lasts **4–8 chunks** (randomly chosen)
+- When a theme expires, a different theme is selected at random
+- The **first chunk** of each new theme is a **transition chunk**: weight biases are softened (40% theme / 60% base), danger chunks are suppressed, and a `rest` weight floor of 25 is guaranteed — this prevents sudden difficulty spikes at theme boundaries
+
+### Weight Multipliers
+
+Each theme applies multipliers to the base difficulty-phase weights:
+
+| Type | PLAINS | CAVE | TOWER |
+|------|--------|------|-------|
+| `rest` | 1.8x | 0.5x | 0.4x |
+| `single_platform` | 1.2x | 1.0x | 1.3x |
+| `double_platform` | 0.5x | 1.5x | 1.8x |
+| `pipe_mix` | 0.3x | 1.8x | 1.0x |
+| `turtle_zone` | 0.7x | 0.8x | 0.5x |
+| `reward` | 1.5x | 0.8x | 1.2x |
+
+### Parameter Offsets
+
+| Parameter | PLAINS | CAVE | TOWER |
+|-----------|--------|------|-------|
+| `maxPipeH` | -20 px | +10 px | +20 px |
+| `maxTopH` | -20 px | +30 px | -10 px |
+| Turtle spawn chance | 60% | 100% | 50% |
+| Reward brick mult | 1.4x | 0.8x | 1.1x |
+
+All parameter offsets are clamped to reachability limits (`CHUNK_PLAYER_MAX_JUMP_H` for pipe height, 42 px min clearance for ceiling pipes).
+
+### Reachability Safety
+
+Theme biases do **not** bypass any existing safety rules:
+
+- **Reachability validation + reroll** still runs on every chunk
+- **Max 2 consecutive danger chunks** rule still forces rest/easy
+- **Every 5 chunks safe chunk guarantee** still applies
+- Transition chunks are biased toward safe types
+- Parameter offsets are clamped to physics-derived limits
+
+### Visual Feedback
+
+Each theme has distinct visual styling that transitions smoothly (~2 seconds) between themes:
+
+| Element | PLAINS | CAVE | TOWER |
+|---------|--------|------|-------|
+| Sky gradient | Blue (#5c94fc → #92c4f8) | Dark navy (#2a2a3e → #3d3d5c) | Twilight purple (#4a3a6e → #7a6a9e) |
+| Ground | Brown (#c0784a) | Grey-blue (#555566) | Sandy (#887766) |
+| Hills | Green (#3a9d5c) | Dark blue (#2a3a4c) | Purple (#5a4a6c) |
+
+### HUD
+
+- **`THEME: PLAINS`** — shown in the top-right, color-coded per theme
+- **`OPEN PLAINS`** / **`ENTER CAVE`** / **`HIGH TOWER`** — center-screen announcement on theme change, fades out over ~2 seconds
+
+### Debug (`?debug=1`)
+
+Bottom status line adds:
+- `THEME:PLAINS` — current active theme
+- `REMAIN:N` — chunks remaining in current theme
+- `NEXT:CAVE` — next theme that will activate
+- `TRANSITION:YES/NO` — whether current chunk is a transition chunk
+- `COLOR_LERP:0.XX` — visual color transition progress (0→1)
+
+Chunk boundary markers also show the theme name for each chunk.
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `THEME_MIN_CHUNKS` | `4` | Minimum chunks per theme |
+| `THEME_MAX_CHUNKS` | `8` | Maximum chunks per theme |
+| `THEME_TRANSITION_CHUNKS` | `1` | Number of transition chunks at theme start |
+| `THEME_ANNOUNCE_DURATION` | `120` | Frames to show theme announcement (~2s) |
+
 ## Jump Mechanics
 
 The jump system uses a **short-tap / long-press** design:
