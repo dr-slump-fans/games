@@ -1386,6 +1386,7 @@ let fragments = [];
 // ── Score popups (floating +5 text) ───────────────────
 // Each popup: { x, y, text, life }
 let scorePopups = [];
+let milestonePipeCount = 0;  // counts pipes for milestone bonus
 
 // ── Drawing helpers ────────────────────────────────────
 
@@ -3775,6 +3776,7 @@ function resetGame() {
   bricks = [];
   fragments = [];
   scorePopups = [];
+  milestonePipeCount = 0;
   timeBonusPopups = [];
   mushrooms = [];
   turtles = [];
@@ -4533,6 +4535,11 @@ function update() {
     if (!pipe.scored && pipe.x + LIP_W < player.x) {
       pipe.scored = true;
       score++;
+      milestonePipeCount++;
+      if (milestonePipeCount % 10 === 0) {
+        score += 5;
+        scorePopups.push({ x: player.x, y: player.y - 30, text: 'MILESTONE +5', life: 60 });
+      }
     }
   }
 
