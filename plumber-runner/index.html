@@ -1351,6 +1351,7 @@ const FLAGPOLE_W = 16;              // pole width
 const FLAGPOLE_H = 200;             // pole height (from ground up)
 const FLAGPOLE_FLAG_W = 40;         // flag rectangle width
 const FLAGPOLE_FLAG_H = 30;         // flag rectangle height
+const LEVEL_CLEAR_BONUS = 50;       // one-time score bonus when touching flagpole
 let flagpoleX = 0;                  // world X of the flagpole
 let levelCleared = false;           // true once player touches flagpole
 let levelClearTimer = 0;            // frames since level was cleared
@@ -4565,6 +4566,9 @@ function update() {
     if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, fpX, fpY, FLAGPOLE_W, FLAGPOLE_H)) {
       levelCleared = true;
       levelClearTimer = 0;
+      score += LEVEL_CLEAR_BONUS;
+      spawnScorePopup(pb.x + pb.w / 2, pb.y - 8, LEVEL_CLEAR_BONUS);
+      scorePopups[scorePopups.length - 1].text = `LEVEL CLEAR +${LEVEL_CLEAR_BONUS}`;
       return;
     }
   }
