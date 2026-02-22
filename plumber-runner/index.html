@@ -1345,6 +1345,16 @@ const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is acti
 let turtles = [];
 let lastTurtleSpawnX = -9999;  // tracks X of last turtle spawn to enforce gap
 
+// ── Flagpole / Level Clear ──────────────────────────────
+const FLAGPOLE_DISTANCE = 5000;     // world X where flagpole spawns
+const FLAGPOLE_W = 16;              // pole width
+const FLAGPOLE_H = 200;             // pole height (from ground up)
+const FLAGPOLE_FLAG_W = 40;         // flag rectangle width
+const FLAGPOLE_FLAG_H = 30;         // flag rectangle height
+let flagpoleX = 0;                  // world X of the flagpole
+let levelCleared = false;           // true once player touches flagpole
+let levelClearTimer = 0;            // frames since level was cleared
+
 // ── Player ─────────────────────────────────────────────
 const player = {
   x: RECENTER_TARGET_X, y: 0, w: 28, h: 36,
@@ -3847,6 +3857,10 @@ function resetGame() {
   bossWaveStepCounter = 0;
   bossWaveNextTrigger = BOSS_WAVE_INTERVAL;
   bossCountdownLastSec = -1;
+  // Flagpole / level clear reset
+  levelCleared = false;
+  levelClearTimer = 0;
+  flagpoleX = FLAGPOLE_DISTANCE;
   initClouds();
   initHills();
   // Seed initial chunks (replaces old spawnInitialPipes)
@@ -4197,6 +4211,7 @@ function spawnPipe() {
 
 function update() {
   if (state !== 'playing') return;
+  if (levelCleared) { levelClearTimer++; return; }
 
   frameCount++;
   // Compute base elapsed time; bonusTime is added after sweep resolves bricks
@@ -4541,6 +4556,19 @@ function update() {
     }
   }
 
+  // ── Flagpole collision check ─────────────────────────
+  {
+    const pb = getPlayerHitbox();
+    const groundY = DESIGN_H - GROUND_H;
+    const fpX = flagpoleX;
+    const fpY = groundY - FLAGPOLE_H;
+    if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, fpX, fpY, FLAGPOLE_W, FLAGPOLE_H)) {
+      levelCleared = true;
+      levelClearTimer = 0;
+      return;
+    }
+  }
+
   // ── Phase 5: Death checks (after obstacles moved) ────
   // Check crush death
   if (checkCrush()) {
@@ -4868,6 +4896,24 @@ function draw() {
     }
   }
 
+  // Flagpole
+  {
+    const groundY = DESIGN_H - GROUND_H;
+    const fpX = flagpoleX;
+    const fpY = groundY - FLAGPOLE_H;
+    // Pole
+    ctx.fillStyle = '#888';
+    ctx.fillRect(fpX, fpY, FLAGPOLE_W, FLAGPOLE_H);
+    // Ball on top
+    ctx.fillStyle = '#ff0';
+    ctx.beginPath();
+    ctx.arc(fpX + FLAGPOLE_W / 2, fpY, 8, 0, Math.PI * 2);
+    ctx.fill();
+    // Flag
+    ctx.fillStyle = '#0a0';
+    ctx.fillRect(fpX + FLAGPOLE_W, fpY + 10, FLAGPOLE_FLAG_W, FLAGPOLE_FLAG_H);
+  }
+
   // Player
   if (state === 'playing' || state === 'dead') {
     drawPlayer(player.x, player.y, player.frame);
@@ -4889,6 +4935,26 @@ function draw() {
   drawTimeBonusPopups();
 
   ctx.restore(); // end camera transform
+
+  // ── Level Clear overlay ────────────────────────────────
+  if (levelCleared) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+    ctx.font = 'bold 36px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('LEVEL CLEAR', DESIGN_W / 2, DESIGN_H / 2 - 10);
+    ctx.font = '18px monospace';
+    const tMins = Math.floor(survivalTime / 60);
+    const tSecs = Math.floor(survivalTime % 60);
+    const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
+    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, DESIGN_W / 2, DESIGN_H / 2 + 25);
+    ctx.font = '14px monospace';
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('Press any key to restart', DESIGN_W / 2, DESIGN_H / 2 + 55);
+    ctx.restore();
+  }
 
   // ── Edge-Protection Debug Overlay (always visible) ────
   // Show EDGE-FORGIVE / WALL-NUDGE messages at top-left when triggered
@@ -5112,6 +5178,7 @@ function startGame() {
 
 // ── Input ──────────────────────────────────────────────
 function onJumpDown() {
+  if (levelCleared) { startGame(); return; }
   if (state === 'dead') { startGame(); return; }
   if (state === 'title') { startGame(); jumpPressed = true; return; }
   jumpPressed = true;
@@ -5121,6 +5188,7 @@ function onJumpUp() {
   jumpConsumed = false;
 }
 function onMoveLeftDown() {
+  if (levelCleared) { startGame(); return; }
   if (state === 'dead') { startGame(); return; }
   if (state === 'title') { startGame(); }
   moveLeftPressed = true;
@@ -5129,6 +5197,7 @@ function onMoveLeftUp() {
   moveLeftPressed = false;
 }
 function onMoveRightDown() {
+  if (levelCleared) { startGame(); return; }
   if (state === 'dead') { startGame(); return; }
   if (state === 'title') { startGame(); }
   moveRightPressed = true;
