@@ -332,6 +332,10 @@ const COIN_BASE_FREQ = 988;          // B5 — base coin sound frequency
 const BLOCK_BUMP_FRAMES = 8;         // total frames for bump animation
 const BLOCK_BUMP_HEIGHT = 6;         // max upward pixel offset during bump
 
+// ── Hidden Block Constants ──────────────────────────
+const HIDDEN_BLOCK_SCORE = 10;        // points awarded when a hidden block is revealed
+const HIDDEN_BLOCK_CHANCE = 0.20;     // chance a chunk spawns a hidden block (shortcut stepping stone)
+
 // ── Special Brick & Mushroom Constants ───────────────
 const SPECIAL_BRICK_CHANCE = 0.25;   // chance a stepping-stone brick becomes a special brick
 const MUSHROOM_W = 20;
@@ -752,6 +756,17 @@ function generateChunk(chunkX, type, diffParams) {
           result.obstacles.push({ type: 'brick', x: bx2, y: by2 });
         }
       }
+
+      // Hidden block shortcut: placed higher up near pipe top as a secret stepping stone
+      if (pipeH >= 100 && Math.random() < HIDDEN_BLOCK_CHANCE) {
+        const hbx = pipeX - 40 - Math.random() * 50;
+        // Place at 70-90% of pipe height — reachable with a full jump, acts as shortcut to pipe top
+        const hbH = pipeH * (0.70 + Math.random() * 0.20);
+        const hby = groundY - hbH;
+        if (hby > 30 && hbx > chunkX + 30) {
+          result.bricks.push(makeHiddenBrick(hbx, hby));
+        }
+      }
       break;
     }
 
@@ -824,6 +839,17 @@ function generateChunk(chunkX, type, diffParams) {
           const h2 = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
           result.pipes.push({ x: pipe2X, h: h2, fromTop: false, scored: false });
           result.obstacles.push({ type: 'pipe_bottom', x: pipe2X, h: h2 });
+        }
+      }
+
+      // Hidden block shortcut: secret stepping stone for pipe_mix with tall pipes
+      if (bottomH >= TALL_PIPE_THRESHOLD && Math.random() < HIDDEN_BLOCK_CHANCE) {
+        const hbx = pipeX + LIP_W + 20 + Math.random() * 60;
+        // Place at 60-80% of pipe height — hidden stepping stone past the pipe
+        const hbH = bottomH * (0.60 + Math.random() * 0.20);
+        const hby = groundY - hbH;
+        if (hby > 30 && hbx < chunkX + width - 50) {
+          result.bricks.push(makeHiddenBrick(hbx, hby));
         }
       }
       break;
@@ -973,10 +999,13 @@ function spawnChunk() {
     pipes.push(p);
   }
   for (const b of chunk.bricks) {
+    // Hidden bricks skip overlap check (they're non-solid until revealed)
+    if (b.hidden) { bricks.push(b); continue; }
     // Prevent overlap with existing bricks/pipes
     let overlaps = false;
     for (const existing of bricks) {
       if (existing.broken) continue;
+      if (existing.hidden && !existing.revealed) continue;
       if (rectsOverlap(b.x, b.y, b.w, b.h, existing.x - 8, existing.y - 8, existing.w + 16, existing.h + 16)) {
         overlaps = true; break;
       }
@@ -1535,6 +1564,12 @@ function makeBrick(x, y, specialChance) {
   const isSpecial = Math.random() < specialChance;
   const isQuestion = !isSpecial && Math.random() < QUESTION_BLOCK_CHANCE;
   return { x, y, w: BRICK_W, h: BRICK_H, broken: false, special: isSpecial, question: isQuestion, used: false };
+}
+
+// Creates a hidden block. Invisible & non-solid until revealed by head bump from below.
+// Once revealed, becomes a permanent solid platform (like a used question block).
+function makeHiddenBrick(x, y) {
+  return { x, y, w: BRICK_W, h: BRICK_H, broken: false, special: false, question: false, used: false, hidden: true, revealed: false };
 }
 
 // ── Drawing helpers ────────────────────────────────────
@@ -2293,6 +2328,29 @@ function drawUsedBlock(bx, by) {
   ctx.strokeRect(x + 0.5, y + 0.5, BRICK_W - 1, BRICK_H - 1);
 }
 
+// ── Draw revealed hidden block (teal/cyan metallic — secret found!) ─
+function drawRevealedHiddenBlock(bx, by) {
+  const x = Math.round(bx);
+  const y = Math.round(by);
+  // Main body — teal metallic
+  ctx.fillStyle = '#3a8a8a';
+  ctx.fillRect(x, y, BRICK_W, BRICK_H);
+  // Highlight strip (top)
+  ctx.fillStyle = '#5ababa';
+  ctx.fillRect(x + 1, y + 1, BRICK_W - 2, 3);
+  // Shadow strip (bottom)
+  ctx.fillStyle = '#2a6a6a';
+  ctx.fillRect(x + 1, y + BRICK_H - 3, BRICK_W - 2, 2);
+  // "!" mark in center (secret found indicator)
+  ctx.fillStyle = '#e0f0f0';
+  ctx.fillRect(x + 15, y + 5, 2, 8);   // vertical bar
+  ctx.fillRect(x + 15, y + 15, 2, 2);  // dot
+  // Outline
+  ctx.strokeStyle = '#1a4a4a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, BRICK_W - 1, BRICK_H - 1);
+}
+
 // ── Coin Pop Animation ──────────────────────────────────
 // Each coinPop: { x, y, vy, life }
 function spawnCoinPop(x, y) {
@@ -2500,6 +2558,7 @@ function spawnMushroom(bx, by) {
   // Ensure spawn position doesn't overlap unbroken bricks above
   for (const brick of bricks) {
     if (brick.broken) continue;
+    if (brick.hidden && !brick.revealed) continue;
     if (rectsOverlap(spawnX, spawnY, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
       spawnY = brick.y - MUSHROOM_H - 2;
     }
@@ -2621,6 +2680,7 @@ function updateMushrooms() {
     // Bounce off unbroken bricks (v2 improvement)
     for (const brick of bricks) {
       if (brick.broken) continue;
+      if (brick.hidden && !brick.revealed) continue;
       if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
         if (m.vy > 0 && m.y + MUSHROOM_H - m.vy <= brick.y + 2) {
           m.y = brick.y - MUSHROOM_H;
@@ -2666,6 +2726,7 @@ function updateMushrooms() {
     }
     for (const brick of bricks) {
       if (brick.broken) continue;
+      if (brick.hidden && !brick.revealed) continue;
       if (rectsOverlap(m.x, m.y, MUSHROOM_W, MUSHROOM_H, brick.x, brick.y, brick.w, brick.h)) {
         stuck = true;
         const overlapLeft = (m.x + MUSHROOM_W) - brick.x;
@@ -2810,6 +2871,7 @@ function updateTurtles() {
 
     for (const brick of bricks) {
       if (brick.broken) continue;
+      if (brick.hidden && !brick.revealed) continue;
       if (!rectsOverlap(t.x, t.y, tw, th, brick.x, brick.y, brick.w, brick.h)) continue;
       if (t.vy > 0 && t.y + th - t.vy <= brick.y + 2) {
         t.y = brick.y - th;
@@ -2847,6 +2909,7 @@ function updateTurtles() {
       if (!hasGround) {
         for (const brick of bricks) {
           if (brick.broken) continue;
+          if (brick.hidden && !brick.revealed) continue;
           if (rectsOverlap(checkX, checkY, probeW, probeH, brick.x, brick.y, brick.w, brick.h)) {
             hasGround = true;
             break;
@@ -3000,6 +3063,7 @@ function spawnTurtle(spawnX) {
   }
   for (const brick of bricks) {
     if (brick.broken) continue;
+    if (brick.hidden && !brick.revealed) continue;
     if (rectsOverlap(spawnX, ty, TURTLE_W, TURTLE_H, brick.x, brick.y, brick.w, brick.h)) {
       return; // skip spawn — overlaps a brick
     }
@@ -3260,9 +3324,10 @@ function gatherCollisionRects() {
     }
   }
 
-  // Bricks
+  // Bricks (hidden unrevealed bricks are non-solid — skip them)
   for (const brick of bricks) {
     if (brick.broken) continue;
+    if (brick.hidden && !brick.revealed) continue;
     rects.push({ x: brick.x, y: brick.y, w: brick.w, h: brick.h, type: 'brick', brickRef: brick });
   }
 
@@ -3726,6 +3791,7 @@ function checkStandingSupport() {
 
   for (const brick of bricks) {
     if (brick.broken) continue;
+    if (brick.hidden && !brick.revealed) continue;
     if (Math.abs(feetY - brick.y) < 3 &&
         pb.x + pb.w > brick.x + 2 && pb.x < brick.x + brick.w - 2) {
       return brick.y;
@@ -3752,6 +3818,7 @@ function checkCrush() {
     }
     for (const brick of bricks) {
       if (brick.broken) continue;
+      if (brick.hidden && !brick.revealed) continue;
       if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, brick.x, brick.y, brick.w, brick.h)) {
         return true;
       }
@@ -4786,6 +4853,31 @@ function update() {
   const preResolveVY = player.vy; // save for perfect landing detection
   const result = resolveSweptMovement(player.vy, playerVX);
 
+  // ── Hidden Block reveal check ─────────────────────────
+  // Hidden blocks are non-solid, so swept movement passes through them.
+  // Detect head-bump trigger: player was moving upward and head overlaps a hidden block.
+  if (preResolveVY < 0) {
+    const pb = getPlayerHitbox();
+    for (const brick of bricks) {
+      if (!brick.hidden || brick.revealed || brick.broken) continue;
+      // Check if player head (top edge) overlaps the hidden brick's bottom region
+      if (pb.x + pb.w > brick.x + 2 && pb.x < brick.x + brick.w - 2 &&
+          pb.y < brick.y + brick.h && pb.y + pb.h * 0.4 > brick.y) {
+        // Reveal the hidden block
+        brick.revealed = true;
+        brick.bumpTimer = BLOCK_BUMP_FRAMES;
+        score += HIDDEN_BLOCK_SCORE;
+        spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, HIDDEN_BLOCK_SCORE);
+        triggerCombo(HIDDEN_BLOCK_SCORE);
+        // Stop upward movement (bonk)
+        player.vy = Math.abs(player.vy) * 0.4;
+        // SFX: reuse coin pop sound for satisfying reveal feedback
+        sfxCoinPop(0);
+        break; // only reveal one per frame
+      }
+    }
+  }
+
   // Recompute survivalTime AFTER sweep so brick bonus is reflected immediately in HUD
   survivalTime = frameCount / 60 + bonusTime;
   updateDifficultyInfo();
@@ -5255,6 +5347,15 @@ function draw() {
 
   // Breakable bricks & question blocks
   for (const brick of bricks) {
+    // Hidden blocks: invisible until revealed
+    if (brick.hidden) {
+      if (brick.revealed) {
+        const by = brick.y + getBumpOffset(brick);
+        drawRevealedHiddenBlock(brick.x, by);
+      }
+      // Unrevealed hidden blocks: draw nothing (invisible)
+      continue;
+    }
     const by = brick.y + getBumpOffset(brick);  // visual-only bump offset
     if (brick.question) {
       if (brick.used) {
@@ -5401,10 +5502,17 @@ function draw() {
       }
     }
 
-    // Brick hitboxes (yellow / magenta for special)
+    // Brick hitboxes (yellow / magenta for special, dashed teal for hidden)
     for (const brick of bricks) {
       if (brick.broken) continue;
-      ctx.strokeStyle = brick.question ? '#0ff' : brick.special ? '#f0f' : '#ff0';
+      if (brick.hidden && !brick.revealed) {
+        ctx.strokeStyle = 'rgba(0,200,200,0.4)';
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
+        ctx.setLineDash([]);
+        continue;
+      }
+      ctx.strokeStyle = (brick.hidden && brick.revealed) ? '#0aa' : brick.question ? '#0ff' : brick.special ? '#f0f' : '#ff0';
       ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
     }
 

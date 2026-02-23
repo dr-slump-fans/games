@@ -1275,6 +1275,49 @@ Supplemental random turtle spawning is now gated by a distance-based rhythm cycl
 - Chunk-based turtle placement logic — unchanged (rhythm only gates the supplemental random spawner)
 - Shell bounce cooldown and anti-sticking — unchanged
 
+## Hidden Blocks & Lightweight Hidden Route (Step 1)
+
+Secret blocks that are invisible until the player discovers them by head-bumping from below — a classic hidden-item mechanic that rewards exploration.
+
+### Hidden Block Mechanic
+
+Hidden blocks are **invisible and non-solid** by default. The player can walk and jump through them freely. When the player's head hits a hidden block from below while jumping (ascending), the block is **revealed**:
+
+1. The block becomes **visible** — drawn as a distinctive teal/cyan metallic block with a "!" mark
+2. The block becomes **permanently solid** — acts as a platform (like a used question block)
+3. A **bump animation** plays (same sine-based pop as question blocks)
+4. **+10 score** is awarded with a floating popup
+5. A **coin pop SFX** plays for satisfying audio feedback
+6. The player **bounces downward** (vy reversed at 40%) — standard "bonk" feel
+
+### Hidden Route Entry Points
+
+Hidden blocks are placed in `single_platform` and `pipe_mix` chunks as **shortcut stepping stones**:
+
+- **`single_platform`**: When pipe height >= 100 px, 20% chance to place a hidden block at 70–90% of pipe height, 40–90 px left of the pipe. If revealed, provides a direct shortcut to the pipe top without needing the normal stepping-stone bricks.
+- **`pipe_mix`**: When pipe height >= 140 px (tall pipe threshold), 20% chance to place a hidden block at 60–80% of pipe height, 20–80 px right of the pipe lip. If revealed, gives a shortcut stepping point past the pipe.
+
+### Fairness Rules
+
+- **Optional**: All levels are completable without discovering any hidden blocks — they're purely bonus shortcuts
+- **Non-obstructive**: Unrevealed hidden blocks have no collision — they can't trap, block, or crush the player
+- **Reachable**: All hidden block positions are within the player's jump range (max 150 px jump height)
+- **No death traps**: Hidden blocks are placed at safe positions, never near screen edges or in squeeze corridors
+- **Enemies pass through**: Unrevealed hidden blocks don't interact with turtles, mushrooms, or shells
+
+### Debug (`?debug=1`)
+
+- **Dashed teal outline**: Unrevealed hidden blocks are shown with a semi-transparent dashed teal rectangle
+- **Solid teal outline**: Revealed hidden blocks show a solid teal hitbox outline
+- All existing debug overlays (chunk markers, brick hitboxes, etc.) continue to work
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `HIDDEN_BLOCK_SCORE` | `10` | Points awarded when a hidden block is revealed |
+| `HIDDEN_BLOCK_CHANCE` | `0.20` | Chance per eligible chunk to spawn a hidden block |
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.
