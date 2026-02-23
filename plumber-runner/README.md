@@ -1774,6 +1774,38 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.6.7 Step 2 — 4th Badge Challenge + Unlock Feedback
+
+### 4th Badge → No Checkpoint
+- Replaced **Speed Runner** (≤90s) with a more challenging badge: **No Checkpoint** — clear the level without activating the checkpoint flag
+- Updated badge table:
+  | Badge | Condition |
+  |---|---|
+  | **First Clear** | Clear the level for the first time |
+  | **Three Stars** | Earn 3 stars in a single run |
+  | **No Death** | Clear with 0 deaths |
+  | **No Checkpoint** | Clear without using checkpoint |
+
+### Badge Unlock Feedback on LEVEL CLEAR
+- When new badges are unlocked during a clear, a gold pulsing text line shows on the clear screen (e.g. "🏅 NEW: No Death, No Checkpoint")
+- Gentle opacity pulse animation; restart prompt shifts down to make room
+- If no new badges, nothing is shown — no clutter
+
+### Title Screen Badge Display
+- Unlocked badges now shown in **gold** (`#ffd700`) with ✓ prefix
+- Locked badges shown in **dark grey** (`#666`) with ☐ prefix and description hint
+- Makes it easy to distinguish earned vs remaining at a glance
+
+### Stability
+- `newlyUnlockedBadges` properly reset in `resetGame()`
+- All localStorage operations remain try/catch wrapped
+- No changes to core gameplay or balance
+
+### Version
+Updated `GAME_VERSION` from `v0.6.6` → **`v0.6.7`**.
+
+---
+
 ## v0.6.6 Step 1 — Clear Screen Ranking + Local Achievement Badges
 
 ### Level Clear Screen — Ranking Info

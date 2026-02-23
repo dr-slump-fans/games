@@ -282,7 +282,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.6';
+const GAME_VERSION = 'v0.6.7';
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -379,7 +379,7 @@ const ACHIEVEMENTS = {
   FIRST_CLEAR:   { name: 'First Clear',   desc: 'Clear the level for the first time' },
   THREE_STAR:    { name: 'Three Stars',    desc: 'Earn 3 stars in a single run' },
   NO_DEATH:      { name: 'No Death',       desc: 'Clear with 0 deaths' },
-  FAST_CLEAR:    { name: 'Speed Runner',   desc: 'Clear in ≤90 seconds' },
+  NO_CHECKPOINT: { name: 'No Checkpoint',  desc: 'Clear without using checkpoint' },
 };
 
 function loadAchievements() {
@@ -414,6 +414,7 @@ function getUnlockedCount() {
 
 // Variables set at level clear for the ranking overlay
 let clearRankInfo = null; // { rank: number|null, topScore: number|null }
+let newlyUnlockedBadges = []; // badge IDs unlocked this clear
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -4820,6 +4821,7 @@ function resetGame() {
   // Star rating / checkpoint / rank reset
   levelClearStars = 0;
   clearRankInfo = null;
+  newlyUnlockedBadges = [];
   deathsThisRun = 0;
   checkpointReached = false;
   checkpointActivated = false;
@@ -5612,11 +5614,12 @@ function update() {
           }
         }
       }
-      // Unlock achievements
-      unlockAchievement('FIRST_CLEAR');
-      if (levelClearStars === 3) unlockAchievement('THREE_STAR');
-      if (deathsThisRun === 0) unlockAchievement('NO_DEATH');
-      if (survivalTime <= 90) unlockAchievement('FAST_CLEAR');
+      // Unlock achievements & track newly unlocked
+      newlyUnlockedBadges = [];
+      if (unlockAchievement('FIRST_CLEAR')) newlyUnlockedBadges.push('FIRST_CLEAR');
+      if (levelClearStars === 3 && unlockAchievement('THREE_STAR')) newlyUnlockedBadges.push('THREE_STAR');
+      if (deathsThisRun === 0 && unlockAchievement('NO_DEATH')) newlyUnlockedBadges.push('NO_DEATH');
+      if (!checkpointActivated && unlockAchievement('NO_CHECKPOINT')) newlyUnlockedBadges.push('NO_CHECKPOINT');
       // Stop checkpoint flash so it doesn't bleed into clear overlay
       checkpointFlashTimer = 0;
       return;
@@ -6251,10 +6254,20 @@ function draw() {
       ctx.fillStyle = '#888';
       ctx.fillText('Not ranked today', cx, cy + 52);
     }
+    // Newly unlocked badges feedback
+    if (newlyUnlockedBadges.length > 0) {
+      const badgeNames = newlyUnlockedBadges.map(id => ACHIEVEMENTS[id] ? ACHIEVEMENTS[id].name : id);
+      const pulse = 0.7 + 0.3 * Math.sin(Date.now() * 0.005); // gentle pulse
+      ctx.globalAlpha = pulse;
+      ctx.font = 'bold 13px monospace';
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText('\u2605 NEW: ' + badgeNames.join(', '), cx, cy + 68);
+      ctx.globalAlpha = 1;
+    }
     // Restart prompt
     ctx.font = '13px monospace';
     ctx.fillStyle = '#ccc';
-    ctx.fillText('Press any key to restart', cx, cy + 74);
+    ctx.fillText('Press any key to restart', cx, cy + (newlyUnlockedBadges.length > 0 ? 86 : 74));
     ctx.restore();
   }
 
@@ -6501,16 +6514,16 @@ function renderTitleAchievements() {
     const unlocked = Object.keys(ach).filter(k => ACHIEVEMENTS[k]).length;
     olAchWrap.style.display = 'block';
     olAchSummary.textContent = `Badges: ${unlocked}/${total} unlocked`;
-    let lines = '';
+    let html = '';
     for (const id of Object.keys(ACHIEVEMENTS)) {
       const a = ACHIEVEMENTS[id];
       if (ach[id]) {
-        lines += `\u2713 ${a.name}\n`;
+        html += `<span style="color:#ffd700">\u2713 ${a.name}</span>\n`;
       } else {
-        lines += `\u2610 ${a.name}\n`;
+        html += `<span style="color:#666">\u2610 ${a.name} — ${a.desc}</span>\n`;
       }
     }
-    olAchList.textContent = lines.trimEnd();
+    olAchList.innerHTML = html.trimEnd();
     olAchList.style.color = '#aaa';
   } catch {
     olAchWrap.style.display = 'none';
