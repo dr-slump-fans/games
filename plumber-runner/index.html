@@ -266,7 +266,11 @@ canvas {
     <p id="ol-msg">MOVE: Arrows/AD  |  JUMP: Space</p>
     <p id="ol-score"></p>
     <p id="ol-daily" style="font-size:13px;color:#8cf;margin:4px 0 0"></p>
-    <p id="ol-lb" style="font-size:12px;color:#ff0;margin:2px 0 0;white-space:pre"></p>
+    <div id="ol-lb-wrap" style="margin:4px 0 0;font-size:11px;color:#ff0;white-space:pre;line-height:1.5;display:none">
+      <div id="ol-lb-title" style="font-size:12px;color:#8cf;margin-bottom:2px">Today Top 5</div>
+      <div id="ol-lb-rows"></div>
+      <button id="ol-lb-clear" style="font-size:10px;padding:2px 8px;margin-top:4px;background:#555;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-family:monospace">Clear Today</button>
+    </div>
     <button id="ol-btn">START</button>
     <p id="ol-version" style="font-size:12px;color:#888;margin:0"></p>
   </div>
@@ -274,7 +278,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.3';
+const GAME_VERSION = 'v0.6.4';
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -316,7 +320,9 @@ function loadLeaderboard() {
   try {
     const raw = localStorage.getItem(LB_STORAGE_KEY);
     if (!raw) return {};
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
   } catch { return {}; }
 }
 
@@ -342,6 +348,14 @@ function addLeaderboardEntry(date, entry) {
 function getTodayLeaderboard() {
   const lb = loadLeaderboard();
   return lb[DAILY_DATE] || [];
+}
+
+function clearTodayLeaderboard() {
+  try {
+    const lb = loadLeaderboard();
+    delete lb[DAILY_DATE];
+    saveLeaderboard(lb);
+  } catch { /* graceful fallback */ }
 }
 
 // ── Constants ──────────────────────────────────────────
@@ -1692,7 +1706,9 @@ const olScore = document.getElementById('ol-score');
 const olBtn = document.getElementById('ol-btn');
 const olVersion = document.getElementById('ol-version');
 const olDailyEl = document.getElementById('ol-daily');
-const olLbEl = document.getElementById('ol-lb');
+const olLbWrap = document.getElementById('ol-lb-wrap');
+const olLbRows = document.getElementById('ol-lb-rows');
+const olLbClear = document.getElementById('ol-lb-clear');
 const hudDaily = document.getElementById('hud-daily');
 hudDaily.textContent = `DAILY: ${DAILY_DATE}`;
 const scoreDisplay = document.getElementById('score-display');
@@ -6346,6 +6362,35 @@ function gameLoop(timestamp) {
 }
 
 // ── Overlay ────────────────────────────────────────────
+function renderTitleLeaderboard() {
+  const todayLb = getTodayLeaderboard();
+  olLbWrap.style.display = 'block';
+  if (todayLb.length > 0) {
+    let rows = '';
+    for (let i = 0; i < todayLb.length; i++) {
+      const e = todayLb[i];
+      const tMin = Math.floor(e.time / 60);
+      const tSec = Math.floor(e.time % 60);
+      const tStr = `${String(tMin).padStart(2,'0')}:${String(tSec).padStart(2,'0')}`;
+      const starStr = '\u2605'.repeat(e.stars) + '\u2606'.repeat(3 - (e.stars || 0));
+      rows += `#${i + 1}  ${String(e.score).padStart(5)}pts  ${tStr}  ${starStr}\n`;
+    }
+    olLbRows.textContent = rows.trimEnd();
+    olLbRows.style.color = '#ff0';
+    olLbClear.style.display = 'inline-block';
+  } else {
+    olLbRows.textContent = 'No runs yet';
+    olLbRows.style.color = '#888';
+    olLbClear.style.display = 'none';
+  }
+}
+
+olLbClear.addEventListener('click', (e) => {
+  e.stopPropagation();
+  clearTodayLeaderboard();
+  renderTitleLeaderboard();
+});
+
 function showOverlay(title, msg, sc) {
   olTitle.textContent = title;
   olMsg.textContent = msg;
@@ -6362,22 +6407,11 @@ function showOverlay(title, msg, sc) {
     olVersion.style.display = 'block';
     olDailyEl.textContent = `DAILY: ${DAILY_DATE}`;
     olDailyEl.style.display = 'block';
-    const todayLb = getTodayLeaderboard();
-    if (todayLb.length > 0) {
-      const top = todayLb[0];
-      const tMin = Math.floor(top.time / 60);
-      const tSec = Math.floor(top.time % 60);
-      const tStr = `${String(tMin).padStart(2,'0')}:${String(tSec).padStart(2,'0')}`;
-      const starStr = '\u2605'.repeat(top.stars) + '\u2606'.repeat(3 - top.stars);
-      olLbEl.textContent = `#1  ${top.score} pts  ${tStr}  ${starStr}`;
-      olLbEl.style.display = 'block';
-    } else {
-      olLbEl.style.display = 'none';
-    }
+    renderTitleLeaderboard();
   } else {
     olVersion.style.display = 'none';
     olDailyEl.style.display = 'none';
-    olLbEl.style.display = 'none';
+    olLbWrap.style.display = 'none';
   }
   overlay.style.display = 'flex';
   hudBoost.style.display = 'none';

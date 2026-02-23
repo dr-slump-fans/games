@@ -1774,6 +1774,30 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.6.4 Step 2 — Leaderboard UI & Clear Today
+
+### Leaderboard UI (Title Screen)
+- Title screen now shows **Today Top 5** entries with rank, score, time, and star rating
+- Uses compact monospace layout (`#1  1234pts  02:15  ★★☆`)
+- When no runs exist for today, shows "No runs yet" in gray
+- Positioned between the daily date and START button; does not obscure gameplay controls
+
+### Clear Today's Leaderboard
+- A small **"Clear Today"** button appears below the leaderboard when entries exist
+- Clicking it removes only the current day's (`YYYY-MM-DD`) data from `localStorage`
+- Other days' data is unaffected; UI refreshes immediately after clearing
+- Button is hidden when there are no entries
+
+### Stability
+- `loadLeaderboard()` now validates parsed data type (rejects non-object/array corruption)
+- All `localStorage` read/write operations wrapped in try/catch — game never crashes on storage failure
+
+### Version
+
+Updated `GAME_VERSION` from `v0.6.3` → **`v0.6.4`**.
+
+---
+
 ## v0.6.3 Step 1 — Daily Seed & Local Leaderboard
 
 ### Daily Seed (Deterministic RNG)
