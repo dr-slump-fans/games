@@ -327,6 +327,8 @@ const COIN_SCORE = 10;               // points per coin collected from question 
 const COIN_COMBO_WINDOW = 1.2;       // seconds — hits within this window count as combo
 const COIN_COMBO_MAX = 8;            // max combo level (caps pitch scaling)
 const COIN_BASE_FREQ = 988;          // B5 — base coin sound frequency
+const BLOCK_BUMP_FRAMES = 8;         // total frames for bump animation
+const BLOCK_BUMP_HEIGHT = 6;         // max upward pixel offset during bump
 
 // ── Special Brick & Mushroom Constants ───────────────
 const SPECIAL_BRICK_CHANCE = 0.25;   // chance a stepping-stone brick becomes a special brick
@@ -2217,7 +2219,7 @@ function drawUsedBlock(bx, by) {
 // ── Coin Pop Animation ──────────────────────────────────
 // Each coinPop: { x, y, vy, life }
 function spawnCoinPop(x, y) {
-  coinPops.push({ x: x, y: y - 4, vy: -4, life: 30 });
+  coinPops.push({ x: x, y: y - 4, vy: -6, life: 40, maxLife: 40 });
 }
 
 function updateCoinPops() {
@@ -2232,20 +2234,40 @@ function updateCoinPops() {
   }
 }
 
+function updateBrickBumps() {
+  for (const brick of bricks) {
+    if (brick.bumpTimer > 0) brick.bumpTimer--;
+  }
+}
+
+function getBumpOffset(brick) {
+  if (!brick.bumpTimer || brick.bumpTimer <= 0) return 0;
+  // Sine-based bump: peaks at halfway through animation
+  const t = brick.bumpTimer / BLOCK_BUMP_FRAMES;  // 1→0
+  return -Math.sin(t * Math.PI) * BLOCK_BUMP_HEIGHT;
+}
+
 function drawCoinPops() {
   for (const c of coinPops) {
-    const alpha = Math.min(1, c.life / 10);
+    // Smooth fade-out over last 15 frames; full opacity otherwise
+    const alpha = c.life <= 15 ? c.life / 15 : 1;
     const cx = Math.round(c.x);
     const cy = Math.round(c.y);
+    // Slight spin effect: stretch width based on life cycle
+    const spin = Math.cos((c.maxLife - c.life) * 0.5);
+    const coinW = Math.max(2, Math.round(8 * Math.abs(spin)));
+    const coinX = cx + Math.round((8 - coinW) / 2);
     ctx.save();
     ctx.globalAlpha = alpha;
-    // Coin: small golden circle/rectangle
+    // Coin: golden with spin stretch
     ctx.fillStyle = '#f4d03f';
-    ctx.fillRect(cx, cy, 8, 10);
-    ctx.fillStyle = '#e8a317';
-    ctx.fillRect(cx + 2, cy + 1, 4, 8);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(cx + 3, cy + 2, 1, 2); // highlight
+    ctx.fillRect(coinX, cy, coinW, 10);
+    if (coinW > 4) {
+      ctx.fillStyle = '#e8a317';
+      ctx.fillRect(coinX + 1, cy + 1, coinW - 2, 8);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(coinX + Math.floor(coinW / 2), cy + 2, 1, 2); // highlight
+    }
     ctx.restore();
   }
 }
@@ -3418,6 +3440,7 @@ function resolveSweptMovement(playerVY, playerDX) {
         if (brick.question && !brick.used) {
           // ── Question Block: pop coin, mark used, keep block solid ──
           brick.used = true;
+          brick.bumpTimer = BLOCK_BUMP_FRAMES;  // start bump animation
           coins++;
           score += COIN_SCORE;
           // Coin combo: track rapid hits for pitch-rising SFX
@@ -4635,6 +4658,7 @@ function update() {
   updateScorePopups();
   updateTimeBonusPopups();
   updateCoinPops();
+  updateBrickBumps();
 
   // Update mushrooms (physics + player pickup)
   updateMushrooms();
@@ -4873,7 +4897,9 @@ function update() {
   }
 
   scoreDisplay.textContent = `SCORE: ${score}`;
-  hudCoin.textContent = `COIN: ${coins}`;
+  hudCoin.textContent = (coinComboLevel >= 1 && coinComboTimer > 0)
+    ? `COIN: ${coins}  x${coinComboLevel + 1}`
+    : `COIN: ${coins}`;
 
   // Update HUD
   const mins = Math.floor(survivalTime / 60);
@@ -5034,17 +5060,18 @@ function draw() {
 
   // Breakable bricks & question blocks
   for (const brick of bricks) {
+    const by = brick.y + getBumpOffset(brick);  // visual-only bump offset
     if (brick.question) {
       if (brick.used) {
-        drawUsedBlock(brick.x, brick.y);
+        drawUsedBlock(brick.x, by);
       } else {
-        drawQuestionBlock(brick.x, brick.y);
+        drawQuestionBlock(brick.x, by);
       }
     } else if (!brick.broken) {
       if (brick.special) {
-        drawSpecialBrick(brick.x, brick.y);
+        drawSpecialBrick(brick.x, by);
       } else {
-        drawBrick(brick.x, brick.y);
+        drawBrick(brick.x, by);
       }
     }
   }

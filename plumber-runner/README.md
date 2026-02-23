@@ -1122,6 +1122,26 @@ When question blocks are hit in rapid succession (within **1.2 seconds**), each 
 - Combo state resets on game restart
 - No scoring or gameplay changes — combo only affects audio pitch
 
+## Step 3: Block Bump & Coin Pop Polish
+
+Visual refinements to question-block interaction feel.
+
+### Block Bump Animation
+When a question block is hit from below, the block now plays a quick **bump animation** — it visually pops upward by 6 px and returns over 8 frames using a sine curve. This is purely visual; the collision box stays in place for stability.
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `BLOCK_BUMP_FRAMES` | `8` | Total frames for the bump animation |
+| `BLOCK_BUMP_HEIGHT` | `6` | Maximum upward pixel offset |
+
+### Enhanced Coin Pop
+- **Higher arc**: initial velocity increased from −4 to **−6 px/frame**, lifetime extended from 30 to **40 frames**
+- **Spin effect**: the coin visually stretches/compresses horizontally to simulate a rotating coin
+- **Smooth fade-out**: coin fades to transparent over the last 15 frames of its life
+
+### HUD Coin Combo Indicator
+When hitting question blocks in rapid succession, the coin HUD shows **`x2`, `x3`, …** next to the coin count for the duration of the combo window, giving immediate visual feedback for combo streaks.
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.
