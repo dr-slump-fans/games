@@ -1201,6 +1201,49 @@ function sfxCoinPop(comboLevel) {
   });
 }
 
+// ── SFX: Shell Combo Kill (escalating pitch/timbre) ──
+function sfxShellCombo(comboLevel) {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  const step = Math.min(comboLevel, SHELL_COMBO_MAX);
+  // Base freq rises with combo: 330 → 370 → 415 → 466 → 523 Hz (approx semitones)
+  const baseFreq = 330 * Math.pow(2, (step - 1) * 2 / 12);
+  // Quick rising two-tone "thwack-ping"
+  const osc1 = ctx.createOscillator();
+  const gain1 = ctx.createGain();
+  osc1.type = step >= 3 ? 'sawtooth' : 'square'; // grittier at high combo
+  osc1.frequency.setValueAtTime(baseFreq * 0.8, now);
+  osc1.frequency.linearRampToValueAtTime(baseFreq, now + 0.04);
+  gain1.gain.setValueAtTime(0.07, now);
+  gain1.gain.linearRampToValueAtTime(0, now + 0.08);
+  osc1.connect(gain1).connect(ctx.destination);
+  osc1.start(now);
+  osc1.stop(now + 0.09);
+  // Second note: higher "ping" delayed slightly
+  const osc2 = ctx.createOscillator();
+  const gain2 = ctx.createGain();
+  osc2.type = 'sine';
+  osc2.frequency.setValueAtTime(baseFreq * 1.5, now + 0.05);
+  gain2.gain.setValueAtTime(0.05 + step * 0.01, now + 0.05); // louder at higher combo
+  gain2.gain.linearRampToValueAtTime(0, now + 0.14);
+  osc2.connect(gain2).connect(ctx.destination);
+  osc2.start(now + 0.05);
+  osc2.stop(now + 0.15);
+  // Third "sparkle" note for combo >= 3
+  if (step >= 3) {
+    const osc3 = ctx.createOscillator();
+    const gain3 = ctx.createGain();
+    osc3.type = 'sine';
+    osc3.frequency.setValueAtTime(baseFreq * 2, now + 0.10);
+    gain3.gain.setValueAtTime(0.04, now + 0.10);
+    gain3.gain.linearRampToValueAtTime(0, now + 0.20);
+    osc3.connect(gain3).connect(ctx.destination);
+    osc3.start(now + 0.10);
+    osc3.stop(now + 0.21);
+  }
+}
+
 // ── Haptics: Vibration API wrapper ───────────────────
 const vibSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
 
@@ -2842,15 +2885,23 @@ function updateTurtles() {
           const comboLevel = Math.min(t.shellCombo, SHELL_COMBO_MAX);
           const killScore = SHELL_COMBO_BASE * Math.pow(2, comboLevel - 1);
           score += killScore;
+          sfxShellCombo(comboLevel);
           if (t.shellCombo >= 2) {
-            // Show shell combo popup with distinct style
+            // Show shell combo popup with escalating style
             spawnScorePopup(other.x, other.y - 10, 0);
             const cp = scorePopups[scorePopups.length - 1];
             cp.text = `SHELL x${t.shellCombo} +${killScore}`;
-            cp.color = '#4aeadc';
-            cp.strokeColor = '#1a4a3a';
-            cp.font = 'bold 16px monospace';
-            cp.life = 55; // slightly longer display
+            // Color escalation: teal → cyan → gold at high combo
+            const comboColors = ['#4aeadc', '#4aeadc', '#5af8ff', '#fff44f', '#ff6'];
+            const comboStrokes = ['#1a4a3a', '#1a4a3a', '#0a3a5a', '#5a4a0a', '#5a3a0a'];
+            const ci = Math.min(comboLevel - 1, comboColors.length - 1);
+            cp.color = comboColors[ci];
+            cp.strokeColor = comboStrokes[ci];
+            // Font size scales with combo level (16→18→20→22→24)
+            const fontSize = 16 + (comboLevel - 1) * 2;
+            cp.font = `bold ${fontSize}px monospace`;
+            cp.scale = 1.0 + comboLevel * 0.15; // initial scale boost
+            cp.life = 55 + comboLevel * 8; // longer display at higher combo
           } else {
             spawnScorePopup(other.x, other.y - 10, killScore);
           }
@@ -3000,6 +3051,13 @@ function drawScorePopups() {
     const alpha = Math.min(1, p.life / 15);
     ctx.save();
     ctx.globalAlpha = alpha;
+    // Scale support: shrink from initial scale → 1.0 over life
+    const sc = p.scale ? 1 + (p.scale - 1) * Math.min(1, p.life / 30) : 1;
+    if (sc !== 1) {
+      ctx.translate(Math.round(p.x), Math.round(p.y));
+      ctx.scale(sc, sc);
+      ctx.translate(-Math.round(p.x), -Math.round(p.y));
+    }
     ctx.font = p.font || 'bold 14px monospace';
     ctx.fillStyle = p.color || '#f4d03f';
     ctx.strokeStyle = p.strokeColor || '#5a3a1a';

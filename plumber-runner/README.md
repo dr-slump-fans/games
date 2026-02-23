@@ -1222,6 +1222,35 @@ Walking turtles now show a brief **front-leg lift** when they reverse direction 
 |----------|-------|---------|
 | `SHELL_BOUNCE_COOLDOWN` | `4` | Frames of bounce immunity after shell wall-bounce |
 
+## Enemy Interaction Step 3: Shell Combo Feedback Enhancement
+
+Audio and visual feedback polish for shell combo kills, making multi-kill chains feel more rewarding without changing any scoring or death rules.
+
+### Escalating Shell Combo SFX
+
+New `sfxShellCombo(comboLevel)` function generates a WebAudio two-tone "thwack-ping" on every shell kill. Feedback escalates with combo level:
+
+- **Pitch** rises ~2 semitones per combo step (base 330 Hz → up to ~523 Hz at combo 5)
+- **Timbre** shifts from `square` wave to `sawtooth` at combo level 3+ for a grittier, more intense feel
+- **Third "sparkle" note** added at combo level 3+ (octave above base) for extra reward cue
+- **Volume** stays conservative (0.07 peak, +0.01 per level on the second note)
+
+### Enhanced Shell Combo Popup Visuals
+
+Shell combo popups (`SHELL x2 +40`, etc.) now escalate visually:
+
+- **Color** shifts from teal (#4aeadc) through cyan (#5af8ff) to gold (#fff44f / #ff6) at high combos
+- **Font size** scales 16 → 24 px across combo levels 1–5
+- **Initial scale** starts larger at higher combos (1.15× → 1.75×), then shrinks to 1.0× over 30 frames
+- **Display duration** increases (+8 frames per combo level on top of the base 55 frames)
+- First kill (combo 1) uses the standard popup style with just the SFX
+
+### What Did NOT Change
+
+- Score formula: `SHELL_COMBO_BASE × 2^(comboLevel - 1)` — unchanged
+- Death/damage rules — unchanged
+- Stomp, kick, and bounce mechanics — unchanged
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.
