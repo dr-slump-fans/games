@@ -222,6 +222,7 @@ canvas {
 <div id="hud">
   <div id="hud-top">
     <div id="hud-left">
+      <div id="hud-daily" style="font-size:11px;color:#8cf;margin-bottom:1px;"></div>
       <div id="hud-time">00:00</div>
       <div id="hud-level">Lv.1 EASY</div>
       <div id="hud-level-bar"><div id="hud-level-fill"></div></div>
@@ -264,6 +265,8 @@ canvas {
     <h1 id="ol-title">Plumber Runner</h1>
     <p id="ol-msg">MOVE: Arrows/AD  |  JUMP: Space</p>
     <p id="ol-score"></p>
+    <p id="ol-daily" style="font-size:13px;color:#8cf;margin:4px 0 0"></p>
+    <p id="ol-lb" style="font-size:12px;color:#ff0;margin:2px 0 0;white-space:pre"></p>
     <button id="ol-btn">START</button>
     <p id="ol-version" style="font-size:12px;color:#888;margin:0"></p>
   </div>
@@ -271,7 +274,75 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.2';
+const GAME_VERSION = 'v0.6.3';
+
+// ── Daily Seed & Deterministic RNG ────────────────────
+function getDailyDateStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return h >>> 0;
+}
+
+// Mulberry32 — fast 32-bit seeded PRNG (returns 0–1 like Math.random)
+function mulberry32(seed) {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const DAILY_DATE = getDailyDateStr();
+const DAILY_SEED = hashStr('plumber-' + DAILY_DATE);
+let rng = mulberry32(DAILY_SEED); // seeded RNG for level generation
+
+// ── Local Leaderboard (per-day, localStorage) ─────────
+const LB_STORAGE_KEY = 'plumber_runner_lb';
+const LB_MAX_ENTRIES = 5;
+
+function loadLeaderboard() {
+  try {
+    const raw = localStorage.getItem(LB_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch { return {}; }
+}
+
+function saveLeaderboard(lb) {
+  try { localStorage.setItem(LB_STORAGE_KEY, JSON.stringify(lb)); } catch {}
+}
+
+function addLeaderboardEntry(date, entry) {
+  const lb = loadLeaderboard();
+  if (!lb[date]) lb[date] = [];
+  lb[date].push(entry);
+  // Sort: score desc, then time asc
+  lb[date].sort((a, b) => b.score - a.score || a.time - b.time);
+  // Keep top 5
+  lb[date] = lb[date].slice(0, LB_MAX_ENTRIES);
+  // Prune old dates (keep last 7 days max)
+  const keys = Object.keys(lb).sort();
+  while (keys.length > 7) { delete lb[keys.shift()]; }
+  saveLeaderboard(lb);
+  return lb[date];
+}
+
+function getTodayLeaderboard() {
+  const lb = loadLeaderboard();
+  return lb[DAILY_DATE] || [];
+}
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -494,13 +565,13 @@ let themeColorTarget = 'PLAINS';   // target theme for color interpolation
 // Pick a random theme different from the current one
 function pickNextTheme() {
   const candidates = THEME_NAMES.filter(t => t !== currentTheme);
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  return candidates[Math.floor(rng() * candidates.length)];
 }
 
 // Initialize theme state for a new game
 function initThemeState() {
   currentTheme = 'PLAINS';
-  themeChunksRemaining = THEME_MIN_CHUNKS + Math.floor(Math.random() * (THEME_MAX_CHUNKS - THEME_MIN_CHUNKS + 1));
+  themeChunksRemaining = THEME_MIN_CHUNKS + Math.floor(rng() * (THEME_MAX_CHUNKS - THEME_MIN_CHUNKS + 1));
   nextTheme = pickNextTheme();
   themeTransitionActive = false;
   themeAnnounceTimer = 0;
@@ -521,7 +592,7 @@ function advanceThemeState() {
     themeColorTarget = currentTheme;
     themeColorLerp = 0;
     nextTheme = pickNextTheme();
-    themeChunksRemaining = THEME_MIN_CHUNKS + Math.floor(Math.random() * (THEME_MAX_CHUNKS - THEME_MIN_CHUNKS + 1));
+    themeChunksRemaining = THEME_MIN_CHUNKS + Math.floor(rng() * (THEME_MAX_CHUNKS - THEME_MIN_CHUNKS + 1));
     themeTransitionActive = true; // first chunk is a transition
     themeAnnounceTimer = THEME_ANNOUNCE_DURATION;
     themeAnnounceName = currentTheme;
@@ -641,7 +712,7 @@ function pickNextSection() {
 
 function initSectionState() {
   currentSection = 'UNDERWORLD';
-  sectionChunksRemaining = SECTION_MIN_CHUNKS + Math.floor(Math.random() * (SECTION_MAX_CHUNKS - SECTION_MIN_CHUNKS + 1));
+  sectionChunksRemaining = SECTION_MIN_CHUNKS + Math.floor(rng() * (SECTION_MAX_CHUNKS - SECTION_MIN_CHUNKS + 1));
   sectionAnnounceTimer = SECTION_ANNOUNCE_DURATION;
   sectionAnnounceName = currentSection;
   sectionTransitionActive = false;
@@ -657,7 +728,7 @@ function advanceSectionState() {
   sectionTransitionActive = sectionTransitionCountdown > 0;
   if (sectionChunksRemaining <= 0) {
     currentSection = pickNextSection();
-    sectionChunksRemaining = SECTION_MIN_CHUNKS + Math.floor(Math.random() * (SECTION_MAX_CHUNKS - SECTION_MIN_CHUNKS + 1));
+    sectionChunksRemaining = SECTION_MIN_CHUNKS + Math.floor(rng() * (SECTION_MAX_CHUNKS - SECTION_MIN_CHUNKS + 1));
     sectionAnnounceTimer = SECTION_ANNOUNCE_DURATION;
     sectionAnnounceName = currentSection;
     sectionTransitionCountdown = 2; // smooth over first 2 chunks of new section
@@ -754,7 +825,7 @@ function getChunkDiffPhase() {
 // Weighted random selection from chunk types
 function selectChunkType(weights) {
   const total = Object.values(weights).reduce((a, b) => a + b, 0);
-  let r = Math.random() * total;
+  let r = rng() * total;
   for (const type of CHUNK_TYPES) {
     r -= weights[type];
     if (r <= 0) return type;
@@ -826,7 +897,7 @@ function validateChunkReachability(chunkObstacles, chunkX, chunkWidth) {
 // Returns: { pipes: [], bricks: [], turtleSpawns: [], width, type, obstacles (for validation) }
 function generateChunk(chunkX, type, diffParams) {
   const groundY = DESIGN_H - GROUND_H;
-  const width = CHUNK_MIN_WIDTH + Math.random() * (CHUNK_MAX_WIDTH - CHUNK_MIN_WIDTH);
+  const width = CHUNK_MIN_WIDTH + rng() * (CHUNK_MAX_WIDTH - CHUNK_MIN_WIDTH);
   const result = { pipes: [], bricks: [], turtleSpawns: [], width, type, obstacles: [] };
   const maxPipeH = diffParams.maxPipeH;
   const maxTopH = diffParams.maxTopH;
@@ -837,28 +908,28 @@ function generateChunk(chunkX, type, diffParams) {
     if (maxH >= 170) pool.push(170);
     if (maxH >= 195) pool.push(195);
     if (maxH >= 220) pool.push(220);
-    return pool[Math.floor(Math.random() * pool.length)] || 60;
+    return pool[Math.floor(rng() * pool.length)] || 60;
   };
   const randTopH = (maxH) => {
     const pool = PIPE_HEIGHTS_TOP.filter(h => h <= maxH);
     if (maxH >= 155) pool.push(155);
     if (maxH >= 170) pool.push(170);
-    return pool[Math.floor(Math.random() * pool.length)] || 60;
+    return pool[Math.floor(rng() * pool.length)] || 60;
   };
 
   switch (type) {
     case 'rest': {
       // Flat ground with maybe 1 very low pipe for visual variety
-      if (Math.random() < 0.3) {
-        const x = chunkX + 200 + Math.random() * (width - 400);
-        const h = 40 + Math.floor(Math.random() * 30); // very low: 40-70px
+      if (rng() < 0.3) {
+        const x = chunkX + 200 + rng() * (width - 400);
+        const h = 40 + Math.floor(rng() * 30); // very low: 40-70px
         result.pipes.push({ x, h, fromTop: false, scored: false });
         result.obstacles.push({ type: 'pipe_bottom', x, h });
       }
       // Maybe a reward brick
-      if (Math.random() < 0.4) {
-        const bx = chunkX + 150 + Math.random() * (width - 300);
-        const by = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 20);
+      if (rng() < 0.4) {
+        const bx = chunkX + 150 + rng() * (width - 300);
+        const by = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 20);
         result.bricks.push(makeBrick(bx, by, 0.4));
         result.obstacles.push({ type: 'brick', x: bx, y: by });
       }
@@ -867,24 +938,24 @@ function generateChunk(chunkX, type, diffParams) {
 
     case 'single_platform': {
       // 1 bottom pipe as platform + optional stepping bricks
-      const pipeX = chunkX + 150 + Math.random() * (width - 350);
+      const pipeX = chunkX + 150 + rng() * (width - 350);
       const pipeH = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
       result.pipes.push({ x: pipeX, h: pipeH, fromTop: false, scored: false });
       result.obstacles.push({ type: 'pipe_bottom', x: pipeX, h: pipeH });
 
       // Stepping brick if pipe is tall
       if (pipeH >= 100) {
-        const bx = pipeX - 60 - Math.random() * 60;
-        const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 15;
+        const bx = pipeX - 60 - rng() * 60;
+        const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 15;
         const by = groundY - stepH;
         result.bricks.push(makeBrick(bx, by, SPECIAL_BRICK_CHANCE));
         result.obstacles.push({ type: 'brick', x: bx, y: by });
       }
 
       // Optional second brick at different position
-      if (Math.random() < 0.35) {
-        const bx2 = pipeX + LIP_W + 30 + Math.random() * 80;
-        const stepH2 = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 30;
+      if (rng() < 0.35) {
+        const bx2 = pipeX + LIP_W + 30 + rng() * 80;
+        const stepH2 = BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 30;
         const by2 = groundY - stepH2;
         if (bx2 < chunkX + width - 50) {
           result.bricks.push(makeBrick(bx2, by2, SPECIAL_BRICK_CHANCE));
@@ -893,10 +964,10 @@ function generateChunk(chunkX, type, diffParams) {
       }
 
       // Hidden block shortcut: placed higher up near pipe top as a secret stepping stone
-      if (pipeH >= 100 && Math.random() < HIDDEN_BLOCK_CHANCE) {
-        const hbx = pipeX - 40 - Math.random() * 50;
+      if (pipeH >= 100 && rng() < HIDDEN_BLOCK_CHANCE) {
+        const hbx = pipeX - 40 - rng() * 50;
         // Place at 70-90% of pipe height — reachable with a full jump, acts as shortcut to pipe top
-        const hbH = pipeH * (0.70 + Math.random() * 0.20);
+        const hbH = pipeH * (0.70 + rng() * 0.20);
         const hby = groundY - hbH;
         if (hby > 30 && hbx > chunkX + 30) {
           result.bricks.push(makeHiddenBrick(hbx, hby));
@@ -904,8 +975,8 @@ function generateChunk(chunkX, type, diffParams) {
       }
       // Hidden shortcut corridor: 2 consecutive hidden blocks forming a short shortcut path
       // over the pipe — rarer than single hidden blocks, awards bonus coins
-      else if (pipeH >= 130 && Math.random() < HIDDEN_SHORTCUT_CHANCE) {
-        const hb1x = pipeX - 50 - Math.random() * 30;
+      else if (pipeH >= 130 && rng() < HIDDEN_SHORTCUT_CHANCE) {
+        const hb1x = pipeX - 50 - rng() * 30;
         const hb1H = pipeH * 0.55;    // first block: mid-height stepping stone
         const hb1y = groundY - hb1H;
         const hb2x = hb1x - BRICK_W - 8; // second block: slightly left, higher
@@ -921,8 +992,8 @@ function generateChunk(chunkX, type, diffParams) {
 
     case 'double_platform': {
       // 2 pipes at staggered heights — staircase platforming
-      const gap = 120 + Math.random() * 100; // horizontal gap between pipes
-      const pipe1X = chunkX + 100 + Math.random() * 100;
+      const gap = 120 + rng() * 100; // horizontal gap between pipes
+      const pipe1X = chunkX + 100 + rng() * 100;
       const pipe2X = pipe1X + gap;
       // First pipe: lower
       const h1 = randBottomH(Math.min(maxPipeH, 120));
@@ -936,7 +1007,7 @@ function generateChunk(chunkX, type, diffParams) {
       result.obstacles.push({ type: 'pipe_bottom', x: pipe2X, h: h2 });
 
       // Optional brick between pipes for extra platforming
-      if (Math.random() < 0.4 && gap > 160) {
+      if (rng() < 0.4 && gap > 160) {
         const midX = (pipe1X + pipe2X) / 2 - BRICK_W / 2;
         const midH = (h1 + h2) / 2;
         const by = groundY - midH;
@@ -945,7 +1016,7 @@ function generateChunk(chunkX, type, diffParams) {
       }
 
       // Hidden shortcut corridor between pipes: 2 hidden blocks as secret bridge
-      if (h2 >= 120 && gap >= 150 && Math.random() < HIDDEN_SHORTCUT_CHANCE) {
+      if (h2 >= 120 && gap >= 150 && rng() < HIDDEN_SHORTCUT_CHANCE) {
         const hb1x = pipe1X + LIP_W + 15;
         const hb1y = groundY - h1 - 30;  // just above first pipe top
         const hb2x = pipe2X - BRICK_W - 10;
@@ -965,7 +1036,7 @@ function generateChunk(chunkX, type, diffParams) {
 
     case 'pipe_mix': {
       // Mixed obstacles: bottom pipe + optional top pipe (pair), bricks
-      const pipeX = chunkX + 150 + Math.random() * (width - 400);
+      const pipeX = chunkX + 150 + rng() * (width - 400);
       const bottomH = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
 
       result.pipes.push({ x: pipeX, h: bottomH, fromTop: false, scored: false });
@@ -973,16 +1044,16 @@ function generateChunk(chunkX, type, diffParams) {
 
       // Stepping bricks for taller pipes
       if (bottomH >= TALL_PIPE_THRESHOLD) {
-        const bx = pipeX - 50 - Math.random() * 60;
-        const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 15;
+        const bx = pipeX - 50 - rng() * 60;
+        const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 15;
         result.bricks.push(makeBrick(bx, groundY - stepH, SPECIAL_BRICK_CHANCE));
         result.obstacles.push({ type: 'brick', x: bx, y: groundY - stepH });
       }
 
       // Add ceiling pipe? (50% chance if difficulty allows)
-      if (Math.random() < 0.5 && maxTopH >= 60) {
+      if (rng() < 0.5 && maxTopH >= 60) {
         // Place ceiling pipe at a different X to avoid instant death trap
-        const topX = pipeX + (Math.random() < 0.5 ? -(120 + Math.random() * 100) : (120 + Math.random() * 100));
+        const topX = pipeX + (rng() < 0.5 ? -(120 + rng() * 100) : (120 + rng() * 100));
         const topH = randTopH(maxTopH);
         // Ensure clearance: ceiling bottom must be above ground with enough gap
         const ceilingBottomY = topH;
@@ -994,8 +1065,8 @@ function generateChunk(chunkX, type, diffParams) {
       }
 
       // Possible second bottom pipe farther in the chunk
-      if (Math.random() < 0.4 && width > 650) {
-        const pipe2X = pipeX + 200 + Math.random() * 150;
+      if (rng() < 0.4 && width > 650) {
+        const pipe2X = pipeX + 200 + rng() * 150;
         if (pipe2X + LIP_W < chunkX + width - 60) {
           const h2 = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
           result.pipes.push({ x: pipe2X, h: h2, fromTop: false, scored: false });
@@ -1004,17 +1075,17 @@ function generateChunk(chunkX, type, diffParams) {
       }
 
       // Hidden block shortcut: secret stepping stone for pipe_mix with tall pipes
-      if (bottomH >= TALL_PIPE_THRESHOLD && Math.random() < HIDDEN_BLOCK_CHANCE) {
-        const hbx = pipeX + LIP_W + 20 + Math.random() * 60;
+      if (bottomH >= TALL_PIPE_THRESHOLD && rng() < HIDDEN_BLOCK_CHANCE) {
+        const hbx = pipeX + LIP_W + 20 + rng() * 60;
         // Place at 60-80% of pipe height — hidden stepping stone past the pipe
-        const hbH = bottomH * (0.60 + Math.random() * 0.20);
+        const hbH = bottomH * (0.60 + rng() * 0.20);
         const hby = groundY - hbH;
         if (hby > 30 && hbx < chunkX + width - 50) {
           result.bricks.push(makeHiddenBrick(hbx, hby));
         }
       }
       // Hidden shortcut corridor for pipe_mix: 2-block path over the tall pipe
-      else if (bottomH >= 160 && Math.random() < HIDDEN_SHORTCUT_CHANCE) {
+      else if (bottomH >= 160 && rng() < HIDDEN_SHORTCUT_CHANCE) {
         const hb1x = pipeX + LIP_W + 15;
         const hb1H = bottomH * 0.50;  // first block: mid-height past the pipe
         const hb1y = groundY - hb1H;
@@ -1032,17 +1103,17 @@ function generateChunk(chunkX, type, diffParams) {
     case 'turtle_zone': {
       // Flat/low terrain with turtle enemies — enough ground space for turtle interaction
       // Maybe 1 low pipe for variety
-      if (Math.random() < 0.5) {
-        const pipeX = chunkX + 250 + Math.random() * (width - 400);
-        const pipeH = 40 + Math.floor(Math.random() * 40); // very low: 40-80px
+      if (rng() < 0.5) {
+        const pipeX = chunkX + 250 + rng() * (width - 400);
+        const pipeH = 40 + Math.floor(rng() * 40); // very low: 40-80px
         result.pipes.push({ x: pipeX, h: pipeH, fromTop: false, scored: false });
         result.obstacles.push({ type: 'pipe_bottom', x: pipeX, h: pipeH });
       }
       // Spawn 1-2 turtles with adequate spacing
-      const turtleCount = 1 + Math.floor(Math.random() * 2);
+      const turtleCount = 1 + Math.floor(rng() * 2);
       const spacing = width / (turtleCount + 1);
       for (let i = 0; i < turtleCount; i++) {
-        const tx = chunkX + spacing * (i + 1) + (Math.random() - 0.5) * 60;
+        const tx = chunkX + spacing * (i + 1) + (rng() - 0.5) * 60;
         // Validate turtle position: must have at least 80px clear ground on each side
         let turtleOK = true;
         for (const p of result.pipes) {
@@ -1069,9 +1140,9 @@ function generateChunk(chunkX, type, diffParams) {
         }
       }
       // Maybe a brick for scoring
-      if (Math.random() < 0.4) {
-        const bx = chunkX + 100 + Math.random() * (width - 200);
-        const by = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 20);
+      if (rng() < 0.4) {
+        const bx = chunkX + 100 + rng() * (width - 200);
+        const by = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 20);
         result.bricks.push(makeBrick(bx, by, SPECIAL_BRICK_CHANCE));
       }
       break;
@@ -1079,11 +1150,11 @@ function generateChunk(chunkX, type, diffParams) {
 
     case 'reward': {
       // Brick cluster with high special chance — easy spacing, lots of pickups
-      const brickCount = 2 + Math.floor(Math.random() * 3); // 2-4 bricks
-      const startX = chunkX + 100 + Math.random() * 100;
+      const brickCount = 2 + Math.floor(rng() * 3); // 2-4 bricks
+      const startX = chunkX + 100 + rng() * 100;
       const spread = (width - 300) / brickCount;
       for (let i = 0; i < brickCount; i++) {
-        const bx = startX + i * spread + Math.random() * 40;
+        const bx = startX + i * spread + rng() * 40;
         // Heights in reachable tiers
         const tierIdx = i % 3;
         const tiers = [
@@ -1092,7 +1163,7 @@ function generateChunk(chunkX, type, diffParams) {
           { minH: BRICK_MIN_HEIGHT_ABOVE_GROUND, maxH: 110 },
         ];
         const tier = tiers[tierIdx];
-        const heightAboveGround = tier.minH + Math.random() * (tier.maxH - tier.minH);
+        const heightAboveGround = tier.minH + rng() * (tier.maxH - tier.minH);
         const by = groundY - heightAboveGround;
 
         if (bx < chunkX + width - 50) {
@@ -1102,9 +1173,9 @@ function generateChunk(chunkX, type, diffParams) {
         }
       }
       // Optional low pipe as visual anchor
-      if (Math.random() < 0.3) {
-        const px = chunkX + width / 2 + Math.random() * 100;
-        const ph = 50 + Math.floor(Math.random() * 30);
+      if (rng() < 0.3) {
+        const px = chunkX + width / 2 + rng() * 100;
+        const ph = 50 + Math.floor(rng() * 30);
         result.pipes.push({ x: px, h: ph, fromTop: false, scored: false });
         result.obstacles.push({ type: 'pipe_bottom', x: px, h: ph });
       }
@@ -1168,7 +1239,7 @@ function spawnChunk() {
     rerolls = attempt + 1;
     // On reroll, try a simpler type
     if (attempt >= 2) {
-      type = Math.random() < 0.5 ? 'rest' : 'single_platform';
+      type = rng() < 0.5 ? 'rest' : 'single_platform';
     }
     chunk = null;
   }
@@ -1202,7 +1273,7 @@ function spawnChunk() {
   const turtleMult = THEME_PARAM_OFFSETS[currentTheme].turtleChanceMult;
   for (const tx of chunk.turtleSpawns) {
     if (tx - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP) {
-      if (turtleMult >= 1 || Math.random() < turtleMult) {
+      if (turtleMult >= 1 || rng() < turtleMult) {
         spawnTurtle(tx);
       }
     }
@@ -1620,6 +1691,10 @@ const olMsg = document.getElementById('ol-msg');
 const olScore = document.getElementById('ol-score');
 const olBtn = document.getElementById('ol-btn');
 const olVersion = document.getElementById('ol-version');
+const olDailyEl = document.getElementById('ol-daily');
+const olLbEl = document.getElementById('ol-lb');
+const hudDaily = document.getElementById('hud-daily');
+hudDaily.textContent = `DAILY: ${DAILY_DATE}`;
 const scoreDisplay = document.getElementById('score-display');
 const hudCoin = document.getElementById('hud-coin');
 const hudLife = document.getElementById('hud-life');
@@ -1797,10 +1872,10 @@ function initClouds() {
   clouds = [];
   for (let i = 0; i < 6; i++) {
     clouds.push({
-      x: Math.random() * DESIGN_W,
-      y: 20 + Math.random() * 100,
-      w: 50 + Math.random() * 60,
-      speed: 0.3 + Math.random() * 0.5,
+      x: rng() * DESIGN_W,
+      y: 20 + rng() * 100,
+      w: 50 + rng() * 60,
+      speed: 0.3 + rng() * 0.5,
     });
   }
 }
@@ -1812,8 +1887,8 @@ function initHills() {
   for (let i = 0; i < 4; i++) {
     hills.push({
       x: i * 250,
-      w: 180 + Math.random() * 100,
-      h: 40 + Math.random() * 40,
+      w: 180 + rng() * 100,
+      h: 40 + rng() * 40,
     });
   }
 }
@@ -1840,8 +1915,8 @@ let milestonePipeCount = 0;  // counts pipes for milestone bonus
 // ── Brick Factory Helper ─────────────────────────────────
 // Creates a brick object. If not special, has a chance to be a question block.
 function makeBrick(x, y, specialChance) {
-  const isSpecial = Math.random() < specialChance;
-  const isQuestion = !isSpecial && Math.random() < QUESTION_BLOCK_CHANCE;
+  const isSpecial = rng() < specialChance;
+  const isQuestion = !isSpecial && rng() < QUESTION_BLOCK_CHANCE;
   return { x, y, w: BRICK_W, h: BRICK_H, broken: false, special: isSpecial, question: isQuestion, used: false };
 }
 
@@ -4477,7 +4552,7 @@ const MISSION_DEFS = [
 ];
 
 function initMission() {
-  const def = MISSION_DEFS[Math.floor(Math.random() * MISSION_DEFS.length)];
+  const def = MISSION_DEFS[Math.floor(rng() * MISSION_DEFS.length)];
   mission = {
     type: def.type,
     desc: def.desc,
@@ -4544,7 +4619,7 @@ function endBossWave() {
 // Spawns a series of short bottom pipes at tight intervals
 function spawnBossWaveObstacleA() {
   // Low pipes: heights 50-80px — easy to jump over individually but need rhythm
-  const h = 50 + Math.floor(Math.random() * 30);
+  const h = 50 + Math.floor(rng() * 30);
   pipes.push({ x: bossWaveSpawnX, h: h, fromTop: false, scored: false });
 }
 
@@ -4556,18 +4631,18 @@ function spawnBossWaveObstacleB() {
 
   if (step === 0) {
     // Tall bottom pipe (needs jump)
-    const h = 90 + Math.floor(Math.random() * 40); // 90-130px
+    const h = 90 + Math.floor(rng() * 40); // 90-130px
     pipes.push({ x: bossWaveSpawnX, h: h, fromTop: false, scored: false });
   } else if (step === 1) {
     // Short ceiling pipe + a helpful brick to stand on or break
-    const topH = 60 + Math.floor(Math.random() * 30); // 60-90px ceiling
+    const topH = 60 + Math.floor(rng() * 30); // 60-90px ceiling
     pipes.push({ x: bossWaveSpawnX, h: topH, fromTop: true, scored: false });
     // Place a brick at a useful jump height
-    const brickTopY = groundY - (80 + Math.floor(Math.random() * 25)); // 80-105px above ground
-    bricks.push(makeBrick(bossWaveSpawnX - 20 + Math.floor(Math.random() * 40), brickTopY, 0.3));
+    const brickTopY = groundY - (80 + Math.floor(rng() * 25)); // 80-105px above ground
+    bricks.push(makeBrick(bossWaveSpawnX - 20 + Math.floor(rng() * 40), brickTopY, 0.3));
   } else {
     // Gap with a brick platform at mid height — breathing room + reward
-    const brickTopY = groundY - (90 + Math.floor(Math.random() * 30)); // 90-120px
+    const brickTopY = groundY - (90 + Math.floor(rng() * 30)); // 90-120px
     bricks.push(makeBrick(bossWaveSpawnX, brickTopY, 0.4));
     // Add a small marker pipe so scoring/spawn tracking continues
     pipes.push({ x: bossWaveSpawnX, h: 0, fromTop: false, scored: false });
@@ -4683,7 +4758,7 @@ function spawnInitialPipes() {
   // Bottom pipe
   pipes.push({
     x: x,
-    h: PIPE_HEIGHTS_BOTTOM[Math.floor(Math.random() * PIPE_HEIGHTS_BOTTOM.length)],
+    h: PIPE_HEIGHTS_BOTTOM[Math.floor(rng() * PIPE_HEIGHTS_BOTTOM.length)],
     fromTop: false,
     scored: false,
   });
@@ -4745,12 +4820,12 @@ function spawnStaircaseFor(targetH, targetX, gapMin, gapMax) {
     // Each step is roughly (i / (steps+1)) of the target height, with some variance
     const ratio = i / (steps + 1);
     const baseH = Math.round(targetH * ratio);
-    const h = Math.max(50, Math.min(baseH + Math.floor(Math.random() * 20 - 10), targetH - 30));
+    const h = Math.max(50, Math.min(baseH + Math.floor(rng() * 20 - 10), targetH - 30));
     stepHeights.unshift(h);
   }
   // Place steps before the target, working backwards
   for (let i = stepHeights.length - 1; i >= 0; i--) {
-    const stepGap = gapMin * 0.7 + Math.random() * (gapMax - gapMin) * 0.4;
+    const stepGap = gapMin * 0.7 + rng() * (gapMax - gapMin) * 0.4;
     curX -= stepGap;
     pipes.push({
       x: curX,
@@ -4773,7 +4848,7 @@ function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
 
   // Tall pipes always get stepping stones; shorter pipes use BRICK_SPAWN_CHANCE
   const isTall = pipeH >= TALL_PIPE_THRESHOLD;
-  if (!isTall && Math.random() > BRICK_SPAWN_CHANCE) return;
+  if (!isTall && rng() > BRICK_SPAWN_CHANCE) return;
 
   // Decide 1 or 2 bricks: tall pipes get 2, shorter pipes get 1
   const brickCount = (isTall && pipeH >= 180) ? 2 : 1;
@@ -4790,10 +4865,10 @@ function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
     let horizDist;
     if (brickCount === 2) {
       horizDist = (i === 0)
-        ? 100 + Math.random() * 40   // farther brick: 100~140px
-        : 40 + Math.random() * 40;   // closer brick: 40~80px
+        ? 100 + rng() * 40   // farther brick: 100~140px
+        : 40 + rng() * 40;   // closer brick: 40~80px
     } else {
-      horizDist = 40 + Math.random() * 100; // single brick: 40~140px
+      horizDist = 40 + rng() * 100; // single brick: 40~140px
     }
     const brickX = pipeX - horizDist;
 
@@ -4805,12 +4880,12 @@ function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
     let brickTopY;
     if (brickCount === 2 && i === 1) {
       // Higher stepping stone — between 40% and 65% of pipe height off ground
-      const ratio = 0.40 + Math.random() * 0.25;
+      const ratio = 0.40 + rng() * 0.25;
       brickTopY = groundY - Math.round(pipeH * ratio);
     } else {
       // Lower stepping stone — reachable from ground with a jump
       // Must be at least BRICK_MIN_HEIGHT_ABOVE_GROUND (72px) above ground
-      const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.random() * 20; // 72~92px
+      const stepH = BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 20; // 72~92px
       brickTopY = groundY - stepH;
     }
 
@@ -4867,7 +4942,7 @@ function maybeSpawnSteppingStoneBricks(pipeX, pipeH, hasCeiling) {
 function spawnStandaloneBricks(anchorX) {
   const groundY = DESIGN_H - GROUND_H;
   const count = STANDALONE_BRICK_MIN_COUNT +
-    Math.floor(Math.random() * (STANDALONE_BRICK_MAX_COUNT - STANDALONE_BRICK_MIN_COUNT + 1));
+    Math.floor(rng() * (STANDALONE_BRICK_MAX_COUNT - STANDALONE_BRICK_MIN_COUNT + 1));
 
   // Predefined height tiers (top-of-brick Y measured from groundY upward)
   // All tiers respect BRICK_MIN_HEIGHT_ABOVE_GROUND (72px = 2× player height)
@@ -4885,9 +4960,9 @@ function spawnStandaloneBricks(anchorX) {
 
   for (let i = 0; i < count; i++) {
     const tier = tiers[i];
-    const heightAboveGround = tier.minH + Math.random() * (tier.maxH - tier.minH);
+    const heightAboveGround = tier.minH + rng() * (tier.maxH - tier.minH);
     const brickTopY = groundY - heightAboveGround;
-    const brickX = startX + i * (35 + Math.random() * 20);
+    const brickX = startX + i * (35 + rng() * 20);
 
     // Clamp within screen bounds; enforce minimum height above ground
     const clampedY = Math.max(30, Math.min(brickTopY, groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND));
@@ -4928,12 +5003,12 @@ function spawnPipe() {
   const lastPipe = pipes[pipes.length - 1];
   const gapMin = getDiffParam('gapMin');
   const gapMax = getDiffParam('gapMax');
-  const gap = gapMin + Math.random() * (gapMax - gapMin);
+  const gap = gapMin + rng() * (gapMax - gapMin);
   const newX = lastPipe.x + gap;
 
   // ── Brick-replaces-pipe check ──────────────────────────
   const brickReplaceChance = getDiffParam('brickReplace');
-  if (Math.random() < brickReplaceChance) {
+  if (rng() < brickReplaceChance) {
     // Replace this pipe spawn with a standalone brick obstacle group
     spawnStandaloneBricks(newX);
     // Add a tiny invisible ground-level "marker pipe" so the spawn/score
@@ -4960,13 +5035,13 @@ function spawnPipe() {
   if (topMaxH >= 200) topHeights.push(200);
 
   // Decide what to spawn
-  const roll = Math.random();
+  const roll = rng();
   const topOnlyChance = 0.20;
   const bottomOnlyChance = 1 - topOnlyChance - pairChance;
 
   if (roll < bottomOnlyChance) {
     // Bottom pipe only
-    const h = bottomHeights[Math.floor(Math.random() * bottomHeights.length)];
+    const h = bottomHeights[Math.floor(rng() * bottomHeights.length)];
     // Staircase: if this pipe is tall and no recent step exists, insert stepping pipes
     if (needsStaircase(h)) {
       spawnStaircaseFor(h, newX, gapMin, gapMax);
@@ -4978,14 +5053,14 @@ function spawnPipe() {
     // Top pipe only
     pipes.push({
       x: newX,
-      h: topHeights[Math.floor(Math.random() * topHeights.length)],
+      h: topHeights[Math.floor(rng() * topHeights.length)],
       fromTop: true,
       scored: false,
     });
   } else {
     // Both top and bottom — create a passable gap
     const groundY = DESIGN_H - GROUND_H;
-    const bottomH = bottomHeights[Math.floor(Math.random() * bottomHeights.length)];
+    const bottomH = bottomHeights[Math.floor(rng() * bottomHeights.length)];
     // Staircase for tall bottom in pair
     if (needsStaircase(bottomH)) {
       spawnStaircaseFor(bottomH, newX, gapMin, gapMax);
@@ -4995,7 +5070,7 @@ function spawnPipe() {
     const minGapSize = player.h + 30 + (1 - diffFrac) * 30;
     const maxTopH = bottomTopY - minGapSize;
     if (maxTopH >= 50) {
-      const topH = 50 + Math.floor(Math.random() * (Math.min(maxTopH, topMaxH) - 50));
+      const topH = 50 + Math.floor(rng() * (Math.min(maxTopH, topMaxH) - 50));
       pipes.push({ x: newX, h: bottomH, fromTop: false, scored: false });
       pipes.push({ x: newX, h: Math.max(50, topH), fromTop: true, scored: false });
     } else {
@@ -5443,6 +5518,13 @@ function update() {
       scorePopups[scorePopups.length - 1].text = `LEVEL CLEAR +${LEVEL_CLEAR_BONUS}`;
       // Calculate star rating (1~3)
       levelClearStars = calcStarRating();
+      // Record to daily leaderboard
+      addLeaderboardEntry(DAILY_DATE, {
+        score: score,
+        time: survivalTime,
+        stars: levelClearStars,
+        date: DAILY_DATE,
+      });
       // Stop checkpoint flash so it doesn't bleed into clear overlay
       checkpointFlashTimer = 0;
       return;
@@ -6274,12 +6356,28 @@ function showOverlay(title, msg, sc) {
     olScore.style.display = 'none';
   }
   olBtn.textContent = state === 'title' ? 'START' : 'RESTART';
-  // Show version only on title screen
+  // Show daily seed + leaderboard on title screen
   if (state === 'title') {
     olVersion.textContent = GAME_VERSION;
     olVersion.style.display = 'block';
+    olDailyEl.textContent = `DAILY: ${DAILY_DATE}`;
+    olDailyEl.style.display = 'block';
+    const todayLb = getTodayLeaderboard();
+    if (todayLb.length > 0) {
+      const top = todayLb[0];
+      const tMin = Math.floor(top.time / 60);
+      const tSec = Math.floor(top.time % 60);
+      const tStr = `${String(tMin).padStart(2,'0')}:${String(tSec).padStart(2,'0')}`;
+      const starStr = '\u2605'.repeat(top.stars) + '\u2606'.repeat(3 - top.stars);
+      olLbEl.textContent = `#1  ${top.score} pts  ${tStr}  ${starStr}`;
+      olLbEl.style.display = 'block';
+    } else {
+      olLbEl.style.display = 'none';
+    }
   } else {
     olVersion.style.display = 'none';
+    olDailyEl.style.display = 'none';
+    olLbEl.style.display = 'none';
   }
   overlay.style.display = 'flex';
   hudBoost.style.display = 'none';
@@ -6306,6 +6404,7 @@ olBtn.addEventListener('click', (e) => {
 
 function startGame() {
   hideOverlay();
+  rng = mulberry32(DAILY_SEED); // reset seeded RNG for deterministic daily level
   resetGame();
   player.animState = 'idle';
   state = 'playing';

@@ -1774,6 +1774,30 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.6.3 Step 1 — Daily Seed & Local Leaderboard
+
+### Daily Seed (Deterministic RNG)
+- Every day generates a **daily seed** from the local date string `YYYY-MM-DD`
+- All level generation (chunk types, pipe heights, brick placement, theme/section rotation, boss wave obstacles, missions) uses a **seeded PRNG** (Mulberry32) instead of `Math.random()`
+- The RNG is **reset on each game start**, so the same day always produces the same level layout
+- Cosmetic effects (brick fragments, screen shake, cloud drift) remain non-deterministic for visual variety
+- **HUD** displays `DAILY: YYYY-MM-DD` in the top-left corner
+- **Title screen** also shows the current daily date
+
+### Local Leaderboard (localStorage)
+- On **level clear**, the player's run is recorded to `localStorage`:
+  - Fields: `date`, `score`, `time`, `stars`
+- Only the **top 5 entries per day** are kept, sorted by score (desc) then time (asc)
+- Old dates are pruned automatically (last 7 days retained)
+- The **title screen** shows the current day's #1 score summary (score, time, stars)
+- No network calls — fully local and offline
+
+### Version
+
+Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
+
+---
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.
