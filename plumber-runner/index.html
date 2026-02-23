@@ -363,10 +363,13 @@ const TURTLE_SPAWN_CHANCE = 0.30;    // chance to spawn turtle per pipe spawn
 const TURTLE_MIN_SPAWN_GAP = 400;    // min px between turtle spawns
 const TURTLE_SHELL_IDLE_KICK_GRACE = 10; // frames after stomp before shell can be kicked
 const TURTLE_DEAD_FRAMES = 30;       // frames for dead turtle to linger before removal
-const TURTLE_TURN_COOLDOWN = 8;      // min frames between direction reversals (prevents jitter)
+const TURTLE_TURN_COOLDOWN = 12;     // min frames between direction reversals (prevents jitter)
 const SHELL_BOUNCE_COOLDOWN = 4;     // frames of bounce immunity after shell wall-bounce (prevents sticking)
 const SHELL_COMBO_MAX = 5;           // max shell combo multiplier
 const SHELL_COMBO_BASE = 20;         // base score for shell kill (doubles each combo hit)
+const TURTLE_NEARBY_CAP = 2;         // max walk/idle turtles within TURTLE_MIN_SPAWN_GAP of a new spawn
+const SPAWN_RHYTHM_CYCLE = 1200;     // px per full pressure+relief cycle
+const SPAWN_RHYTHM_RELIEF = 0.4;     // fraction of cycle that is "relief" (no random spawns)
 
 // ── Difficulty System ─────────────────────────────────
 // 5 levels with smooth interpolation between them
@@ -1458,6 +1461,7 @@ const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is acti
 // States: 'walk', 'shell_idle', 'shell_move', 'shell_bounce_dead', 'dead'
 let turtles = [];
 let lastTurtleSpawnX = -9999;  // tracks X of last turtle spawn to enforce gap
+let spawnRhythmBase = 0;       // cameraX snapshot at game start for rhythm cycle
 
 // ── Flagpole / Level Clear ──────────────────────────────
 const FLAGPOLE_DISTANCE = 5000;     // world X where flagpole spawns
@@ -2825,16 +2829,17 @@ function updateTurtles() {
     // ── Edge detection: if walking turtle reaches platform edge, reverse ──
     // Only for turtles on elevated platforms (feet above main ground level)
     if (t.state === 'walk' && t.onGround && t.y + th < groundY - 2) {
-      // Check if there's ground ahead
-      const checkX = t.vx < 0 ? t.x - 2 : t.x + tw + 2;
-      const checkY = t.y + th + 4;
+      // Check if there's ground ahead — use a wider probe (4×6) to avoid sub-pixel jitter
+      const probeW = 4, probeH = 6;
+      const checkX = t.direction < 0 ? t.x - probeW : t.x + tw;
+      const checkY = t.y + th + 2;
       let hasGround = false;
       // Check pipes/bricks below
       for (const pipe of pipes) {
         if (pipe.h <= 0) continue;
         const pr = getPipeRects(pipe);
-        if (rectsOverlap(checkX, checkY, 1, 1, pr.lipRect.x, pr.lipRect.y, pr.lipRect.w, pr.lipRect.h) ||
-            rectsOverlap(checkX, checkY, 1, 1, pr.bodyRect.x, pr.bodyRect.y, pr.bodyRect.w, pr.bodyRect.h)) {
+        if (rectsOverlap(checkX, checkY, probeW, probeH, pr.lipRect.x, pr.lipRect.y, pr.lipRect.w, pr.lipRect.h) ||
+            rectsOverlap(checkX, checkY, probeW, probeH, pr.bodyRect.x, pr.bodyRect.y, pr.bodyRect.w, pr.bodyRect.h)) {
           hasGround = true;
           break;
         }
@@ -2842,7 +2847,7 @@ function updateTurtles() {
       if (!hasGround) {
         for (const brick of bricks) {
           if (brick.broken) continue;
-          if (rectsOverlap(checkX, checkY, 1, 1, brick.x, brick.y, brick.w, brick.h)) {
+          if (rectsOverlap(checkX, checkY, probeW, probeH, brick.x, brick.y, brick.w, brick.h)) {
             hasGround = true;
             break;
           }
@@ -2850,6 +2855,8 @@ function updateTurtles() {
       }
       if (!hasGround && t.turnCooldown <= 0) {
         t.direction *= -1;
+        // Snap turtle back a few px away from edge to prevent flip-flop
+        t.x += t.direction * 3;
         t.turnCooldown = TURTLE_TURN_COOLDOWN;
       }
     }
@@ -2997,6 +3004,14 @@ function spawnTurtle(spawnX) {
       return; // skip spawn — overlaps a brick
     }
   }
+
+  // Nearby-turtle density cap: reject spawn if too many walk/idle turtles nearby
+  let nearbyCount = 0;
+  for (const ot of turtles) {
+    if (ot.state !== 'walk' && ot.state !== 'shell_idle') continue;
+    if (Math.abs(ot.x - spawnX) < TURTLE_MIN_SPAWN_GAP) nearbyCount++;
+  }
+  if (nearbyCount >= TURTLE_NEARBY_CAP) return; // too crowded
 
   turtles.push({
     x: spawnX,
@@ -4147,6 +4162,7 @@ function resetGame() {
   mushrooms = [];
   turtles = [];
   lastTurtleSpawnX = -9999;
+  spawnRhythmBase = cameraX;
   score = 0;
   coins = 0;
   lives = INITIAL_LIVES;
@@ -4977,10 +4993,15 @@ function update() {
   // Remove off-screen turtles handled inside updateTurtles()
 
   // Supplemental random turtle spawning (reduced — chunks also place turtles)
+  // Rhythm gating: suppress random spawns during relief portion of cycle
   {
-    const turtleSpawnX = cameraX + DESIGN_W + 80 + Math.random() * 120;
-    if (turtleSpawnX - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP && Math.random() < TURTLE_SPAWN_CHANCE * FIXED_DT * 0.4) {
-      spawnTurtle(turtleSpawnX);
+    const rhythmPos = ((cameraX - spawnRhythmBase) % SPAWN_RHYTHM_CYCLE + SPAWN_RHYTHM_CYCLE) % SPAWN_RHYTHM_CYCLE;
+    const inRelief = rhythmPos > SPAWN_RHYTHM_CYCLE * (1 - SPAWN_RHYTHM_RELIEF);
+    if (!inRelief) {
+      const turtleSpawnX = cameraX + DESIGN_W + 80 + Math.random() * 120;
+      if (turtleSpawnX - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP && Math.random() < TURTLE_SPAWN_CHANCE * FIXED_DT * 0.4) {
+        spawnTurtle(turtleSpawnX);
+      }
     }
   }
 

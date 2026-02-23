@@ -1251,6 +1251,30 @@ Shell combo popups (`SHELL x2 +40`, etc.) now escalate visually:
 - Death/damage rules — unchanged
 - Stomp, kick, and bounce mechanics — unchanged
 
+## Enemy Interaction Step 4: Spawn Density Rhythm & Patrol Stabilization
+
+Final polish pass for enemy spawning fairness and patrol reliability.
+
+### Rhythmic Spawn Density
+
+Supplemental random turtle spawning is now gated by a distance-based rhythm cycle (`SPAWN_RHYTHM_CYCLE = 1200 px`). Each cycle alternates between a **pressure window** (60% — normal spawning) and a **relief window** (40% — random spawns suppressed). This creates natural breathing room so the player isn't under constant enemy pressure.
+
+### Nearby-Turtle Density Cap
+
+`spawnTurtle()` now counts active walk/idle turtles within `TURTLE_MIN_SPAWN_GAP` (400 px) of the proposed spawn point. If 2+ (`TURTLE_NEARBY_CAP`) already exist, the spawn is rejected. This prevents unfair clusters of 3+ turtles in a short stretch.
+
+### Patrol Edge-Detection Stabilization
+
+- Edge-detection probe widened from 1×1 to **4×6 pixels**, reducing false edge triggers from sub-pixel alignment
+- On edge reversal, turtle is **snapped back 3 px** away from the edge to prevent flip-flop oscillation
+- `TURTLE_TURN_COOLDOWN` increased from 8 → **12 frames** for more decisive direction changes
+
+### What Did NOT Change
+
+- Score formula, death/damage rules, shell combo mechanics — all unchanged
+- Chunk-based turtle placement logic — unchanged (rhythm only gates the supplemental random spawner)
+- Shell bounce cooldown and anti-sticking — unchanged
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.
