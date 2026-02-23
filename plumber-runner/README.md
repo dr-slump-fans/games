@@ -1201,6 +1201,27 @@ When a moving shell kills multiple turtles in sequence, each successive kill awa
 | `SHELL_COMBO_MAX` | `5` | Maximum shell combo multiplier level |
 | `SHELL_COMBO_BASE` | `20` | Base score for first shell kill (doubles per combo) |
 
+## Enemy Interaction Step 2: Shell Bounce Feel & Patrol Readability
+
+Micro-polish pass that improves shell bounce reliability and adds a subtle visual cue for turtle patrol turns.
+
+### Shell Bounce Anti-Sticking
+
+Moving shells now have a **bounce cooldown** (`SHELL_BOUNCE_COOLDOWN = 4` frames) after each wall/brick bounce. During cooldown, the shell ignores further bounce triggers, preventing rapid direction-flipping that caused the shell to visually "stick" or jitter against walls when collision geometry overlapped across consecutive frames.
+
+**Key changes:**
+- Each shell_move bounce (pipe or brick) sets `bounceCooldown = 4`
+- While `bounceCooldown > 0`, further bounce reversal is suppressed — the shell commits to its new direction
+- All death rules, stomp mechanics, combo scoring, and kick behavior are unchanged
+
+### Patrol Turn Visual Hint
+
+Walking turtles now show a brief **front-leg lift** when they reverse direction (during the existing `turnCooldown` window). The front leg raises 3 px for the 8-frame cooldown period, giving players a subtle but readable cue that the turtle has turned. The walk animation also freezes during the lift, reinforcing the "pause and turn" feel.
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `SHELL_BOUNCE_COOLDOWN` | `4` | Frames of bounce immunity after shell wall-bounce |
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.

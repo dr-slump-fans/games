@@ -364,6 +364,7 @@ const TURTLE_MIN_SPAWN_GAP = 400;    // min px between turtle spawns
 const TURTLE_SHELL_IDLE_KICK_GRACE = 10; // frames after stomp before shell can be kicked
 const TURTLE_DEAD_FRAMES = 30;       // frames for dead turtle to linger before removal
 const TURTLE_TURN_COOLDOWN = 8;      // min frames between direction reversals (prevents jitter)
+const SHELL_BOUNCE_COOLDOWN = 4;     // frames of bounce immunity after shell wall-bounce (prevents sticking)
 const SHELL_COMBO_MAX = 5;           // max shell combo multiplier
 const SHELL_COMBO_BASE = 20;         // base score for shell kill (doubles each combo hit)
 
@@ -2332,7 +2333,8 @@ function drawMushroom(mx, my) {
 
 // ── Turtle Drawing (procedural pixel art) ───────────────
 // Walking turtle: 24×28 px, original green/brown creature with shell on back
-function drawTurtleWalk(tx, ty, direction, animFrame) {
+// turnCooldown > 0 → turtle just turned; show brief leg-lift hint
+function drawTurtleWalk(tx, ty, direction, animFrame, turnCooldown) {
   const x = Math.round(tx);
   const y = Math.round(ty);
   ctx.save();
@@ -2366,16 +2368,18 @@ function drawTurtleWalk(tx, ty, direction, animFrame) {
   ctx.fillRect(x + 1, y + 7, 2, 2);
   // Legs — tan/brown, animated
   ctx.fillStyle = '#a0845c';
-  const legOffset = (animFrame % 2 === 0) ? 0 : 2;
-  // Front leg
-  ctx.fillRect(x + 4 - legOffset, y + 18, 4, 8);
-  ctx.fillRect(x + 2 - legOffset, y + 24, 6, 4);
+  const turning = turnCooldown > 0;
+  const legOffset = turning ? 0 : ((animFrame % 2 === 0) ? 0 : 2);
+  // Front leg — lifts up briefly when turning
+  const frontLegLift = turning ? 3 : 0;
+  ctx.fillRect(x + 4 - legOffset, y + 18 - frontLegLift, 4, 8);
+  ctx.fillRect(x + 2 - legOffset, y + 24 - frontLegLift, 6, 4);
   // Back leg
   ctx.fillRect(x + 14 + legOffset, y + 18, 4, 8);
   ctx.fillRect(x + 14 + legOffset, y + 24, 6, 4);
   // Feet — darker
   ctx.fillStyle = '#6d4c2a';
-  ctx.fillRect(x + 2 - legOffset, y + 26, 6, 2);
+  ctx.fillRect(x + 2 - legOffset, y + 26 - frontLegLift, 6, 2);
   ctx.fillRect(x + 14 + legOffset, y + 26, 6, 2);
   // Outline
   ctx.strokeStyle = '#1a3a1a';
@@ -2703,6 +2707,8 @@ function updateTurtles() {
     if (t.kickGrace > 0) t.kickGrace--;
     // ── Turn cooldown timer (prevents jitter) ──
     if (t.turnCooldown > 0) t.turnCooldown--;
+    // ── Shell bounce cooldown (prevents wall-sticking) ──
+    if (t.bounceCooldown > 0) t.bounceCooldown--;
 
     // ── Physics: gravity ──
     t.vy += TURTLE_GRAVITY;
@@ -2746,11 +2752,11 @@ function updateTurtles() {
         else if (t.vx > 0 && t.x + tw - t.vx <= r.x + 2) {
           t.x = r.x - tw;
           if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = -1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
-          else if (t.state === 'shell_move') t.vx = -Math.abs(t.vx);
+          else if (t.state === 'shell_move' && t.bounceCooldown <= 0) { t.vx = -Math.abs(t.vx); t.bounceCooldown = SHELL_BOUNCE_COOLDOWN; }
         } else if (t.vx < 0 && t.x - t.vx >= r.x + r.w - 2) {
           t.x = r.x + r.w;
           if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = 1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
-          else if (t.state === 'shell_move') t.vx = Math.abs(t.vx);
+          else if (t.state === 'shell_move' && t.bounceCooldown <= 0) { t.vx = Math.abs(t.vx); t.bounceCooldown = SHELL_BOUNCE_COOLDOWN; }
         }
       }
     }
@@ -2765,11 +2771,11 @@ function updateTurtles() {
       } else if (t.vx > 0 && t.x + tw - t.vx <= brick.x + 2) {
         t.x = brick.x - tw;
         if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = -1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
-        else if (t.state === 'shell_move') t.vx = -Math.abs(t.vx);
+        else if (t.state === 'shell_move' && t.bounceCooldown <= 0) { t.vx = -Math.abs(t.vx); t.bounceCooldown = SHELL_BOUNCE_COOLDOWN; }
       } else if (t.vx < 0 && t.x - t.vx >= brick.x + brick.w - 2) {
         t.x = brick.x + brick.w;
         if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = 1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
-        else if (t.state === 'shell_move') t.vx = Math.abs(t.vx);
+        else if (t.state === 'shell_move' && t.bounceCooldown <= 0) { t.vx = Math.abs(t.vx); t.bounceCooldown = SHELL_BOUNCE_COOLDOWN; }
       }
     }
 
@@ -2953,6 +2959,7 @@ function spawnTurtle(spawnX) {
     deadTimer: 0,
     kickGrace: 0,
     turnCooldown: 0,
+    bounceCooldown: 0,
     shellCombo: 0,
   });
   lastTurtleSpawnX = spawnX;
@@ -5193,7 +5200,7 @@ function draw() {
   // Turtles
   for (const t of turtles) {
     if (t.state === 'walk') {
-      drawTurtleWalk(t.x, t.y, t.vx, t.animFrame);  // use vx for flip (same sign as direction)
+      drawTurtleWalk(t.x, t.y, t.vx, t.animFrame, t.turnCooldown || 0);
     } else if (t.state === 'shell_idle') {
       drawTurtleShell(t.x, t.y, false, t.animFrame, 0);
     } else if (t.state === 'shell_move') {
