@@ -1750,6 +1750,30 @@ Updated `GAME_VERSION` from `v0.6.0` → **`v0.6.1`**.
 
 ---
 
+## v0.6.2 Step 3 — Star Rating & Checkpoint Final Integration
+
+### Star Rating Display Polish
+- Tightened the LEVEL CLEAR overlay layout: reduced font sizes and vertical spacing so it reads cleanly on small/mobile screens without blocking gameplay view
+- Star criteria summary is now **compact** (`✓ Time  ✓ Coins` / `✓ No death`) instead of verbose thresholds — less visual clutter while still informative
+- 1–3 star calculation logic is **unchanged**
+
+### Checkpoint State Cleanup
+- `checkpointFlashTimer` is now **zeroed on level clear** so the green checkpoint flash never bleeds into the LEVEL CLEAR overlay
+- All three checkpoint variables (`checkpointReached`, `checkpointActivated`, `checkpointFlashTimer`) continue to reset correctly in `resetGame()`, covering: game-over restart, level-clear restart, and title-screen start
+- Verified respawn-at-checkpoint flow (lives > 0) remains intact with wider enemy clear radius
+
+### Checkpoint vs Flagpole Guard
+- Checkpoint collision check now also requires `!levelCleared`, preventing any theoretical checkpoint activation during the flagpole slide-down animation
+- Flagpole and checkpoint are far apart (2500 vs 5000 world-X) so this is a safety guard, not a bug fix
+
+### Version
+
+Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
+
+**Star rating + checkpoint main trunk: complete.**
+
+---
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

@@ -271,7 +271,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.1';
+const GAME_VERSION = 'v0.6.2';
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -5443,12 +5443,14 @@ function update() {
       scorePopups[scorePopups.length - 1].text = `LEVEL CLEAR +${LEVEL_CLEAR_BONUS}`;
       // Calculate star rating (1~3)
       levelClearStars = calcStarRating();
+      // Stop checkpoint flash so it doesn't bleed into clear overlay
+      checkpointFlashTimer = 0;
       return;
     }
   }
 
   // ── Checkpoint flag collision check ────────────────────
-  if (!checkpointReached) {
+  if (!checkpointReached && !levelCleared) {
     const pb = getPlayerHitbox();
     const groundY = DESIGN_H - GROUND_H;
     const cpX = CHECKPOINT_X;
@@ -6030,39 +6032,42 @@ function draw() {
   // ── Level Clear overlay ────────────────────────────────
   if (levelCleared && levelClearPhase === 'done') {
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
     ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
-    ctx.font = 'bold 36px monospace';
+    const cx = DESIGN_W / 2;
+    const cy = DESIGN_H / 2;
     ctx.textAlign = 'center';
+    // Title
+    ctx.font = 'bold 32px monospace';
     ctx.fillStyle = '#fff';
-    ctx.fillText('LEVEL CLEAR!', DESIGN_W / 2, DESIGN_H / 2 - 10);
-    ctx.font = '18px monospace';
+    ctx.fillText('LEVEL CLEAR!', cx, cy - 28);
+    // Score & time
+    ctx.font = '16px monospace';
     const tMins = Math.floor(survivalTime / 60);
     const tSecs = Math.floor(survivalTime % 60);
     const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, DESIGN_W / 2, DESIGN_H / 2 + 25);
+    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, cx, cy + 2);
     // Star rating display
-    ctx.font = 'bold 28px monospace';
+    ctx.font = 'bold 26px monospace';
     const starFilled = '\u2605';  // ★
     const starEmpty  = '\u2606';  // ☆
     const starStr = starFilled.repeat(levelClearStars) + starEmpty.repeat(3 - levelClearStars);
     ctx.fillStyle = '#ffd700';
-    ctx.fillText(starStr, DESIGN_W / 2, DESIGN_H / 2 + 58);
-    // Star rating source summary
-    ctx.font = '12px monospace';
-    ctx.fillStyle = '#aaa';
+    ctx.fillText(starStr, cx, cy + 32);
+    // Star criteria summary (compact)
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#bbb';
     const timeMet = survivalTime <= STAR_TIME_THRESHOLDS[0];
     const coinMet = coins >= STAR_COIN_THRESHOLD;
     const noDeathMet = deathsThisRun === 0;
-    const parts = [];
-    parts.push(timeMet ? '\u2713 Time \u2264' + Math.floor(STAR_TIME_THRESHOLDS[0]) + 's' : '\u2717 Time >' + Math.floor(STAR_TIME_THRESHOLDS[0]) + 's');
-    if (coinMet) parts.push('\u2713 Coins \u2265' + STAR_COIN_THRESHOLD);
-    else if (noDeathMet) parts.push('\u2713 No deaths');
-    else parts.push('\u2717 Coins <' + STAR_COIN_THRESHOLD + ' & died');
-    ctx.fillText(parts.join('  |  '), DESIGN_W / 2, DESIGN_H / 2 + 76);
-    ctx.font = '14px monospace';
+    const p = [];
+    p.push(timeMet ? '\u2713 Time' : '\u2717 Time');
+    p.push(coinMet ? '\u2713 Coins' : noDeathMet ? '\u2713 No death' : '\u2717 Coins');
+    ctx.fillText(p.join('   '), cx, cy + 48);
+    // Restart prompt
+    ctx.font = '13px monospace';
     ctx.fillStyle = '#ccc';
-    ctx.fillText('Press any key to restart', DESIGN_W / 2, DESIGN_H / 2 + 98);
+    ctx.fillText('Press any key to restart', cx, cy + 68);
     ctx.restore();
   }
 
