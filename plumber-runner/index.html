@@ -266,10 +266,10 @@ canvas {
     <p id="ol-msg">MOVE: Arrows/AD  |  JUMP: Space</p>
     <p id="ol-score"></p>
     <p id="ol-daily" style="font-size:13px;color:#8cf;margin:4px 0 0"></p>
-    <div id="ol-lb-wrap" style="margin:4px 0 0;font-size:11px;color:#ff0;white-space:pre;line-height:1.5;display:none">
-      <div id="ol-lb-title" style="font-size:12px;color:#8cf;margin-bottom:2px">Today Top 5</div>
+    <div id="ol-lb-wrap" style="margin:6px 0 0;font-size:12px;color:#ff0;white-space:pre;line-height:1.6;display:none">
+      <div id="ol-lb-title" style="font-size:12px;color:#8cf;margin-bottom:3px">Today Top 5</div>
       <div id="ol-lb-rows"></div>
-      <button id="ol-lb-clear" style="font-size:10px;padding:2px 8px;margin-top:4px;background:#555;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-family:monospace">Clear Today</button>
+      <button id="ol-lb-clear" style="font-size:11px;padding:3px 10px;margin-top:5px;background:#555;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-family:monospace">Clear Today</button>
     </div>
     <button id="ol-btn">START</button>
     <p id="ol-version" style="font-size:12px;color:#888;margin:0"></p>
@@ -278,7 +278,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.4';
+const GAME_VERSION = 'v0.6.5';
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -308,9 +308,18 @@ function mulberry32(seed) {
   };
 }
 
-const DAILY_DATE = getDailyDateStr();
-const DAILY_SEED = hashStr('plumber-' + DAILY_DATE);
+let DAILY_DATE = getDailyDateStr();
+let DAILY_SEED = hashStr('plumber-' + DAILY_DATE);
 let rng = mulberry32(DAILY_SEED); // seeded RNG for level generation
+
+function refreshDailyIfNeeded() {
+  const today = getDailyDateStr();
+  if (today !== DAILY_DATE) {
+    DAILY_DATE = today;
+    DAILY_SEED = hashStr('plumber-' + DAILY_DATE);
+    hudDaily.textContent = `DAILY: ${DAILY_DATE}`;
+  }
+}
 
 // ── Local Leaderboard (per-day, localStorage) ─────────
 const LB_STORAGE_KEY = 'plumber_runner_lb';
@@ -331,18 +340,20 @@ function saveLeaderboard(lb) {
 }
 
 function addLeaderboardEntry(date, entry) {
-  const lb = loadLeaderboard();
-  if (!lb[date]) lb[date] = [];
-  lb[date].push(entry);
-  // Sort: score desc, then time asc
-  lb[date].sort((a, b) => b.score - a.score || a.time - b.time);
-  // Keep top 5
-  lb[date] = lb[date].slice(0, LB_MAX_ENTRIES);
-  // Prune old dates (keep last 7 days max)
-  const keys = Object.keys(lb).sort();
-  while (keys.length > 7) { delete lb[keys.shift()]; }
-  saveLeaderboard(lb);
-  return lb[date];
+  try {
+    const lb = loadLeaderboard();
+    if (!Array.isArray(lb[date])) lb[date] = [];
+    lb[date].push(entry);
+    // Sort: score desc, then time asc
+    lb[date].sort((a, b) => b.score - a.score || a.time - b.time);
+    // Keep top 5
+    lb[date] = lb[date].slice(0, LB_MAX_ENTRIES);
+    // Prune old dates (keep last 7 days max)
+    const keys = Object.keys(lb).sort();
+    while (keys.length > 7) { delete lb[keys.shift()]; }
+    saveLeaderboard(lb);
+    return lb[date];
+  } catch { return []; }
 }
 
 function getTodayLeaderboard() {
@@ -6363,23 +6374,37 @@ function gameLoop(timestamp) {
 
 // ── Overlay ────────────────────────────────────────────
 function renderTitleLeaderboard() {
-  const todayLb = getTodayLeaderboard();
-  olLbWrap.style.display = 'block';
-  if (todayLb.length > 0) {
-    let rows = '';
-    for (let i = 0; i < todayLb.length; i++) {
-      const e = todayLb[i];
-      const tMin = Math.floor(e.time / 60);
-      const tSec = Math.floor(e.time % 60);
-      const tStr = `${String(tMin).padStart(2,'0')}:${String(tSec).padStart(2,'0')}`;
-      const starStr = '\u2605'.repeat(e.stars) + '\u2606'.repeat(3 - (e.stars || 0));
-      rows += `#${i + 1}  ${String(e.score).padStart(5)}pts  ${tStr}  ${starStr}\n`;
+  try {
+    const todayLb = getTodayLeaderboard();
+    olLbWrap.style.display = 'block';
+    if (Array.isArray(todayLb) && todayLb.length > 0) {
+      let rows = '';
+      for (let i = 0; i < todayLb.length; i++) {
+        const e = todayLb[i];
+        if (!e || typeof e.score !== 'number') continue;
+        const sc = String(Math.floor(e.score)).padStart(5);
+        const t = Number(e.time) || 0;
+        const tStr = `${String(Math.floor(t / 60)).padStart(2,'0')}:${String(Math.floor(t % 60)).padStart(2,'0')}`;
+        const stars = Math.max(0, Math.min(3, e.stars || 0));
+        const starStr = '\u2605'.repeat(stars) + '\u2606'.repeat(3 - stars);
+        rows += `#${i + 1} ${sc}pts ${tStr} ${starStr}\n`;
+      }
+      if (rows) {
+        olLbRows.textContent = rows.trimEnd();
+        olLbRows.style.color = '#ff0';
+        olLbClear.style.display = 'inline-block';
+      } else {
+        olLbRows.textContent = 'No runs yet';
+        olLbRows.style.color = '#888';
+        olLbClear.style.display = 'none';
+      }
+    } else {
+      olLbRows.textContent = 'No runs yet';
+      olLbRows.style.color = '#888';
+      olLbClear.style.display = 'none';
     }
-    olLbRows.textContent = rows.trimEnd();
-    olLbRows.style.color = '#ff0';
-    olLbClear.style.display = 'inline-block';
-  } else {
-    olLbRows.textContent = 'No runs yet';
+  } catch {
+    olLbRows.textContent = 'Leaderboard unavailable';
     olLbRows.style.color = '#888';
     olLbClear.style.display = 'none';
   }
@@ -6438,6 +6463,7 @@ olBtn.addEventListener('click', (e) => {
 
 function startGame() {
   hideOverlay();
+  refreshDailyIfNeeded();
   rng = mulberry32(DAILY_SEED); // reset seeded RNG for deterministic daily level
   resetGame();
   player.animState = 'idle';

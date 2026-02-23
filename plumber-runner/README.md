@@ -1774,6 +1774,32 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.6.5 Step 3 — Daily Seed + Local Leaderboard Final Integration
+
+### Daily Seed Polish
+- `DAILY_DATE` / `DAILY_SEED` are now `let` — if the browser tab stays open past midnight, `refreshDailyIfNeeded()` detects the date change and updates the seed before the next game starts
+- HUD and title overlay always display the current `DAILY_DATE`, never a stale value
+- Same-day determinism and cross-day variation verified end-to-end
+
+### Leaderboard UI Polish
+- Bumped leaderboard font from 11 → 12 px and line-height from 1.5 → 1.6 for better mobile readability
+- Clear Today button padding and font increased slightly for easier tap targets
+- `renderTitleLeaderboard()` now validates each entry (`score` must be a number, `stars` clamped 0–3, `time` coerced safely)
+- If all entries are invalid, shows "No runs yet" instead of an empty list
+
+### localStorage Fallback
+- `addLeaderboardEntry()` fully wrapped in try/catch — storage failure never blocks gameplay
+- `renderTitleLeaderboard()` catches any exception and displays "Leaderboard unavailable" gracefully
+- Existing guards in `loadLeaderboard`, `saveLeaderboard`, `clearTodayLeaderboard` preserved
+
+### Version
+
+Updated `GAME_VERSION` from `v0.6.4` → **`v0.6.5`**.
+
+**Daily Seed + local leaderboard main trunk: complete.**
+
+---
+
 ## v0.6.4 Step 2 — Leaderboard UI & Clear Today
 
 ### Leaderboard UI (Title Screen)
