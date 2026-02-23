@@ -1727,6 +1727,29 @@ Updated `GAME_VERSION` from `v0.5.6` → **`v0.6.0`**.
 
 ---
 
+## v0.6.1 Step 2 — Star Rating Readability & Checkpoint Polish
+
+### Star Rating Source Summary
+- The LEVEL CLEAR overlay now shows a **breakdown line** below the stars indicating which criteria were met:
+  - `✓ Time ≤120s` / `✗ Time >120s` — whether the time bonus star was earned
+  - `✓ Coins ≥30` / `✓ No deaths` / `✗ Coins <30 & died` — whether the coin/flawless star was earned
+- The 1–3 star mechanism is **unchanged**; this is a readability improvement only
+
+### Checkpoint Trigger Feedback
+- Touching the checkpoint flag now triggers a **green screen flash** (1 second, fading) with large centered "CHECKPOINT!" and "Progress saved" text
+- Provides much clearer feedback that progress was saved vs the previous small popup only
+- New state variable `checkpointFlashTimer` drives the overlay; resets on `startGame()`
+
+### Checkpoint Respawn Protection
+- Respawning at the checkpoint now uses a **wider enemy clear radius** (400px vs 250px) to prevent instant re-kills from enemies near the checkpoint area
+- Existing invincibility frames (`HURT_INVINCIBLE_FRAMES = 150`, ~2.5s) remain unchanged
+
+### Version
+
+Updated `GAME_VERSION` from `v0.6.0` → **`v0.6.1`**.
+
+---
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

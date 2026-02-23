@@ -271,7 +271,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.0';
+const GAME_VERSION = 'v0.6.1';
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -1776,6 +1776,7 @@ const CHECKPOINT_BANNER_W = 32;           // banner width
 const CHECKPOINT_BANNER_H = 24;           // banner height
 let checkpointReached = false;            // true once player touches checkpoint
 let checkpointActivated = false;          // visual: flag flipped after touch
+let checkpointFlashTimer = 0;            // frames remaining for checkpoint flash (v0.6.1)
 
 // ── Player ─────────────────────────────────────────────
 const player = {
@@ -3455,7 +3456,8 @@ function respawnPlayer() {
   lives--;
   deathsThisRun++;
   // Reset player position — use checkpoint if reached, else near camera
-  if (checkpointReached && cameraX < CHECKPOINT_X) {
+  const cpRespawn = checkpointReached && cameraX < CHECKPOINT_X;
+  if (cpRespawn) {
     // Respawn at checkpoint location
     player.x = CHECKPOINT_X + 40;
     cameraX = Math.max(0, CHECKPOINT_X - RECENTER_TARGET_X);
@@ -3484,9 +3486,11 @@ function respawnPlayer() {
   hurtShakeTimer = 0;
   hurtFlashTimer = 0;
   // Remove nearby enemies/shells that could instantly re-kill
+  // Wider clear radius when respawning at checkpoint (400 vs 250)
+  const clearRadius = cpRespawn ? 400 : 250;
   turtles = turtles.filter(t => {
     const dist = Math.abs(t.x - player.x);
-    return dist > 250;
+    return dist > clearRadius;
   });
   // Brief invincibility popup
   spawnScorePopup(player.x, player.y - 20, 0);
@@ -4667,6 +4671,7 @@ function resetGame() {
   deathsThisRun = 0;
   checkpointReached = false;
   checkpointActivated = false;
+  checkpointFlashTimer = 0;
   initClouds();
   initHills();
   // Seed initial chunks (replaces old spawnInitialPipes)
@@ -5451,6 +5456,7 @@ function update() {
     if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, cpX, cpY, CHECKPOINT_FLAG_W + CHECKPOINT_BANNER_W, CHECKPOINT_FLAG_H)) {
       checkpointReached = true;
       checkpointActivated = true;
+      checkpointFlashTimer = 60; // 1s flash effect
       spawnScorePopup(cpX, cpY - 8, 0);
       scorePopups[scorePopups.length - 1].text = 'CHECKPOINT!';
     }
@@ -5998,6 +6004,29 @@ function draw() {
     ctx.restore();
   }
 
+  // ── Checkpoint flash overlay ──────────────────────────
+  if (checkpointFlashTimer > 0) {
+    checkpointFlashTimer--;
+    const cpAlpha = Math.min(1, checkpointFlashTimer / 30) * 0.25;
+    ctx.save();
+    ctx.fillStyle = `rgba(0, 255, 0, ${cpAlpha})`;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+    // Large centered "CHECKPOINT!" text that fades
+    if (checkpointFlashTimer > 15) {
+      const txtAlpha = Math.min(1, (checkpointFlashTimer - 15) / 30);
+      ctx.globalAlpha = txtAlpha;
+      ctx.font = 'bold 28px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#0f0';
+      ctx.fillText('CHECKPOINT!', DESIGN_W / 2, DESIGN_H / 2 - 20);
+      ctx.font = '14px monospace';
+      ctx.fillStyle = '#bfb';
+      ctx.fillText('Progress saved', DESIGN_W / 2, DESIGN_H / 2 + 8);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
   // ── Level Clear overlay ────────────────────────────────
   if (levelCleared && levelClearPhase === 'done') {
     ctx.save();
@@ -6019,9 +6048,21 @@ function draw() {
     const starStr = starFilled.repeat(levelClearStars) + starEmpty.repeat(3 - levelClearStars);
     ctx.fillStyle = '#ffd700';
     ctx.fillText(starStr, DESIGN_W / 2, DESIGN_H / 2 + 58);
+    // Star rating source summary
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#aaa';
+    const timeMet = survivalTime <= STAR_TIME_THRESHOLDS[0];
+    const coinMet = coins >= STAR_COIN_THRESHOLD;
+    const noDeathMet = deathsThisRun === 0;
+    const parts = [];
+    parts.push(timeMet ? '\u2713 Time \u2264' + Math.floor(STAR_TIME_THRESHOLDS[0]) + 's' : '\u2717 Time >' + Math.floor(STAR_TIME_THRESHOLDS[0]) + 's');
+    if (coinMet) parts.push('\u2713 Coins \u2265' + STAR_COIN_THRESHOLD);
+    else if (noDeathMet) parts.push('\u2713 No deaths');
+    else parts.push('\u2717 Coins <' + STAR_COIN_THRESHOLD + ' & died');
+    ctx.fillText(parts.join('  |  '), DESIGN_W / 2, DESIGN_H / 2 + 76);
     ctx.font = '14px monospace';
     ctx.fillStyle = '#ccc';
-    ctx.fillText('Press any key to restart', DESIGN_W / 2, DESIGN_H / 2 + 82);
+    ctx.fillText('Press any key to restart', DESIGN_W / 2, DESIGN_H / 2 + 98);
     ctx.restore();
   }
 
