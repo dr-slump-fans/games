@@ -1376,7 +1376,7 @@ Shortcuts use the `else` branch of the single hidden block roll, so a chunk gets
 
 ### Version Display
 
-The title/start screen now shows the game version (`GAME_VERSION` constant, currently `v0.5.0`) below the START button. The version is displayed in small gray text and only appears on the title screen, not on game-over.
+The title/start screen now shows the game version (`GAME_VERSION` constant, currently `v0.5.1`) below the START button. The version is displayed in small gray text and only appears on the title screen, not on game-over.
 
 ## Level Rhythm Sections — Underworld / Tower (Mario List Item 5, Step 1)
 
@@ -1442,6 +1442,42 @@ Section biases do **not** bypass any existing safety rules:
 | `SECTION_MIN_CHUNKS` | `5` | Minimum chunks per section |
 | `SECTION_MAX_CHUNKS` | `9` | Maximum chunks per section |
 | `SECTION_ANNOUNCE_DURATION` | `120` | Frames to show section announcement (~2s) |
+
+## Section Transition Visual Layer & Difficulty Smoothing (Mario List Item 5, Step 2)
+
+Building on the rhythm section system from Step 1, this step adds a **visual transition flash** when switching between UNDERWORLD and TOWER sections, and **softens the first chunk** of each new section to prevent difficulty spikes at the boundary.
+
+### Visual Transition Flash
+
+When a section switch occurs, a brief color flash overlay appears for ~0.75 seconds:
+
+- **Edge vignette bars** at the top and bottom 8% of the screen, tinted with the section's announce color
+- **Subtle full-screen tint** at ~35% of the vignette intensity
+- Quick flash-in (first 20% of duration) then smooth fade-out (remaining 80%)
+- UNDERWORLD flash: orange (#ff6644), TOWER flash: cyan (#44ccff)
+
+The effect is lightweight — no sprite or asset changes, just a brief atmospheric pulse that signals the environment shift.
+
+### Transition Chunk Difficulty Smoothing
+
+The first chunk spawned in a new section uses blended parameters to avoid a sudden difficulty spike:
+
+- **Weight blending**: section weight multipliers are softened to 40% strength (same approach as theme transitions)
+- **Parameter blending**: section parameter offsets (`maxPipeH`, `maxTopH`) are applied at 40% instead of 100%
+- **Safety bias**: the first chunk also biases toward safer types (`rest` weight boosted to ≥20, `pipe_mix` ×0.6, `turtle_zone` ×0.5)
+
+This mirrors the existing `themeTransitionActive` pattern, ensuring the player has a brief adjustment period before the full section feel kicks in.
+
+### New Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `SECTION_FLASH_DURATION` | `45` | Frames for the section flash overlay (~0.75s) |
+| `sectionTransitionActive` | `bool` | True during first chunk of a new section |
+
+### Version
+
+Updated `GAME_VERSION` from `v0.5.0` → **`v0.5.1`**.
 
 ## Frame-rate Independent Simulation
 
