@@ -1096,6 +1096,32 @@ Bottom status line adds:
 - `VIB:ON/OFF` — current vibration state
 - `VIB_SUPPORTED:true/false` — whether the browser supports the Vibration API
 
+## Step 2: Coin Sound Effects & Combo Feedback
+
+Adds a short synthesized "coin" sound when a question block is hit, plus a pitch-rising combo system for rapid consecutive hits.
+
+### Coin SFX
+
+A two-note square-wave chirp (root + fifth) plays each time a question block pops a coin. The sound is generated entirely via WebAudio (`OscillatorNode` + `GainNode`) — no external audio files.
+
+- Base frequency: **988 Hz** (B5)
+- Volume: gain 0.06, fading to 0 over 60 ms per note — conservative to avoid being jarring
+- Respects the existing **SFX ON/OFF** toggle
+
+### Combo Pitch Scaling
+
+When question blocks are hit in rapid succession (within **1.2 seconds**), each subsequent hit raises the coin sound by one semitone (100 cents). This gives an ascending "staircase" feel that rewards rhythmic play.
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `COIN_COMBO_WINDOW` | `1.2` | Seconds — hits within this window continue the combo |
+| `COIN_COMBO_MAX` | `8` | Maximum combo level (caps pitch at +8 semitones) |
+| `COIN_BASE_FREQ` | `988` | Base frequency in Hz (B5) |
+
+- Combo level resets to 0 when the window expires without a new hit
+- Combo state resets on game restart
+- No scoring or gameplay changes — combo only affects audio pitch
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.

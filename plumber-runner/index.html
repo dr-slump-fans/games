@@ -324,6 +324,9 @@ const BRICK_MIN_HEIGHT_ABOVE_GROUND = 36 * 2; // 72px (2× player.h)
 // ── Question Block & Coin Constants ──────────────────
 const QUESTION_BLOCK_CHANCE = 0.30;  // chance a brick becomes a question block (coin reward)
 const COIN_SCORE = 10;               // points per coin collected from question block
+const COIN_COMBO_WINDOW = 1.2;       // seconds — hits within this window count as combo
+const COIN_COMBO_MAX = 8;            // max combo level (caps pitch scaling)
+const COIN_BASE_FREQ = 988;          // B5 — base coin sound frequency
 
 // ── Special Brick & Mushroom Constants ───────────────
 const SPECIAL_BRICK_CHANCE = 0.25;   // chance a stepping-stone brick becomes a special brick
@@ -1148,6 +1151,29 @@ function sfxBossClear() {
   });
 }
 
+// ── SFX: Coin Pop (short chirp, pitch rises with combo) ──
+function sfxCoinPop(comboLevel) {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  // Pitch rises by ~100 cents per combo step (one semitone)
+  const step = Math.min(comboLevel, COIN_COMBO_MAX);
+  const freq = COIN_BASE_FREQ * Math.pow(2, step / 12);
+  // Two quick notes for a classic coin "ding-ding"
+  const notes = [freq, freq * 1.5]; // root + fifth above
+  notes.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(f, now + i * 0.07);
+    gain.gain.setValueAtTime(0.06, now + i * 0.07);
+    gain.gain.linearRampToValueAtTime(0, now + i * 0.07 + 0.06);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + i * 0.07);
+    osc.stop(now + i * 0.07 + 0.07);
+  });
+}
+
 // ── Haptics: Vibration API wrapper ───────────────────
 const vibSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
 
@@ -1341,6 +1367,8 @@ let bossWaveNextTrigger = BOSS_WAVE_INTERVAL; // survivalTime threshold for next
 
 // ── Coin State ──────────────────────────────────────────
 let coins = 0;                // total coins collected this run
+let coinComboLevel = 0;       // current coin combo streak (resets after COIN_COMBO_WINDOW)
+let coinComboTimer = 0;       // seconds remaining in combo window
 let coinPops = [];            // active coin pop animations: { x, y, vy, life }
 
 // ── Mushroom & Double Jump State ─────────────────────
@@ -3392,6 +3420,10 @@ function resolveSweptMovement(playerVY, playerDX) {
           brick.used = true;
           coins++;
           score += COIN_SCORE;
+          // Coin combo: track rapid hits for pitch-rising SFX
+          coinComboLevel = (coinComboTimer > 0) ? coinComboLevel + 1 : 0;
+          coinComboTimer = COIN_COMBO_WINDOW;
+          sfxCoinPop(coinComboLevel);
           spawnCoinPop(brick.x + BRICK_W / 2 - 4, brick.y);
           spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, COIN_SCORE);
           triggerCombo(COIN_SCORE);
@@ -3932,6 +3964,8 @@ function resetGame() {
   score = 0;
   coins = 0;
   coinPops = [];
+  coinComboLevel = 0;
+  coinComboTimer = 0;
   frameCount = 0;
   survivalTime = 0;
   bonusTime = 0;
@@ -4341,6 +4375,9 @@ function update() {
   if (coinRushWindowTimer > 0) coinRushWindowTimer = Math.max(0, coinRushWindowTimer - FIXED_DT);
   if (coinRushTimer > 0) coinRushTimer = Math.max(0, coinRushTimer - FIXED_DT);
   if (coinRushWindowTimer <= 0 && coinRushTimer <= 0) coinRushChain = 0;
+  // Coin combo timer
+  if (coinComboTimer > 0) { coinComboTimer = Math.max(0, coinComboTimer - FIXED_DT); }
+  if (coinComboTimer <= 0) coinComboLevel = 0;
   // ── Manual horizontal movement (auto-acceleration + reverse brake) ─────
   // Compute desired move direction from input
   let moveDir = 0;
