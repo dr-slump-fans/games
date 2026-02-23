@@ -1576,6 +1576,39 @@ When debug mode is active, the bottom status area includes:
 | 144 Hz | 0 or 1 (alternating) | Same as 120 Hz — no speed increase |
 | Tab hidden | 0 (clamped) | dt capped at 100ms, max 5 catch-up steps — no death spiral or teleporting |
 
+## Player Form System — Lives & Hurt State (Mario List Item 6, Step 1)
+
+The player now has two form states: **small** and **big**.
+
+### Form States
+
+| Form | Visual | Behaviour on Hit |
+|------|--------|-------------------|
+| `small` | Normal size (28×36) | Loses a life / game over (existing death flow) |
+| `big` | 1.3× scaled sprite | Downgrades to `small` + ~2s invincibility frames |
+
+### Becoming Big
+
+- Collecting a **mushroom** power-up sets `playerForm = 'big'` (in addition to existing double-jump timer).
+- If already `big`, mushroom just refreshes the double-jump timer.
+
+### Hurt / Invincibility Rules
+
+- `big` → hit → becomes `small`, gains **120 frames (~2s)** of invincibility (sprite flashes).
+- `small` → hit → existing death/respawn/game-over flow.
+- During invincibility frames, all damage sources are ignored.
+
+### Visual Feedback
+
+- **Big form**: player sprite is drawn at 1.3× scale anchored at feet.
+- **Invincibility flash**: sprite alternates visible/hidden every 4 frames.
+- **HUD**: `SMALL` (light blue) / `BIG` (gold) label shown below the life counter.
+
+### State Resets
+
+- `resetGame()` → `playerForm = 'small'`, `hurtInvincibleTimer = 0`
+- `respawnPlayer()` → same resets (form lost on death)
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.
