@@ -235,6 +235,7 @@ This prevents unfair situations where a single ultra-tall pipe appears with no w
 | Pipe pair | Bottom + ceiling pipe together — navigate through the gap |
 | Breakable brick | Stepping-stone brick placed before pipes — **stand on it or smash it from below** for bonus points! |
 | Special brick | Purple brick with mushroom icon — break it from below to spawn a **mushroom power-up** |
+| Question block | Golden block with "?" — hit from below to pop a **coin** (+10 points), then becomes a used grey block (stays solid) |
 | Mushroom | Red mushroom item — collect it to gain **double jump** ability for 25 seconds |
 | Standalone brick group | 1–3 brick obstacle cluster that **replaces a pipe** entirely — a lighter challenge with breakable targets |
 
@@ -383,10 +384,47 @@ Mushrooms are collected **only when the player's inset pickup box overlaps the m
 | `AIR_JUMP_INITIAL` | `-4.2` | Air jump initial velocity (60% of ground jump) |
 | `AIR_JUMP_HOLD_MAX_T` | `8` | Air jump hold frames (55% of ground jump) |
 
+## Question Blocks & Coin System
+
+### Question Blocks
+
+**~30% of non-special bricks** are randomly upgraded to **question blocks** (mutually exclusive with special bricks — a brick is either normal, special, or question). Question blocks are visually distinct:
+
+- **Golden yellow color scheme** instead of brown/terracotta
+- **Animated white "?" glyph** that shimmers
+- **Corner rivets** for a metallic look
+
+Question blocks follow different rules from normal bricks:
+
+1. **Single-use**: each question block can only be triggered **once**
+2. **Not breakable**: hitting a question block from below does NOT destroy it — it stays solid as a platform
+3. **Coin pop**: on hit, a gold coin pops upward from the block with a short arc animation, then fades out
+4. **Score**: each coin awards **+10 points** (`COIN_SCORE`)
+5. **Used state**: after triggering, the block turns into a **dark grey "used block"** — visually inert, still solid
+
+### Coin Counter HUD
+
+A persistent **COIN: N** counter is displayed in the top-right HUD area (below the score), showing total coins collected this run. The counter resets to 0 on game restart.
+
+### Coin Pop Animation
+
+When a question block is hit:
+- A small golden coin sprite (8×10 px) pops upward from the block
+- The coin rises with initial velocity, decelerates under gravity, then fades out over ~0.5 seconds
+- A floating `+10` score popup appears simultaneously
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `QUESTION_BLOCK_CHANCE` | `0.30` | Chance a non-special brick becomes a question block |
+| `COIN_SCORE` | `10` | Points awarded per coin from question block |
+
 ### What Cannot Be Broken
 
 - **Ground** — always solid
 - **Pipes** (bottom and ceiling) — always solid, act as platforms or obstacles
+- **Question blocks** — they turn into used blocks but remain solid; they cannot be shattered
 - Only the dedicated **breakable brick** obstacles can be destroyed
 
 ### Brick Interaction
