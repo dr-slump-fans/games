@@ -196,6 +196,13 @@ canvas {
   z-index: 12;
   transition: opacity 0.5s ease;
 }
+#hud-section-label {
+  font-size: 11px; margin-top: 2px; color: #aaa;
+  transition: color 0.4s ease, text-shadow 0.4s ease;
+}
+#hud-section-label.highlight {
+  text-shadow: 0 0 8px currentColor, 0 0 16px currentColor;
+}
 #hud-section-announce {
   position: absolute; top: 28%; left: 50%;
   transform: translate(-50%, -50%);
@@ -218,6 +225,7 @@ canvas {
       <div id="hud-time">00:00</div>
       <div id="hud-level">Lv.1 EASY</div>
       <div id="hud-level-bar"><div id="hud-level-fill"></div></div>
+      <div id="hud-section-label">UNDERWORLD</div>
     </div>
     <div id="hud-right">
       <div id="score-display">SCORE: 0</div>
@@ -262,7 +270,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.5.1';
+const GAME_VERSION = 'v0.5.2';
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -603,6 +611,12 @@ const SECTION_PARAM_OFFSETS = {
   TOWER:      { maxPipeH: 30,  maxTopH: -15 },   // taller bottom pipes → vertical climbing
 };
 
+// Subtle sky tint per section (rgba overlaid on sky gradient for ambient cue)
+const SECTION_SKY_TINT = {
+  UNDERWORLD: 'rgba(180, 80, 40, 0.06)',   // warm amber undertone
+  TOWER:      'rgba(60, 120, 200, 0.06)',   // cool blue-ish undertone
+};
+
 // Section announce text and color
 const SECTION_ANNOUNCE = {
   UNDERWORLD: { text: 'ENTER UNDERWORLD', color: '#ff6644' },
@@ -615,6 +629,7 @@ let sectionChunksRemaining = 0;
 let sectionAnnounceTimer = 0;
 let sectionAnnounceName = '';
 let sectionTransitionActive = false; // true during the first chunk of a new section
+let sectionTransitionCountdown = 0;  // ramp-in counter: 2→1→0 over first 2 chunks
 let sectionFlashTimer = 0;          // visual flash overlay timer (frames)
 let sectionFlashColor = '';          // color for the flash overlay
 const SECTION_FLASH_DURATION = 45;   // ~0.75 seconds at 60fps
@@ -629,18 +644,22 @@ function initSectionState() {
   sectionAnnounceTimer = SECTION_ANNOUNCE_DURATION;
   sectionAnnounceName = currentSection;
   sectionTransitionActive = false;
+  sectionTransitionCountdown = 0;
   sectionFlashTimer = 0;
   sectionFlashColor = '';
 }
 
 function advanceSectionState() {
   sectionChunksRemaining--;
-  sectionTransitionActive = false;
+  // Ramp-in countdown: decrement each chunk, transition smoothing active while > 0
+  if (sectionTransitionCountdown > 0) sectionTransitionCountdown--;
+  sectionTransitionActive = sectionTransitionCountdown > 0;
   if (sectionChunksRemaining <= 0) {
     currentSection = pickNextSection();
     sectionChunksRemaining = SECTION_MIN_CHUNKS + Math.floor(Math.random() * (SECTION_MAX_CHUNKS - SECTION_MIN_CHUNKS + 1));
     sectionAnnounceTimer = SECTION_ANNOUNCE_DURATION;
     sectionAnnounceName = currentSection;
+    sectionTransitionCountdown = 2; // smooth over first 2 chunks of new section
     sectionTransitionActive = true; // first chunk of new section is a transition
     // Trigger visual flash overlay
     const sann = SECTION_ANNOUNCE[currentSection];
@@ -652,11 +671,13 @@ function advanceSectionState() {
 function applySectionWeights(weights, section, isTransition) {
   const mults = SECTION_WEIGHT_MULTS[section];
   const result = {};
+  // Graduated blend: countdown 2→blend 0.4, countdown 1→blend 0.7, 0→full 1.0
+  const blend = isTransition ? (sectionTransitionCountdown >= 2 ? 0.4 : 0.7) : 1.0;
   for (const type of CHUNK_TYPES) {
     let w = (weights[type] || 0) * (mults[type] || 1);
-    // During transition, blend toward neutral to avoid sudden difficulty spike
-    if (isTransition) {
-      w = (weights[type] || 0) * 0.6 + w * 0.4;
+    // During transition ramp-in, blend toward neutral to avoid sudden difficulty spike
+    if (blend < 1.0) {
+      w = (weights[type] || 0) * (1 - blend) + w * blend;
     }
     result[type] = Math.max(0, w);
   }
@@ -665,7 +686,8 @@ function applySectionWeights(weights, section, isTransition) {
 
 function applySectionParams(diffParams, section, isTransition) {
   const offsets = SECTION_PARAM_OFFSETS[section];
-  const blend = isTransition ? 0.4 : 1.0;
+  // Graduated ramp-in: countdown 2→0.4, countdown 1→0.7, 0→full 1.0
+  const blend = isTransition ? (sectionTransitionCountdown >= 2 ? 0.4 : 0.7) : 1.0;
   const result = { ...diffParams };
   result.maxPipeH = Math.max(60, result.maxPipeH + Math.round(offsets.maxPipeH * blend));
   result.maxTopH = Math.max(40, result.maxTopH + Math.round(offsets.maxTopH * blend));
@@ -1123,11 +1145,12 @@ function spawnChunk() {
     weights.double_platform *= 0.5;
   }
 
-  // During section transition, also bias toward safer chunks
+  // During section transition ramp-in, bias toward safer chunks (stronger for chunk 1)
   if (sectionTransitionActive) {
-    weights.rest = Math.max(weights.rest, 20);
-    weights.pipe_mix *= 0.6;
-    weights.turtle_zone *= 0.5;
+    const safetyMult = sectionTransitionCountdown >= 2 ? 1.0 : 0.5;
+    weights.rest = Math.max(weights.rest, 20 * safetyMult + 10);
+    weights.pipe_mix *= (1 - 0.4 * safetyMult);
+    weights.turtle_zone *= (1 - 0.5 * safetyMult);
   }
 
   let type = selectChunkType(weights);
@@ -1584,6 +1607,7 @@ const hudBossClear = document.getElementById('hud-boss-clear');
 const hudTheme = document.getElementById('hud-theme');
 const hudThemeAnnounce = document.getElementById('hud-theme-announce');
 const hudSectionAnnounce = document.getElementById('hud-section-announce');
+const hudSectionLabel = document.getElementById('hud-section-label');
 const btnSfx = document.getElementById('btn-sfx');
 const btnVib = document.getElementById('btn-vib');
 
@@ -5582,6 +5606,17 @@ function update() {
   } else {
     hudSectionAnnounce.style.display = 'none';
   }
+
+  // Persistent section label with highlight glow on transition
+  const sLabelInfo = SECTION_ANNOUNCE[currentSection];
+  hudSectionLabel.textContent = currentSection;
+  if (sectionAnnounceTimer > 0) {
+    hudSectionLabel.style.color = sLabelInfo ? sLabelInfo.color : '#fff';
+    hudSectionLabel.classList.add('highlight');
+  } else {
+    hudSectionLabel.style.color = '#aaa';
+    hudSectionLabel.classList.remove('highlight');
+  }
 }
 
 function draw() {
@@ -5592,6 +5627,13 @@ function draw() {
   grad.addColorStop(1, themeSky.bottom);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+
+  // Subtle section sky tint overlay for ambient differentiation
+  const sectionTint = SECTION_SKY_TINT[currentSection];
+  if (sectionTint) {
+    ctx.fillStyle = sectionTint;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H - GROUND_H);
+  }
 
   // Clouds (parallax — not affected by camera)
   for (const c of clouds) {
@@ -5881,7 +5923,7 @@ function draw() {
     const chunkPhaseNames = ['Tutorial', 'Medium', 'Hard', 'Max'];
     ctx.fillText(`CHUNK:${cdi ? '#' + cdi.id + ' ' + cdi.type : '-'} PHASE:${cdi ? chunkPhaseNames[cdi.diffPhase] || cdi.diffPhase : '-'} REROLLS:${cdi ? cdi.rerolls : 0} NEXT_X:${Math.round(nextChunkX)} TOTAL:${chunkIdCounter} CONSEC_DANGER:${consecutiveDangerChunks}`, 4, DESIGN_H - 74);
     ctx.fillText(`THEME:${currentTheme} REMAIN:${themeChunksRemaining} NEXT:${nextTheme || '-'} TRANSITION:${themeTransitionActive ? 'YES' : 'NO'} COLOR_LERP:${themeColorLerp.toFixed(2)}`, 4, DESIGN_H - 84);
-    ctx.fillText(`SECTION:${currentSection} REMAIN:${sectionChunksRemaining} TRANSITION:${sectionTransitionActive ? 'YES' : 'NO'} FLASH:${sectionFlashTimer}`, 4, DESIGN_H - 94);
+    ctx.fillText(`SECTION:${currentSection} REMAIN:${sectionChunksRemaining} TRANSITION:${sectionTransitionActive ? 'YES' : 'NO'} RAMP:${sectionTransitionCountdown} FLASH:${sectionFlashTimer}`, 4, DESIGN_H - 94);
     ctx.restore();
   }
 }
@@ -5965,6 +6007,8 @@ function showOverlay(title, msg, sc) {
   hudBossClear.style.display = 'none';
   hudThemeAnnounce.style.display = 'none';
   hudSectionAnnounce.style.display = 'none';
+  hudSectionLabel.classList.remove('highlight');
+  hudSectionLabel.style.color = '#aaa';
 }
 
 function hideOverlay() {

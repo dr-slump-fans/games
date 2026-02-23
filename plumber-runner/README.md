@@ -1376,7 +1376,7 @@ Shortcuts use the `else` branch of the single hidden block roll, so a chunk gets
 
 ### Version Display
 
-The title/start screen now shows the game version (`GAME_VERSION` constant, currently `v0.5.1`) below the START button. The version is displayed in small gray text and only appears on the title screen, not on game-over.
+The title/start screen now shows the game version (`GAME_VERSION` constant, currently `v0.5.2`) below the START button. The version is displayed in small gray text and only appears on the title screen, not on game-over.
 
 ## Level Rhythm Sections — Underworld / Tower (Mario List Item 5, Step 1)
 
@@ -1478,6 +1478,49 @@ This mirrors the existing `themeTransitionActive` pattern, ensuring the player h
 ### Version
 
 Updated `GAME_VERSION` from `v0.5.0` → **`v0.5.1`**.
+
+## Section Final Integration & Polish (Mario List Item 5, Step 3 — Completion)
+
+This step completes the rhythm section system (Item 5 main trunk) with final smoothing, identification polish, and ambient cues.
+
+### 2-Chunk Transition Ramp-In
+
+The transition smoothing from Step 2 (single chunk) is extended to **2 chunks**:
+
+- **Chunk 1** (first after switch): section weights/params blend at 40% strength, strong safety bias (rest ≥30, pipe_mix ×0.6, turtle_zone ×0.5)
+- **Chunk 2**: blend increases to 70% strength, lighter safety bias (rest ≥20, pipe_mix ×0.8, turtle_zone ×0.75)
+- **Chunk 3+**: full section parameters, no safety override
+
+This eliminates difficulty spikes at section boundaries while keeping the distinct section feel within 2 chunks. Implemented via `sectionTransitionCountdown` (2→1→0) which graduates the blend factor in `applySectionWeights()` and `applySectionParams()`.
+
+### Persistent HUD Section Label
+
+A small label below the level bar shows the current section name (`UNDERWORLD` / `TOWER`):
+
+- Default: subtle gray text (#aaa), 11px monospace
+- On section switch: temporarily highlights with the section's announce color and a CSS glow (`text-shadow`) for the duration of the announce timer (~2s), then fades back to gray
+- Provides at-a-glance section awareness without cluttering the HUD
+
+### Section Sky Tint
+
+A very subtle full-sky color overlay differentiates sections at the ambient level:
+
+- **UNDERWORLD**: warm amber tint (`rgba(180, 80, 40, 0.06)`)
+- **TOWER**: cool blue tint (`rgba(60, 120, 200, 0.06)`)
+
+The tint is applied as a single `fillRect` over the sky gradient (below clouds/hills), barely perceptible but enough to shift the mood between dense underground corridors and open vertical climbs.
+
+### New Variables
+
+| Variable | Type | Purpose |
+|----------|------|---------|
+| `sectionTransitionCountdown` | `int` | Ramp-in counter: starts at 2, decrements each chunk, drives graduated blend |
+| `SECTION_SKY_TINT` | `object` | Per-section rgba sky overlay color |
+| `hudSectionLabel` | `element` | Persistent HUD section name label |
+
+### Version
+
+Updated `GAME_VERSION` from `v0.5.1` → **`v0.5.2`**.
 
 ## Frame-rate Independent Simulation
 
