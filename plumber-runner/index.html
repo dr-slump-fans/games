@@ -271,7 +271,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.5.3';
+const GAME_VERSION = 'v0.5.4';
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -1487,6 +1487,34 @@ function sfxShellCombo(comboLevel) {
   }
 }
 
+// ── SFX: Hurt (big→small downgrade — short descending buzz) ──
+function sfxHurt() {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  // Quick descending two-tone "oof" — not harsh, just noticeable
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(520, now);
+  osc.frequency.linearRampToValueAtTime(220, now + 0.12);
+  gain.gain.setValueAtTime(0.12, now);
+  gain.gain.linearRampToValueAtTime(0, now + 0.15);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.16);
+  // Second "thud" undertone
+  const osc2 = ctx.createOscillator();
+  const gain2 = ctx.createGain();
+  osc2.type = 'sine';
+  osc2.frequency.setValueAtTime(120, now + 0.03);
+  gain2.gain.setValueAtTime(0.08, now + 0.03);
+  gain2.gain.linearRampToValueAtTime(0, now + 0.13);
+  osc2.connect(gain2).connect(ctx.destination);
+  osc2.start(now + 0.03);
+  osc2.stop(now + 0.14);
+}
+
 // ── Haptics: Vibration API wrapper ───────────────────
 const vibSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
 
@@ -1497,6 +1525,7 @@ function vibrate(pattern) {
 
 function vibBossStart() { vibrate([80, 40, 80, 40, 120]); }
 function vibBossClear() { vibrate([40, 30, 40]); }
+function vibHurt() { vibrate([60, 30, 40]); }
 
 // Countdown beep last-second tracker (prevents duplicate beeps per second)
 let bossCountdownLastSec = -1;
@@ -1704,6 +1733,13 @@ const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is acti
 let playerForm = 'small';        // 'small' | 'big'
 let hurtInvincibleTimer = 0;     // frames of invincibility after taking a hit (big→small)
 const HURT_INVINCIBLE_FRAMES = 120; // ~2 seconds at 60fps
+const BIG_SPEED_BONUS = 1.05;        // BIG form: +5% movement speed (subtle advantage)
+
+// ── Hurt Feedback State ─────────────────────────────────
+let hurtShakeTimer = 0;             // frames of screen-shake on big→small
+const HURT_SHAKE_FRAMES = 12;       // short 12-frame shake (~0.2s)
+let hurtFlashTimer = 0;             // frames of red flash overlay on big→small
+const HURT_FLASH_FRAMES = 8;        // quick 8-frame red flash
 
 // ── Turtle Enemy State ──────────────────────────────────
 // Each turtle: { x, y, vx, vy, onGround, state, direction, animFrame, deadTimer, kickGrace, turnCooldown, shellCombo }
@@ -3411,6 +3447,8 @@ function respawnPlayer() {
   doubleJumpTimer = 0;
   playerForm = 'small';
   hurtInvincibleTimer = 0;
+  hurtShakeTimer = 0;
+  hurtFlashTimer = 0;
   // Remove nearby enemies/shells that could instantly re-kill
   turtles = turtles.filter(t => {
     const dist = Math.abs(t.x - player.x);
@@ -3430,6 +3468,10 @@ function handlePlayerHurt() {
     // Downgrade to small, grant invincibility frames
     playerForm = 'small';
     hurtInvincibleTimer = HURT_INVINCIBLE_FRAMES;
+    hurtShakeTimer = HURT_SHAKE_FRAMES;   // screen shake feedback
+    hurtFlashTimer = HURT_FLASH_FRAMES;   // red flash overlay
+    sfxHurt();                             // audio feedback
+    vibHurt();                             // haptic feedback
     spawnScorePopup(player.x, player.y - 20, 0);
     scorePopups[scorePopups.length - 1].text = 'HIT!';
     if (DEBUG_MODE) console.log('%c[Form] big→small, invincible for ' + HURT_INVINCIBLE_FRAMES + ' frames', 'color: #ff9800');
@@ -4541,6 +4583,8 @@ function resetGame() {
   isAirJump = false;
   playerForm = 'small';
   hurtInvincibleTimer = 0;
+  hurtShakeTimer = 0;
+  hurtFlashTimer = 0;
   diffLevel = 0;
   diffProgress = 0;
   scrollSpeed = 0;
@@ -4955,7 +4999,8 @@ function update() {
 
   // Target speed: holding a direction auto-ramps toward max speed
   const rushMul = coinRushTimer > 0 ? COIN_RUSH_SPEED_MUL : 1.0;
-  const targetVX = moveDir * PLAYER_MAX_SPEED * rushMul;
+  const bigMul = playerForm === 'big' ? BIG_SPEED_BONUS : 1.0; // BIG form: subtle speed advantage
+  const targetVX = moveDir * PLAYER_MAX_SPEED * rushMul * bigMul;
 
   // Detect reverse-braking: input opposes current velocity
   const reversing = moveDir !== 0 && moveDir * playerVX < 0;
@@ -5280,6 +5325,8 @@ function update() {
 
   // Update hurt invincibility timer
   if (hurtInvincibleTimer > 0) hurtInvincibleTimer--;
+  if (hurtShakeTimer > 0) hurtShakeTimer--;
+  if (hurtFlashTimer > 0) hurtFlashTimer--;
 
   // ── Fun Pack v1: Combo timer decay ────────────────────
   if (comboTimer > 0) {
@@ -5507,8 +5554,9 @@ function update() {
     ? `COIN: ${coins}  x${coinComboLevel + 1}`
     : `COIN: ${coins}`;
   hudLife.textContent = `LIFE: ${lives}`;
-  hudForm.textContent = playerForm === 'big' ? 'BIG' : 'SMALL';
-  hudForm.style.color = playerForm === 'big' ? '#f1c40f' : '#adf';
+  hudForm.textContent = playerForm === 'big' ? '\u2605 BIG' : 'SMALL';
+  hudForm.style.color = playerForm === 'big' ? '#fdd835' : '#adf';
+  hudForm.style.textShadow = playerForm === 'big' ? '0 0 6px #f1c40f' : 'none';
 
   // Update HUD
   const mins = Math.floor(survivalTime / 60);
@@ -5654,6 +5702,14 @@ function update() {
 }
 
 function draw() {
+  // Screen shake for hurt feedback
+  if (hurtShakeTimer > 0) {
+    const intensity = (hurtShakeTimer / HURT_SHAKE_FRAMES) * 3; // decays from 3px to 0
+    const sx = (Math.random() - 0.5) * intensity * 2;
+    const sy = (Math.random() - 0.5) * intensity * 2;
+    ctx.save();
+    ctx.translate(sx, sy);
+  }
   // Sky gradient (theme-aware)
   const themeSky = getThemeSkyColors();
   const grad = ctx.createLinearGradient(0, 0, 0, DESIGN_H - GROUND_H);
@@ -5763,13 +5819,35 @@ function draw() {
 
   // Player
   if (state === 'playing' || state === 'dead') {
-    // Invincibility flash: skip rendering every other 4-frame block
-    const invFlash = hurtInvincibleTimer > 0 && (Math.floor(hurtInvincibleTimer / 4) % 2 === 0);
-    if (!invFlash) {
+    // Invincibility flicker: alternates between full and ghost opacity
+    // Blink rate starts fast (period ~3) and slows as invincibility fades (period ~8)
+    let drawPlayerNow = true;
+    if (hurtInvincibleTimer > 0) {
+      const invRatio = hurtInvincibleTimer / HURT_INVINCIBLE_FRAMES; // 1→0
+      const invPeriod = Math.round(3 + 5 * (1 - invRatio));
+      const invPhase = Math.floor(hurtInvincibleTimer / invPeriod) % 2 === 0;
+      ctx.save();
+      ctx.globalAlpha = invPhase ? 0.25 : 0.9; // ghost/solid alternation (always visible)
+    }
+    if (drawPlayerNow) {
       if (playerForm === 'big') {
         const sc = 1.3;
         const cx = player.x + player.w / 2;
         const by = player.y + player.h; // anchor at feet
+        // BIG glow aura — subtle pulsing golden glow behind player
+        const glowPulse = 0.12 + Math.sin(frameCount * 0.08) * 0.05;
+        ctx.save();
+        ctx.globalAlpha = glowPulse;
+        ctx.fillStyle = '#fdd835';
+        const gw = player.w * sc + 8;
+        const gh = player.h * sc + 6;
+        const gx = cx - gw / 2;
+        const gy = by - gh;
+        ctx.beginPath();
+        ctx.ellipse(cx, by - gh / 2, gw / 2, gh / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        // Draw scaled BIG player
         ctx.save();
         ctx.translate(cx, by);
         ctx.scale(sc, sc);
@@ -5780,6 +5858,7 @@ function draw() {
         drawPlayer(player.x, player.y, player.frame);
       }
     }
+    if (hurtInvincibleTimer > 0) ctx.restore(); // end invincibility alpha
   } else {
     // Title screen: show idle animation
     const prevAnim = player.animState;
@@ -5818,6 +5897,16 @@ function draw() {
     ctx.fillRect(0, DESIGN_H * 0.92, DESIGN_W, DESIGN_H * 0.08);
     // Subtle full-screen tint
     ctx.globalAlpha = alpha * 0.35;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+    ctx.restore();
+  }
+
+  // ── Hurt red flash overlay (big→small) ──────────────────
+  if (hurtFlashTimer > 0) {
+    const hfAlpha = (hurtFlashTimer / HURT_FLASH_FRAMES) * 0.22; // quick fade from 22% to 0
+    ctx.save();
+    ctx.globalAlpha = hfAlpha;
+    ctx.fillStyle = '#e53935';
     ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
     ctx.restore();
   }
@@ -5974,6 +6063,11 @@ function draw() {
     ctx.fillText(`CHUNK:${cdi ? '#' + cdi.id + ' ' + cdi.type : '-'} PHASE:${cdi ? chunkPhaseNames[cdi.diffPhase] || cdi.diffPhase : '-'} REROLLS:${cdi ? cdi.rerolls : 0} NEXT_X:${Math.round(nextChunkX)} TOTAL:${chunkIdCounter} CONSEC_DANGER:${consecutiveDangerChunks}`, 4, DESIGN_H - 74);
     ctx.fillText(`THEME:${currentTheme} REMAIN:${themeChunksRemaining} NEXT:${nextTheme || '-'} TRANSITION:${themeTransitionActive ? 'YES' : 'NO'} COLOR_LERP:${themeColorLerp.toFixed(2)}`, 4, DESIGN_H - 84);
     ctx.fillText(`SECTION:${currentSection} REMAIN:${sectionChunksRemaining} TRANSITION:${sectionTransitionActive ? 'YES' : 'NO'} RAMP:${sectionTransitionCountdown} FLASH:${sectionFlashTimer}`, 4, DESIGN_H - 94);
+    ctx.restore();
+  }
+
+  // End screen shake transform
+  if (hurtShakeTimer > 0) {
     ctx.restore();
   }
 }

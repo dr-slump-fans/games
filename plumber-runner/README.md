@@ -1600,14 +1600,41 @@ The player now has two form states: **small** and **big**.
 
 ### Visual Feedback
 
-- **Big form**: player sprite is drawn at 1.3× scale anchored at feet.
-- **Invincibility flash**: sprite alternates visible/hidden every 4 frames.
-- **HUD**: `SMALL` (light blue) / `BIG` (gold) label shown below the life counter.
+- **Big form**: player sprite is drawn at 1.3× scale anchored at feet, with a **pulsing golden glow aura** behind the sprite and a **★ BIG** HUD badge with gold text-shadow.
+- **Invincibility flicker**: sprite alternates between 90% and 25% opacity with an **adaptive blink rate** — fast (3-frame period) right after being hit, slowing to 8-frame period as invincibility wears off. Player is always partially visible (never fully hidden).
+- **Hurt flash**: a brief red screen overlay (8 frames, ~0.13s) on big→small downgrade.
+- **Hurt screen shake**: short decaying camera shake (12 frames, ~0.2s) on big→small downgrade.
+- **HUD**: `SMALL` (light blue) / `★ BIG` (gold + glow) label shown below the life counter.
 
 ### State Resets
 
-- `resetGame()` → `playerForm = 'small'`, `hurtInvincibleTimer = 0`
+- `resetGame()` → `playerForm = 'small'`, `hurtInvincibleTimer = 0`, `hurtShakeTimer = 0`, `hurtFlashTimer = 0`
 - `respawnPlayer()` → same resets (form lost on death)
+
+## Form Feel & Hurt Feedback (Mario List Item 6, Step 2)
+
+Step 2 refines the **big/small form system** introduced in Step 1 with enhanced game-feel and clearer feedback.
+
+### BIG State Enhancements
+
+- **Golden glow aura**: subtle pulsing elliptical glow behind the player in BIG form (alpha oscillates 0.07–0.17).
+- **+5% speed bonus**: BIG form moves slightly faster (`BIG_SPEED_BONUS = 1.05`), stacking with coin-rush multiplier. Not enough to break balance, but enough to feel powerful.
+- **HUD upgrade**: BIG label now shows `★ BIG` in gold with a glowing text-shadow effect.
+
+### Hurt Feedback (big→small)
+
+| Feedback | Duration | Description |
+|----------|----------|-------------|
+| SFX `sfxHurt()` | ~0.16s | Descending triangle wave (520→220 Hz) + low sine undertone (120 Hz) |
+| Haptics `vibHurt()` | ~130ms | Short vibration burst `[60, 30, 40]` |
+| Red flash | 8 frames | Full-screen red overlay fading from 22% to 0% opacity |
+| Screen shake | 12 frames | Decaying random camera offset (±3px → 0) |
+
+### Improved Invincibility Flicker
+
+The old uniform 4-frame on/off blink is replaced with an **adaptive-rate ghost flicker**:
+- Blink period starts at **3 frames** (fast, urgent) and gradually slows to **8 frames** (calm, fading).
+- Instead of fully hiding the sprite, the "dim" phase renders at **25% opacity** — player is always visible, avoiding confusion about character position.
 
 ## Asset & License Information
 
