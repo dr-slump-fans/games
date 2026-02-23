@@ -245,10 +245,14 @@ canvas {
     <p id="ol-msg">MOVE: Arrows/AD  |  JUMP: Space</p>
     <p id="ol-score"></p>
     <button id="ol-btn">START</button>
+    <p id="ol-version" style="font-size:12px;color:#888;margin:0"></p>
   </div>
 </div>
 
 <script>
+// ── Version ───────────────────────────────────────────
+const GAME_VERSION = 'v0.4.0';
+
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
 const DESIGN_H = 400;
@@ -338,6 +342,8 @@ const HIDDEN_BLOCK_CHANCE = 0.20;     // chance a chunk spawns a hidden block (s
 const HIDDEN_HINT_RANGE = 60;         // horizontal proximity range for spark hint (px)
 const HIDDEN_HINT_FREQ = 8;           // spawn a hint spark every N frames (low frequency)
 const HIDDEN_REVEAL_BONUS = 5;        // extra bonus points on reveal ("SECRET!" reward)
+const HIDDEN_SHORTCUT_CHANCE = 0.12;  // chance a chunk spawns a 2-block shortcut corridor
+const HIDDEN_SHORTCUT_COIN = true;    // shortcut blocks award a bonus coin on reveal
 
 // ── Special Brick & Mushroom Constants ───────────────
 const SPECIAL_BRICK_CHANCE = 0.25;   // chance a stepping-stone brick becomes a special brick
@@ -770,6 +776,20 @@ function generateChunk(chunkX, type, diffParams) {
           result.bricks.push(makeHiddenBrick(hbx, hby));
         }
       }
+      // Hidden shortcut corridor: 2 consecutive hidden blocks forming a short shortcut path
+      // over the pipe — rarer than single hidden blocks, awards bonus coins
+      else if (pipeH >= 130 && Math.random() < HIDDEN_SHORTCUT_CHANCE) {
+        const hb1x = pipeX - 50 - Math.random() * 30;
+        const hb1H = pipeH * 0.55;    // first block: mid-height stepping stone
+        const hb1y = groundY - hb1H;
+        const hb2x = hb1x - BRICK_W - 8; // second block: slightly left, higher
+        const hb2H = pipeH * 0.80;    // close to pipe top — shortcut landing
+        const hb2y = groundY - hb2H;
+        if (hb2y > 30 && hb2x > chunkX + 30) {
+          result.bricks.push(makeHiddenBrick(hb1x, hb1y, true));
+          result.bricks.push(makeHiddenBrick(hb2x, hb2y, true));
+        }
+      }
       break;
     }
 
@@ -796,6 +816,18 @@ function generateChunk(chunkX, type, diffParams) {
         const by = groundY - midH;
         result.bricks.push(makeBrick(midX, by, SPECIAL_BRICK_CHANCE));
         result.obstacles.push({ type: 'brick', x: midX, y: by });
+      }
+
+      // Hidden shortcut corridor between pipes: 2 hidden blocks as secret bridge
+      if (h2 >= 120 && gap >= 150 && Math.random() < HIDDEN_SHORTCUT_CHANCE) {
+        const hb1x = pipe1X + LIP_W + 15;
+        const hb1y = groundY - h1 - 30;  // just above first pipe top
+        const hb2x = pipe2X - BRICK_W - 10;
+        const hb2y = groundY - h2 + 5;   // near second pipe top — serves as bridge
+        if (hb1y > 30 && hb2y > 30) {
+          result.bricks.push(makeHiddenBrick(hb1x, hb1y, true));
+          result.bricks.push(makeHiddenBrick(hb2x, hb2y, true));
+        }
       }
 
       // Make sure pipe2 is still within chunk bounds
@@ -853,6 +885,19 @@ function generateChunk(chunkX, type, diffParams) {
         const hby = groundY - hbH;
         if (hby > 30 && hbx < chunkX + width - 50) {
           result.bricks.push(makeHiddenBrick(hbx, hby));
+        }
+      }
+      // Hidden shortcut corridor for pipe_mix: 2-block path over the tall pipe
+      else if (bottomH >= 160 && Math.random() < HIDDEN_SHORTCUT_CHANCE) {
+        const hb1x = pipeX + LIP_W + 15;
+        const hb1H = bottomH * 0.50;  // first block: mid-height past the pipe
+        const hb1y = groundY - hb1H;
+        const hb2x = hb1x + BRICK_W + 10; // second block: farther right, higher
+        const hb2H = bottomH * 0.78;  // near pipe top for landing
+        const hb2y = groundY - hb2H;
+        if (hb2y > 30 && hb2x < chunkX + width - 50) {
+          result.bricks.push(makeHiddenBrick(hb1x, hb1y, true));
+          result.bricks.push(makeHiddenBrick(hb2x, hb2y, true));
         }
       }
       break;
@@ -1402,6 +1447,7 @@ const olTitle = document.getElementById('ol-title');
 const olMsg = document.getElementById('ol-msg');
 const olScore = document.getElementById('ol-score');
 const olBtn = document.getElementById('ol-btn');
+const olVersion = document.getElementById('ol-version');
 const scoreDisplay = document.getElementById('score-display');
 const hudCoin = document.getElementById('hud-coin');
 const hudLife = document.getElementById('hud-life');
@@ -1597,8 +1643,9 @@ function makeBrick(x, y, specialChance) {
 
 // Creates a hidden block. Invisible & non-solid until revealed by head bump from below.
 // Once revealed, becomes a permanent solid platform (like a used question block).
-function makeHiddenBrick(x, y) {
-  return { x, y, w: BRICK_W, h: BRICK_H, broken: false, special: false, question: false, used: false, hidden: true, revealed: false };
+// shortcut=true marks this block as part of a shortcut corridor — awards a bonus coin on reveal.
+function makeHiddenBrick(x, y, shortcut) {
+  return { x, y, w: BRICK_W, h: BRICK_H, broken: false, special: false, question: false, used: false, hidden: true, revealed: false, shortcut: !!shortcut };
 }
 
 // ── Drawing helpers ────────────────────────────────────
@@ -4952,6 +4999,13 @@ function update() {
         scorePopups[scorePopups.length - 1].text = 'SECRET!';
         scorePopups[scorePopups.length - 1].color = '#7eeaea';
         triggerCombo(HIDDEN_BLOCK_SCORE + HIDDEN_REVEAL_BONUS);
+        // Shortcut blocks award a bonus coin (risk/reward for discovery)
+        if (brick.shortcut && HIDDEN_SHORTCUT_COIN) {
+          coins++;
+          check1UP();
+          spawnCoinPop(brick.x + BRICK_W / 2 - 4, brick.y);
+          sfxCoinPop(0);
+        }
         // Stop upward movement (bonk)
         player.vy = Math.abs(player.vy) * 0.4;
         // SFX: distinctive reveal chime (higher pitch than normal coin)
@@ -5739,6 +5793,13 @@ function showOverlay(title, msg, sc) {
     olScore.style.display = 'none';
   }
   olBtn.textContent = state === 'title' ? 'START' : 'RESTART';
+  // Show version only on title screen
+  if (state === 'title') {
+    olVersion.textContent = GAME_VERSION;
+    olVersion.style.display = 'block';
+  } else {
+    olVersion.style.display = 'none';
+  }
   overlay.style.display = 'flex';
   hudBoost.style.display = 'none';
   hudCombo.style.display = 'none';

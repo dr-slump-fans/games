@@ -1347,6 +1347,37 @@ When a hidden block is successfully revealed by a head-bump:
 - The +5 bonus is small enough not to distort the score economy
 - Hint sparks are ambient and easily missed — they don't spell out "jump here"
 
+## Hidden Blocks — Shortcut Corridors & Risk/Reward (Step 3)
+
+Step 3 completes the hidden block feature by introducing **perceivable shortcut corridors** — pairs of hidden blocks that form a short secret path, rewarding discovery with bonus coins while remaining non-essential.
+
+### Shortcut Corridors
+
+A **shortcut corridor** is a pair of 2 consecutive hidden blocks placed at staggered heights, forming a secret stepping-stone path. They appear in three chunk types:
+
+- **`single_platform`**: When pipe height >= 130 px, 12% chance. Two hidden blocks placed left of the pipe at 55% and 80% height — a 2-step secret staircase to the pipe top.
+- **`pipe_mix`**: When pipe height >= 160 px, 12% chance. Two hidden blocks placed right of the pipe at 50% and 78% height — a shortcut path over the tall pipe.
+- **`double_platform`**: When second pipe height >= 120 px and gap >= 150 px, 12% chance. Two hidden blocks bridge the gap between pipes — a secret aerial path.
+
+Shortcuts use the `else` branch of the single hidden block roll, so a chunk gets either a single hidden block **or** a shortcut corridor, never both (except `double_platform` which is independent).
+
+### Risk/Reward Balance
+
+- **Reward**: Each shortcut block awards a **bonus coin** on reveal (in addition to the standard +15 score). Finding both blocks in a corridor gives 2 extra coins — meaningful but not game-breaking.
+- **Failure safety**: Missing a shortcut block never causes death. All shortcut blocks are placed above open ground or near safe pipe surfaces. The main route always remains passable.
+- **Coin pop feedback**: Shortcut reveals trigger a coin pop animation and SFX on top of the standard SECRET! popup, giving extra positive reinforcement.
+
+### Constants
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `HIDDEN_SHORTCUT_CHANCE` | `0.12` | Chance per eligible chunk to spawn a 2-block shortcut corridor |
+| `HIDDEN_SHORTCUT_COIN` | `true` | Whether shortcut blocks award a bonus coin on reveal |
+
+### Version Display
+
+The title/start screen now shows the game version (`GAME_VERSION` constant, currently `v0.4.0`) below the START button. The version is displayed in small gray text and only appears on the title screen, not on game-over.
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.
