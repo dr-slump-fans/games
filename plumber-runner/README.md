@@ -1694,6 +1694,39 @@ A parameters-only tuning pass to smooth overall feel, reduce frustration, and ke
 
 Updated `GAME_VERSION` from `v0.5.5` → **`v0.5.6`**.
 
+---
+
+## v0.6.0 Step 1 — Star Rating & Checkpoint Flag
+
+### Star Rating (Level Clear)
+When the player touches the flagpole, a **1–3 star rating** is calculated and displayed on the LEVEL CLEAR overlay:
+
+| Stars | Condition |
+|-------|-----------|
+| ★☆☆ | Base — cleared the level |
+| ★★☆ | Cleared within **120 seconds** |
+| ★★★ | Also collected **≥30 coins** OR completed with **zero deaths** |
+
+Star thresholds are tunable via `STAR_TIME_THRESHOLDS` and `STAR_COIN_THRESHOLD` constants.
+
+### Checkpoint Flag
+- A **checkpoint flag** is placed at `x = 2500` (roughly mid-level, ~50% of the 5000-unit course)
+- First contact triggers `checkpointReached = true` with a "CHECKPOINT!" popup
+- The flag visually flips from orange (unactivated) to green (activated)
+- On death with `lives > 0`: if the checkpoint was reached and the camera hasn't passed it, the player **respawns at the checkpoint** instead of near the current camera position
+- Only a **single checkpoint** per level in this version
+
+### State Tracking
+- `deathsThisRun` — counts lives lost (used for star calculation)
+- `checkpointReached` / `checkpointActivated` — checkpoint flag state
+- All new state resets properly in `startGame()`
+
+### Version
+
+Updated `GAME_VERSION` from `v0.5.6` → **`v0.6.0`**.
+
+---
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.
