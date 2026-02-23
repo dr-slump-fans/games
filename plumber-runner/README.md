@@ -1376,7 +1376,72 @@ Shortcuts use the `else` branch of the single hidden block roll, so a chunk gets
 
 ### Version Display
 
-The title/start screen now shows the game version (`GAME_VERSION` constant, currently `v0.4.0`) below the START button. The version is displayed in small gray text and only appears on the title screen, not on game-over.
+The title/start screen now shows the game version (`GAME_VERSION` constant, currently `v0.5.0`) below the START button. The version is displayed in small gray text and only appears on the title screen, not on game-over.
+
+## Level Rhythm Sections — Underworld / Tower (Mario List Item 5, Step 1)
+
+A **rhythm section** system overlays on top of the existing theme system, cycling between two distinct level feel modes that alter chunk selection weights and obstacle parameters.
+
+### Section Types
+
+| Section | Feel | Key Characteristics |
+|---------|------|---------------------|
+| **UNDERWORLD** | Dense, low-pipe corridors | More `single_platform` (1.4×) and `pipe_mix` (1.6×), shorter bottom pipes (−25 px), more ceiling pipes (+15 px maxTopH), more turtles (1.3×). Creates a cramped, ground-level gauntlet. |
+| **TOWER** | Vertical platform climbing | More `double_platform` (1.8×), taller bottom pipes (+30 px), fewer ceiling pipes (−15 px maxTopH), fewer turtles (0.4×). Creates a staircase-climbing feel. |
+
+### Section Cycling
+
+- Each section lasts **5–9 chunks** (randomly chosen)
+- Sections alternate: UNDERWORLD → TOWER → UNDERWORLD → ...
+- On transition, a center-screen announcement appears for ~2 seconds:
+  - **`ENTER UNDERWORLD`** — orange text (#ff6644)
+  - **`CLIMB TOWER`** — cyan text (#44ccff)
+
+### Relationship to Theme System
+
+Sections and themes are **independent layers** that stack:
+
+1. Base difficulty phase weights → theme weight multipliers → **section weight multipliers**
+2. Base difficulty params → theme parameter offsets → **section parameter offsets**
+
+This means a CAVE theme + UNDERWORLD section produces very dense, claustrophobic corridors, while a PLAINS theme + TOWER section gives open vertical climbing with gentle base spacing.
+
+### Weight Multipliers
+
+| Type | UNDERWORLD | TOWER |
+|------|------------|-------|
+| `rest` | 0.6× | 0.5× |
+| `single_platform` | 1.4× | 0.8× |
+| `double_platform` | 0.5× | 1.8× |
+| `pipe_mix` | 1.6× | 0.7× |
+| `turtle_zone` | 1.3× | 0.4× |
+| `reward` | 1.0× | 1.3× |
+
+### Parameter Offsets
+
+| Parameter | UNDERWORLD | TOWER |
+|-----------|------------|-------|
+| `maxPipeH` | −25 px | +30 px |
+| `maxTopH` | +15 px | −15 px |
+
+All offsets are clamped to reachability limits (same as theme offsets).
+
+### Reachability Safety
+
+Section biases do **not** bypass any existing safety rules:
+
+- Reachability validation + reroll still runs on every chunk
+- Max 2 consecutive danger chunks rule still applies
+- Every 5 chunks safe chunk guarantee still applies
+- Theme transition softening still applies independently
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `SECTION_MIN_CHUNKS` | `5` | Minimum chunks per section |
+| `SECTION_MAX_CHUNKS` | `9` | Maximum chunks per section |
+| `SECTION_ANNOUNCE_DURATION` | `120` | Frames to show section announcement (~2s) |
 
 ## Frame-rate Independent Simulation
 

@@ -196,6 +196,16 @@ canvas {
   z-index: 12;
   transition: opacity 0.5s ease;
 }
+#hud-section-announce {
+  position: absolute; top: 28%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 18px; font-weight: bold;
+  color: #fff; text-shadow: 2px 2px 0 #000, 0 0 10px rgba(255,255,255,0.5);
+  pointer-events: none;
+  display: none;
+  z-index: 12;
+  transition: opacity 0.5s ease;
+}
 </style>
 </head>
 <body>
@@ -235,6 +245,7 @@ canvas {
 <div id="hud-boss-clear"></div>
 <div id="hud-theme"></div>
 <div id="hud-theme-announce"></div>
+<div id="hud-section-announce"></div>
 <div id="hud-settings">
   <div class="toggle-btn" id="btn-sfx">SFX ON</div>
   <div class="toggle-btn" id="btn-vib">VIB ON</div>
@@ -251,7 +262,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.4.0';
+const GAME_VERSION = 'v0.5.0';
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -570,6 +581,79 @@ function getThemeGroundColors() {
 // Get current hill color (with smooth transition)
 function getThemeHillColor() {
   return lerpColor(THEME_HILL_COLORS[themeColorFrom], THEME_HILL_COLORS[themeColorTarget], themeColorLerp);
+}
+
+// ── Rhythm Section System ────────────────────────────────
+// Rhythm sections overlay on top of themes, cycling between
+// UNDERWORLD (dense low-pipe ground patterns) and TOWER (vertical platform layers).
+const SECTION_NAMES = ['UNDERWORLD', 'TOWER'];
+const SECTION_MIN_CHUNKS = 5;
+const SECTION_MAX_CHUNKS = 9;
+const SECTION_ANNOUNCE_DURATION = 120; // frames
+
+// Section-specific weight multipliers (stacked on top of theme mults)
+const SECTION_WEIGHT_MULTS = {
+  UNDERWORLD: { rest: 0.6, single_platform: 1.4, double_platform: 0.5, pipe_mix: 1.6, turtle_zone: 1.3, reward: 1.0 },
+  TOWER:      { rest: 0.5, single_platform: 0.8, double_platform: 1.8, pipe_mix: 0.7, turtle_zone: 0.4, reward: 1.3 },
+};
+
+// Section-specific parameter offsets (stacked on top of theme offsets)
+const SECTION_PARAM_OFFSETS = {
+  UNDERWORLD: { maxPipeH: -25, maxTopH: 15 },   // shorter pipes, more ceiling pipes → dense low corridors
+  TOWER:      { maxPipeH: 30,  maxTopH: -15 },   // taller bottom pipes → vertical climbing
+};
+
+// Section announce text and color
+const SECTION_ANNOUNCE = {
+  UNDERWORLD: { text: 'ENTER UNDERWORLD', color: '#ff6644' },
+  TOWER:      { text: 'CLIMB TOWER',      color: '#44ccff' },
+};
+
+// Section state variables
+let currentSection = 'UNDERWORLD';
+let sectionChunksRemaining = 0;
+let sectionAnnounceTimer = 0;
+let sectionAnnounceName = '';
+
+function pickNextSection() {
+  return currentSection === 'UNDERWORLD' ? 'TOWER' : 'UNDERWORLD';
+}
+
+function initSectionState() {
+  currentSection = 'UNDERWORLD';
+  sectionChunksRemaining = SECTION_MIN_CHUNKS + Math.floor(Math.random() * (SECTION_MAX_CHUNKS - SECTION_MIN_CHUNKS + 1));
+  sectionAnnounceTimer = SECTION_ANNOUNCE_DURATION;
+  sectionAnnounceName = currentSection;
+}
+
+function advanceSectionState() {
+  sectionChunksRemaining--;
+  if (sectionChunksRemaining <= 0) {
+    currentSection = pickNextSection();
+    sectionChunksRemaining = SECTION_MIN_CHUNKS + Math.floor(Math.random() * (SECTION_MAX_CHUNKS - SECTION_MIN_CHUNKS + 1));
+    sectionAnnounceTimer = SECTION_ANNOUNCE_DURATION;
+    sectionAnnounceName = currentSection;
+  }
+}
+
+function applySectionWeights(weights, section) {
+  const mults = SECTION_WEIGHT_MULTS[section];
+  const result = {};
+  for (const type of CHUNK_TYPES) {
+    result[type] = Math.max(0, (weights[type] || 0) * (mults[type] || 1));
+  }
+  return result;
+}
+
+function applySectionParams(diffParams, section) {
+  const offsets = SECTION_PARAM_OFFSETS[section];
+  const result = { ...diffParams };
+  result.maxPipeH = Math.max(60, result.maxPipeH + offsets.maxPipeH);
+  result.maxTopH = Math.max(40, result.maxTopH + offsets.maxTopH);
+  // Clamp to reachability limits
+  result.maxPipeH = Math.min(result.maxPipeH, CHUNK_PLAYER_MAX_JUMP_H);
+  result.maxTopH = Math.min(result.maxTopH, DESIGN_H - GROUND_H - 42);
+  return result;
 }
 
 // Chunk types:
@@ -994,10 +1078,14 @@ function spawnChunk() {
   const diffParams = getChunkDiffPhase();
   // Apply theme parameter offsets (pipe heights etc.)
   const themedParams = applyThemeParams(diffParams, currentTheme, themeTransitionActive);
+  // Apply rhythm section parameter offsets on top of theme params
+  const sectionedParams = applySectionParams(themedParams, currentSection);
   let weights = { ...diffParams.weights };
 
   // Apply theme weight multipliers
   weights = applyThemeWeights(weights, currentTheme, themeTransitionActive);
+  // Apply rhythm section weight multipliers on top
+  weights = applySectionWeights(weights, currentSection);
 
   // Force rest chunk after too many consecutive danger chunks
   if (consecutiveDangerChunks >= CHUNK_MAX_CONSEC_DANGER) {
@@ -1022,7 +1110,7 @@ function spawnChunk() {
 
   // Generate and validate, reroll if unreachable
   for (let attempt = 0; attempt <= CHUNK_MAX_REROLLS; attempt++) {
-    chunk = generateChunk(nextChunkX, type, themedParams);
+    chunk = generateChunk(nextChunkX, type, sectionedParams);
     if (validateChunkReachability(chunk.obstacles, nextChunkX, chunk.width)) {
       rerolls = attempt;
       break;
@@ -1038,7 +1126,7 @@ function spawnChunk() {
   // Final fallback: force rest chunk
   if (!chunk) {
     type = 'rest';
-    chunk = generateChunk(nextChunkX, type, themedParams);
+    chunk = generateChunk(nextChunkX, type, sectionedParams);
     rerolls = CHUNK_MAX_REROLLS + 1;
   }
 
@@ -1106,13 +1194,15 @@ function spawnChunk() {
   // Debug info
   chunkDebugInfo = chunkRecord;
   if (DEBUG_MODE) {
-    console.log(`%c[Chunk] #${chunkId} type=${type} theme=${currentTheme} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} rerolls=${rerolls} themeRemain=${themeChunksRemaining}`, 'color: #42d4f4');
+    console.log(`%c[Chunk] #${chunkId} type=${type} theme=${currentTheme} section=${currentSection} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} rerolls=${rerolls} themeRemain=${themeChunksRemaining} sectionRemain=${sectionChunksRemaining}`, 'color: #42d4f4');
   }
 
   nextChunkX += chunk.width;
 
   // Advance theme state machine
   advanceThemeState();
+  // Advance rhythm section state machine
+  advanceSectionState();
 }
 
 // Initialize first chunks at game start
@@ -1127,6 +1217,8 @@ function spawnInitialChunks() {
 
   // Initialize theme state machine
   initThemeState();
+  // Initialize rhythm section state machine
+  initSectionState();
 
   // Generate first rest chunk (safe start)
   const firstChunk = generateChunk(nextChunkX, 'rest', getChunkDiffPhase());
@@ -1139,6 +1231,7 @@ function spawnInitialChunks() {
   chunkHistory.push({ id: 1, type: 'rest', x: nextChunkX, width: firstChunk.width, diffPhase: 0, rerolls: 0, reachable: true, theme: currentTheme });
   nextChunkX += firstChunk.width;
   advanceThemeState(); // count first chunk
+  advanceSectionState(); // count first chunk for section too
 
   // Generate a couple more chunks ahead
   spawnChunk();
@@ -1464,6 +1557,7 @@ const hudBossWave = document.getElementById('hud-boss-wave');
 const hudBossClear = document.getElementById('hud-boss-clear');
 const hudTheme = document.getElementById('hud-theme');
 const hudThemeAnnounce = document.getElementById('hud-theme-announce');
+const hudSectionAnnounce = document.getElementById('hud-section-announce');
 const btnSfx = document.getElementById('btn-sfx');
 const btnVib = document.getElementById('btn-vib');
 
@@ -4867,6 +4961,8 @@ function update() {
 
   // Theme announce timer countdown
   if (themeAnnounceTimer > 0) themeAnnounceTimer--;
+  // Section announce timer countdown
+  if (sectionAnnounceTimer > 0) sectionAnnounceTimer--;
   // Smooth theme color transition (lerp toward 1 over ~2 seconds)
   if (themeColorLerp < 1) {
     themeColorLerp = Math.min(1, themeColorLerp + 0.008); // ~125 frames ≈ 2s
@@ -5447,6 +5543,17 @@ function update() {
   } else {
     hudThemeAnnounce.style.display = 'none';
   }
+
+  // Rhythm section transition announcement
+  if (sectionAnnounceTimer > 0 && sectionAnnounceName) {
+    const sann = SECTION_ANNOUNCE[sectionAnnounceName];
+    hudSectionAnnounce.textContent = sann ? sann.text : sectionAnnounceName;
+    hudSectionAnnounce.style.color = sann ? sann.color : '#fff';
+    hudSectionAnnounce.style.display = 'block';
+    hudSectionAnnounce.style.opacity = Math.min(1, sectionAnnounceTimer / 30);
+  } else {
+    hudSectionAnnounce.style.display = 'none';
+  }
 }
 
 function draw() {
@@ -5809,6 +5916,7 @@ function showOverlay(title, msg, sc) {
   hudBossWave.style.display = 'none';
   hudBossClear.style.display = 'none';
   hudThemeAnnounce.style.display = 'none';
+  hudSectionAnnounce.style.display = 'none';
 }
 
 function hideOverlay() {
