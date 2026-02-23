@@ -1166,6 +1166,41 @@ Classic Mario-style extra-life mechanic tied to coin collection.
 | `INITIAL_LIVES` | `3` | Starting lives per run |
 | 1UP threshold | `100 coins` | Coins needed for an extra life |
 
+## Enemy Interaction Step 1: Patrol Stability & Shell Combo Scoring
+
+Refines turtle enemy behavior for smoother patrol and adds escalating combo rewards for shell chain kills.
+
+### Patrol Stabilization
+
+Walking turtles now use a **turn cooldown** (`TURTLE_TURN_COOLDOWN = 8` frames) that prevents rapid direction flipping. This eliminates the 1px jitter/twitching that occurred when a turtle sat at the exact boundary of a pipe or platform edge.
+
+**Key changes:**
+- Side collisions with pipes/bricks now **set** the direction explicitly (face away from wall) instead of toggling — hitting the same wall repeatedly no longer causes oscillation
+- Platform edge detection respects the cooldown — the turtle commits to its turn and walks away before checking again
+- All existing death rules, stomp rules, and shell mechanics are preserved unchanged
+
+### Shell Combo Kill Scoring
+
+When a moving shell kills multiple turtles in sequence, each successive kill awards escalating points:
+
+| Kill # | Points | Popup |
+|--------|--------|-------|
+| 1st | 20 | `+20` (standard) |
+| 2nd | 40 | `SHELL x2 +40` (cyan) |
+| 3rd | 80 | `SHELL x3 +80` (cyan) |
+| 4th | 160 | `SHELL x4 +160` (cyan) |
+| 5th+ | 320 | `SHELL x5 +320` (cyan, capped) |
+
+- Formula: `SHELL_COMBO_BASE × 2^(comboLevel - 1)`, capped at `SHELL_COMBO_MAX = 5`
+- Combo counter resets when the shell is kicked (new kick = fresh combo)
+- Combo popups use a distinct **cyan** color and slightly larger font to stand out from normal score popups
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `TURTLE_TURN_COOLDOWN` | `8` | Min frames between walk direction reversals |
+| `SHELL_COMBO_MAX` | `5` | Maximum shell combo multiplier level |
+| `SHELL_COMBO_BASE` | `20` | Base score for first shell kill (doubles per combo) |
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.

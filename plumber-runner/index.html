@@ -363,6 +363,9 @@ const TURTLE_SPAWN_CHANCE = 0.30;    // chance to spawn turtle per pipe spawn
 const TURTLE_MIN_SPAWN_GAP = 400;    // min px between turtle spawns
 const TURTLE_SHELL_IDLE_KICK_GRACE = 10; // frames after stomp before shell can be kicked
 const TURTLE_DEAD_FRAMES = 30;       // frames for dead turtle to linger before removal
+const TURTLE_TURN_COOLDOWN = 8;      // min frames between direction reversals (prevents jitter)
+const SHELL_COMBO_MAX = 5;           // max shell combo multiplier
+const SHELL_COMBO_BASE = 20;         // base score for shell kill (doubles each combo hit)
 
 // ── Difficulty System ─────────────────────────────────
 // 5 levels with smooth interpolation between them
@@ -1407,7 +1410,7 @@ let isAirJump = false;        // true when current jump is an air jump (half-hei
 const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is active
 
 // ── Turtle Enemy State ──────────────────────────────────
-// Each turtle: { x, y, vx, vy, onGround, state, direction, animFrame, deadTimer, kickGrace }
+// Each turtle: { x, y, vx, vy, onGround, state, direction, animFrame, deadTimer, kickGrace, turnCooldown, shellCombo }
 // States: 'walk', 'shell_idle', 'shell_move', 'shell_bounce_dead', 'dead'
 let turtles = [];
 let lastTurtleSpawnX = -9999;  // tracks X of last turtle spawn to enforce gap
@@ -2698,6 +2701,8 @@ function updateTurtles() {
 
     // ── Kick grace timer ──
     if (t.kickGrace > 0) t.kickGrace--;
+    // ── Turn cooldown timer (prevents jitter) ──
+    if (t.turnCooldown > 0) t.turnCooldown--;
 
     // ── Physics: gravity ──
     t.vy += TURTLE_GRAVITY;
@@ -2740,11 +2745,11 @@ function updateTurtles() {
         // Side collision
         else if (t.vx > 0 && t.x + tw - t.vx <= r.x + 2) {
           t.x = r.x - tw;
-          if (t.state === 'walk') t.direction *= -1;
+          if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = -1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
           else if (t.state === 'shell_move') t.vx = -Math.abs(t.vx);
         } else if (t.vx < 0 && t.x - t.vx >= r.x + r.w - 2) {
           t.x = r.x + r.w;
-          if (t.state === 'walk') t.direction *= -1;
+          if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = 1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
           else if (t.state === 'shell_move') t.vx = Math.abs(t.vx);
         }
       }
@@ -2759,11 +2764,11 @@ function updateTurtles() {
         t.onGround = true;
       } else if (t.vx > 0 && t.x + tw - t.vx <= brick.x + 2) {
         t.x = brick.x - tw;
-        if (t.state === 'walk') t.direction *= -1;
+        if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = -1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
         else if (t.state === 'shell_move') t.vx = -Math.abs(t.vx);
       } else if (t.vx < 0 && t.x - t.vx >= brick.x + brick.w - 2) {
         t.x = brick.x + brick.w;
-        if (t.state === 'walk') t.direction *= -1;
+        if (t.state === 'walk' && t.turnCooldown <= 0) { t.direction = 1; t.turnCooldown = TURTLE_TURN_COOLDOWN; }
         else if (t.state === 'shell_move') t.vx = Math.abs(t.vx);
       }
     }
@@ -2794,7 +2799,10 @@ function updateTurtles() {
           }
         }
       }
-      if (!hasGround) t.direction *= -1;
+      if (!hasGround && t.turnCooldown <= 0) {
+        t.direction *= -1;
+        t.turnCooldown = TURTLE_TURN_COOLDOWN;
+      }
     }
 
     // ── Animation ──
@@ -2823,9 +2831,24 @@ function updateTurtles() {
           other.state = 'dead';
           other.vy = -3;
           other.deadTimer = TURTLE_DEAD_FRAMES;
-          score += TURTLE_SHELL_KILL_SCORE;
-          spawnScorePopup(other.x, other.y - 10, TURTLE_SHELL_KILL_SCORE);
-          if (DEBUG_MODE) console.log(`%c[Turtle] Shell kill! +${TURTLE_SHELL_KILL_SCORE}`, 'color: #4caf50; font-weight: bold');
+          // Shell combo scoring: 20, 40, 80, 160, 320 (capped at SHELL_COMBO_MAX)
+          t.shellCombo++;
+          const comboLevel = Math.min(t.shellCombo, SHELL_COMBO_MAX);
+          const killScore = SHELL_COMBO_BASE * Math.pow(2, comboLevel - 1);
+          score += killScore;
+          if (t.shellCombo >= 2) {
+            // Show shell combo popup with distinct style
+            spawnScorePopup(other.x, other.y - 10, 0);
+            const cp = scorePopups[scorePopups.length - 1];
+            cp.text = `SHELL x${t.shellCombo} +${killScore}`;
+            cp.color = '#4aeadc';
+            cp.strokeColor = '#1a4a3a';
+            cp.font = 'bold 16px monospace';
+            cp.life = 55; // slightly longer display
+          } else {
+            spawnScorePopup(other.x, other.y - 10, killScore);
+          }
+          if (DEBUG_MODE) console.log(`%c[Turtle] Shell combo x${t.shellCombo}! +${killScore}`, 'color: #4caf50; font-weight: bold');
           // If j < i, adjust index since we haven't removed yet
           // (dead turtles handled next frame)
         }
@@ -2880,6 +2903,7 @@ function updateTurtles() {
       } else {
         // Side touch → kick the shell into shell_move
         t.state = 'shell_move';
+        t.shellCombo = 0; // reset combo on new kick
         t.vy = 0;
         if (t.y + SHELL_H > groundY) t.y = groundY - SHELL_H;
         const playerCX = pb.x + pb.w / 2;
@@ -2928,6 +2952,8 @@ function spawnTurtle(spawnX) {
     animFrame: 0,
     deadTimer: 0,
     kickGrace: 0,
+    turnCooldown: 0,
+    shellCombo: 0,
   });
   lastTurtleSpawnX = spawnX;
   if (DEBUG_MODE) console.log(`%c[Turtle] Spawned at x=${Math.round(spawnX)}`, 'color: #4caf50');
@@ -2967,9 +2993,9 @@ function drawScorePopups() {
     const alpha = Math.min(1, p.life / 15);
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.font = 'bold 14px monospace';
-    ctx.fillStyle = '#f4d03f';
-    ctx.strokeStyle = '#5a3a1a';
+    ctx.font = p.font || 'bold 14px monospace';
+    ctx.fillStyle = p.color || '#f4d03f';
+    ctx.strokeStyle = p.strokeColor || '#5a3a1a';
     ctx.lineWidth = 2;
     ctx.strokeText(p.text, Math.round(p.x), Math.round(p.y));
     ctx.fillText(p.text, Math.round(p.x), Math.round(p.y));
