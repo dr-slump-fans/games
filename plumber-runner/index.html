@@ -335,6 +335,9 @@ const BLOCK_BUMP_HEIGHT = 6;         // max upward pixel offset during bump
 // ── Hidden Block Constants ──────────────────────────
 const HIDDEN_BLOCK_SCORE = 10;        // points awarded when a hidden block is revealed
 const HIDDEN_BLOCK_CHANCE = 0.20;     // chance a chunk spawns a hidden block (shortcut stepping stone)
+const HIDDEN_HINT_RANGE = 60;         // horizontal proximity range for spark hint (px)
+const HIDDEN_HINT_FREQ = 8;           // spawn a hint spark every N frames (low frequency)
+const HIDDEN_REVEAL_BONUS = 5;        // extra bonus points on reveal ("SECRET!" reward)
 
 // ── Special Brick & Mushroom Constants ───────────────
 const SPECIAL_BRICK_CHANCE = 0.25;   // chance a stepping-stone brick becomes a special brick
@@ -1233,6 +1236,26 @@ function sfxCoinPop(comboLevel) {
   });
 }
 
+// ── SFX: Hidden Block Reveal (distinct rising chime) ──
+function sfxHiddenReveal() {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  // Three quick rising notes — teal "secret found" chime
+  const freqs = [660, 880, 1100];
+  freqs.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(f, now + i * 0.06);
+    gain.gain.setValueAtTime(0.07, now + i * 0.06);
+    gain.gain.linearRampToValueAtTime(0, now + i * 0.06 + 0.08);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + i * 0.06);
+    osc.stop(now + i * 0.06 + 0.09);
+  });
+}
+
 // ── SFX: Shell Combo Kill (escalating pitch/timbre) ──
 function sfxShellCombo(comboLevel) {
   if (!sfxEnabled) return;
@@ -1552,6 +1575,12 @@ let bricks = [];
 // ── Brick Fragments (debris particles) ────────────────
 // Each fragment: { x, y, vx, vy, size, color, life }
 let fragments = [];
+
+// ── Hidden Block Hint Sparks ──────────────────────────
+// Tiny teal sparks near unrevealed hidden blocks when player is close
+// Each spark: { x, y, vy, life, maxLife }
+let hintSparks = [];
+let hintSparkTimer = 0; // throttle spark spawning
 
 // ── Score popups (floating +5 text) ───────────────────
 // Each popup: { x, y, text, life }
@@ -3255,6 +3284,54 @@ function updateFragments() {
   }
 }
 
+// ── Hidden Block Hint Sparks ──────────────────────────
+// Check proximity to unrevealed hidden blocks and spawn subtle sparks
+function updateHintSparks() {
+  // Update existing sparks
+  for (let i = hintSparks.length - 1; i >= 0; i--) {
+    const s = hintSparks[i];
+    s.y += s.vy;
+    s.life--;
+    if (s.life <= 0) { hintSparks.splice(i, 1); }
+  }
+  // Throttle spawning
+  hintSparkTimer++;
+  if (hintSparkTimer < HIDDEN_HINT_FREQ) return;
+  hintSparkTimer = 0;
+  // Check if player is near any unrevealed hidden block
+  const px = player.x + player.w / 2;
+  const py = player.y + player.h;
+  for (const brick of bricks) {
+    if (!brick.hidden || brick.revealed || brick.broken) continue;
+    const bCenterX = brick.x + brick.w / 2;
+    const dx = Math.abs(px - bCenterX);
+    // Player must be horizontally close and below the block (within ~1.5 block heights)
+    if (dx < HIDDEN_HINT_RANGE && py > brick.y && py < brick.y + brick.h + 50) {
+      // Spawn one tiny spark near the hidden block (randomized position)
+      hintSparks.push({
+        x: brick.x + Math.random() * brick.w,
+        y: brick.y + brick.h + Math.random() * 4,
+        vy: -0.5 - Math.random() * 0.5,
+        life: 18,
+        maxLife: 18,
+      });
+      break; // only one spark per check
+    }
+  }
+}
+
+function drawHintSparks() {
+  for (const s of hintSparks) {
+    const alpha = s.life / s.maxLife * 0.5; // very subtle, max 0.5 alpha
+    const size = 1.5 + (s.life / s.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#7eeaea';
+    ctx.fillRect(Math.round(s.x) - size / 2, Math.round(s.y) - size / 2, size, size);
+    ctx.restore();
+  }
+}
+
 // ── Collision — Swept AABB Continuous Collision Detection ──
 
 function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
@@ -4223,6 +4300,8 @@ function resetGame() {
   pipes = [];
   bricks = [];
   fragments = [];
+  hintSparks = [];
+  hintSparkTimer = 0;
   scorePopups = [];
   milestonePipeCount = 0;
   timeBonusPopups = [];
@@ -4866,13 +4945,17 @@ function update() {
         // Reveal the hidden block
         brick.revealed = true;
         brick.bumpTimer = BLOCK_BUMP_FRAMES;
-        score += HIDDEN_BLOCK_SCORE;
-        spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, HIDDEN_BLOCK_SCORE);
-        triggerCombo(HIDDEN_BLOCK_SCORE);
+        score += HIDDEN_BLOCK_SCORE + HIDDEN_REVEAL_BONUS;
+        spawnScorePopup(brick.x + BRICK_W / 2 - 8, brick.y - 5, HIDDEN_BLOCK_SCORE + HIDDEN_REVEAL_BONUS);
+        // "SECRET!" label popup (offset slightly so it doesn't overlap the score)
+        spawnScorePopup(brick.x + BRICK_W / 2 - 14, brick.y - 18, 0);
+        scorePopups[scorePopups.length - 1].text = 'SECRET!';
+        scorePopups[scorePopups.length - 1].color = '#7eeaea';
+        triggerCombo(HIDDEN_BLOCK_SCORE + HIDDEN_REVEAL_BONUS);
         // Stop upward movement (bonk)
         player.vy = Math.abs(player.vy) * 0.4;
-        // SFX: reuse coin pop sound for satisfying reveal feedback
-        sfxCoinPop(0);
+        // SFX: distinctive reveal chime (higher pitch than normal coin)
+        sfxHiddenReveal();
         break; // only reveal one per frame
       }
     }
@@ -4925,6 +5008,9 @@ function update() {
 
   // Update debris fragments
   updateFragments();
+
+  // Update hidden block hint sparks
+  updateHintSparks();
 
   // Update score popups & coin pops
   updateScorePopups();
@@ -5425,6 +5511,9 @@ function draw() {
   for (const frag of fragments) {
     drawFragment(frag);
   }
+
+  // Hidden block hint sparks (subtle, behind popups)
+  drawHintSparks();
 
   // Score popups & coin pops
   drawScorePopups();

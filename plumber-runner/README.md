@@ -1317,6 +1317,35 @@ Hidden blocks are placed in `single_platform` and `pipe_mix` chunks as **shortcu
 |----------|-------|---------|
 | `HIDDEN_BLOCK_SCORE` | `10` | Points awarded when a hidden block is revealed |
 | `HIDDEN_BLOCK_CHANCE` | `0.20` | Chance per eligible chunk to spawn a hidden block |
+| `HIDDEN_HINT_RANGE` | `60` | Horizontal proximity range for spark hint (px) |
+| `HIDDEN_HINT_FREQ` | `8` | Spawn a hint spark every N frames (low frequency) |
+| `HIDDEN_REVEAL_BONUS` | `5` | Extra bonus points on reveal ("SECRET!" reward) |
+
+## Hidden Blocks — Readability Hints & Reward Feedback (Step 2)
+
+Building on the hidden block foundation from Step 1, this step adds subtle discoverability cues and a stronger reward loop.
+
+### Proximity Hint Sparks
+
+When the player is **horizontally within 60 px** of an unrevealed hidden block and positioned just below it, a tiny **teal spark** particle floats upward from the block's underside. The sparks are:
+
+- **Very subtle**: max 0.5 alpha, 1.5–2.5 px size, 18-frame lifetime
+- **Low frequency**: one spark per 8 frames at most, only one block hints at a time
+- **Non-spoiling**: no outline, no shape — just a faint shimmer that rewards attentive players
+
+### Reveal Reward Feedback
+
+When a hidden block is successfully revealed by a head-bump:
+
+- **Bonus score**: +15 total (10 base + 5 SECRET bonus), up from the original +10
+- **"SECRET!" popup**: a teal-colored floating text label appears above the score popup
+- **Distinct SFX**: a rising three-note triangle-wave chime (660→880→1100 Hz) replaces the generic coin sound, giving hidden blocks a unique audio identity
+
+### Design Principles Preserved
+
+- Hidden blocks remain **optional shortcuts**, never required
+- The +5 bonus is small enough not to distort the score economy
+- Hint sparks are ambient and easily missed — they don't spell out "jump here"
 
 ## Frame-rate Independent Simulation
 
