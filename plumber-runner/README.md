@@ -847,6 +847,32 @@ This prevents side-collisions from registering as stomps. On stomp, the player r
 | `TURTLE_SPAWN_CHANCE` | `0.30` | Per-frame spawn probability (throttled) |
 | `TURTLE_MIN_SPAWN_GAP` | `400` | Minimum px between turtle spawns |
 
+## Flagpole Level-Clear Flow
+
+A flagpole spawns at a fixed world-X distance (`FLAGPOLE_DISTANCE = 5000`). Reaching it ends the current run with a victory sequence.
+
+### Collision & Guard
+- On first contact with the flagpole hitbox, `levelCleared` is set **once**; a duplicate-collision guard (`if (!levelCleared)`) prevents re-triggering.
+- A one-time score bonus (`LEVEL_CLEAR_BONUS = 50`) is awarded with a "LEVEL CLEAR +50" popup.
+
+### Slide Animation (~1.25 s)
+- The player snaps horizontally to the pole center and enters the **sliding** phase.
+- Each frame, the player eases downward toward ground level.
+- During sliding, all normal gameplay (movement, gravity, enemies, death checks) is frozen — the `update()` early-return prevents any further game logic.
+
+### Done Phase & Overlay
+- After `LEVEL_CLEAR_SLIDE_FRAMES` (75 frames ≈ 1.25 s) the phase switches to **done**.
+- A dark overlay displays "LEVEL CLEAR!", final score, and survival time.
+- Any input (jump / move) restarts the game; inputs during the slide phase are ignored.
+
+### Constants
+| Constant | Value | Purpose |
+|---|---|---|
+| `FLAGPOLE_DISTANCE` | 5000 | World X where flagpole spawns |
+| `FLAGPOLE_W / H` | 16 / 200 | Pole collision size |
+| `LEVEL_CLEAR_BONUS` | 50 | One-time score bonus |
+| `LEVEL_CLEAR_SLIDE_FRAMES` | 75 | Slide duration (frames) |
+
 ## Fun Pack v1
 
 Three new systems that add depth, replayability, and satisfying feedback to every run.

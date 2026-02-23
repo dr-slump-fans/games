@@ -1352,9 +1352,11 @@ const FLAGPOLE_H = 200;             // pole height (from ground up)
 const FLAGPOLE_FLAG_W = 40;         // flag rectangle width
 const FLAGPOLE_FLAG_H = 30;         // flag rectangle height
 const LEVEL_CLEAR_BONUS = 50;       // one-time score bonus when touching flagpole
+const LEVEL_CLEAR_SLIDE_FRAMES = 75; // ~1.25s slide-down animation before overlay
 let flagpoleX = 0;                  // world X of the flagpole
 let levelCleared = false;           // true once player touches flagpole
 let levelClearTimer = 0;            // frames since level was cleared
+let levelClearPhase = 'none';       // 'none' | 'sliding' | 'done'
 
 // ── Player ─────────────────────────────────────────────
 const player = {
@@ -3861,6 +3863,7 @@ function resetGame() {
   // Flagpole / level clear reset
   levelCleared = false;
   levelClearTimer = 0;
+  levelClearPhase = 'none';
   flagpoleX = FLAGPOLE_DISTANCE;
   initClouds();
   initHills();
@@ -4212,7 +4215,22 @@ function spawnPipe() {
 
 function update() {
   if (state !== 'playing') return;
-  if (levelCleared) { levelClearTimer++; return; }
+  if (levelCleared) {
+    levelClearTimer++;
+    if (levelClearPhase === 'sliding') {
+      // Slide player down the flagpole toward ground
+      const groundY = DESIGN_H - GROUND_H - player.h;
+      if (player.y < groundY) {
+        player.y += (groundY - player.y) * 0.08 + 1; // ease toward ground
+        if (player.y > groundY) player.y = groundY;
+      }
+      if (levelClearTimer >= LEVEL_CLEAR_SLIDE_FRAMES) {
+        levelClearPhase = 'done';
+        player.y = groundY;
+      }
+    }
+    return;
+  }
 
   frameCount++;
   // Compute base elapsed time; bonusTime is added after sweep resolves bricks
@@ -4558,7 +4576,7 @@ function update() {
   }
 
   // ── Flagpole collision check ─────────────────────────
-  {
+  if (!levelCleared) {
     const pb = getPlayerHitbox();
     const groundY = DESIGN_H - GROUND_H;
     const fpX = flagpoleX;
@@ -4566,6 +4584,10 @@ function update() {
     if (rectsOverlap(pb.x, pb.y, pb.w, pb.h, fpX, fpY, FLAGPOLE_W, FLAGPOLE_H)) {
       levelCleared = true;
       levelClearTimer = 0;
+      levelClearPhase = 'sliding';
+      player.x = fpX - player.w / 2 + FLAGPOLE_W / 2; // snap to pole
+      player.vy = 0;
+      player.animState = 'idle';
       score += LEVEL_CLEAR_BONUS;
       spawnScorePopup(pb.x + pb.w / 2, pb.y - 8, LEVEL_CLEAR_BONUS);
       scorePopups[scorePopups.length - 1].text = `LEVEL CLEAR +${LEVEL_CLEAR_BONUS}`;
@@ -4941,7 +4963,7 @@ function draw() {
   ctx.restore(); // end camera transform
 
   // ── Level Clear overlay ────────────────────────────────
-  if (levelCleared) {
+  if (levelCleared && levelClearPhase === 'done') {
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
@@ -5182,7 +5204,7 @@ function startGame() {
 
 // ── Input ──────────────────────────────────────────────
 function onJumpDown() {
-  if (levelCleared) { startGame(); return; }
+  if (levelCleared) { if (levelClearPhase === 'done') startGame(); return; }
   if (state === 'dead') { startGame(); return; }
   if (state === 'title') { startGame(); jumpPressed = true; return; }
   jumpPressed = true;
@@ -5192,7 +5214,7 @@ function onJumpUp() {
   jumpConsumed = false;
 }
 function onMoveLeftDown() {
-  if (levelCleared) { startGame(); return; }
+  if (levelCleared) { if (levelClearPhase === 'done') startGame(); return; }
   if (state === 'dead') { startGame(); return; }
   if (state === 'title') { startGame(); }
   moveLeftPressed = true;
@@ -5201,7 +5223,7 @@ function onMoveLeftUp() {
   moveLeftPressed = false;
 }
 function onMoveRightDown() {
-  if (levelCleared) { startGame(); return; }
+  if (levelCleared) { if (levelClearPhase === 'done') startGame(); return; }
   if (state === 'dead') { startGame(); return; }
   if (state === 'title') { startGame(); }
   moveRightPressed = true;
