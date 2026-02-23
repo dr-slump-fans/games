@@ -1658,6 +1658,42 @@ Step 3 is the **final consistency pass** for the big/small form system and life 
 
 Updated `GAME_VERSION` from `v0.5.4` → **`v0.5.5`**.
 
+---
+
+## v0.5.6 — Balance Pass
+
+A parameters-only tuning pass to smooth overall feel, reduce frustration, and keep reward feedback readable without adding new systems.
+
+### Movement / Brake
+- `BRAKE_DECEL_MIN` 0.10 → **0.12** — snappier tail-end stop, less sluggish
+- `BRAKE_DECEL_MAX` 0.60 → **0.55** — softer peak brake for more natural curve
+- `AIR_BRAKE_DECEL` 0.30 → **0.25** — air pullback less forceful, more controllable
+
+### Enemy Pressure
+- `TURTLE_MIN_SPAWN_GAP` 400 → **440 px** — more breathing room between turtles
+- `SPAWN_RHYTHM_RELIEF` 0.40 → **0.45** — longer relief windows in spawn rhythm
+- `SHELL_COMBO_MAX` 5 → **4** — cap combo earlier to prevent score explosion
+- `SHELL_COMBO_BASE` 20 → **15** — lower base keeps chain rewarding but not game-breaking
+
+### Coin / Question Brick
+- `COIN_COMBO_WINDOW` 1.2 → **1.0 s** — combo resets faster, less pitch-spam
+- `COIN_COMBO_MAX` 8 → **6** — caps pitch escalation before it gets shrill
+- Score popup lifetime 45 → **38 frames** — popups clear faster, less screen clutter
+
+### Hidden Brick / Shortcut
+- `HIDDEN_HINT_RANGE` 60 → **50 px** — tighter proximity before sparks appear
+- `HIDDEN_HINT_FREQ` 8 → **12 frames** — spark hints more subtle and less frequent
+- `HIDDEN_SHORTCUT_CHANCE` 0.12 → **0.10** — slightly rarer shortcuts to preserve surprise
+
+### Life / Form
+- `HURT_INVINCIBLE_FRAMES` 120 → **150** (~2 s → 2.5 s) — more recovery time after hit
+- `HURT_SHAKE_FRAMES` 12 → **10** — shorter screen-shake, less jarring
+- Respawn enemy clear radius 200 → **250 px** — safer respawn zone
+
+### Version
+
+Updated `GAME_VERSION` from `v0.5.5` → **`v0.5.6`**.
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

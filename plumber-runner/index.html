@@ -271,7 +271,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.5.5';
+const GAME_VERSION = 'v0.5.6';
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -303,9 +303,9 @@ const PLAYER_MAX_SPEED = 4.5;        // max speed when holding direction (auto r
 const PLAYER_ACCEL = 0.07;           // acceleration per frame toward max speed (smooth ramp ~1.1s)
 const PLAYER_DECEL = 0.22;           // deceleration per frame when no input
 const BRAKE_TO_STOP_TIME = 0.5;      // seconds to brake to zero on ground when reversing
-const BRAKE_DECEL_MIN = 0.10;        // min decel per frame (prevents infinite brake at low speed)
-const BRAKE_DECEL_MAX = 0.60;        // max decel per frame (cap at very high speed)
-const AIR_BRAKE_DECEL = 0.30;        // weaker brake when reversing in air (no time constraint)
+const BRAKE_DECEL_MIN = 0.12;        // min decel per frame (slightly snappier tail-end stop)
+const BRAKE_DECEL_MAX = 0.55;        // max decel per frame (softer peak for natural feel)
+const AIR_BRAKE_DECEL = 0.25;        // weaker brake when reversing in air (controllable but not forceful)
 const CAMERA_LEAD = DESIGN_W * 0.40; // camera keeps player at 40% from left edge
 // ── Coin Rush (Mario-style mini buff) ───────────────
 const COIN_RUSH_WINDOW = 6.0;      // seconds to chain 3 coin pickups
@@ -350,8 +350,8 @@ const BRICK_MIN_HEIGHT_ABOVE_GROUND = 36 * 2; // 72px (2× player.h)
 // ── Question Block & Coin Constants ──────────────────
 const QUESTION_BLOCK_CHANCE = 0.30;  // chance a brick becomes a question block (coin reward)
 const COIN_SCORE = 10;               // points per coin collected from question block
-const COIN_COMBO_WINDOW = 1.2;       // seconds — hits within this window count as combo
-const COIN_COMBO_MAX = 8;            // max combo level (caps pitch scaling)
+const COIN_COMBO_WINDOW = 1.0;       // seconds — hits within this window count as combo (tighter reset)
+const COIN_COMBO_MAX = 6;            // max combo level (caps pitch scaling, avoids shrill spam)
 const COIN_BASE_FREQ = 988;          // B5 — base coin sound frequency
 const BLOCK_BUMP_FRAMES = 8;         // total frames for bump animation
 const BLOCK_BUMP_HEIGHT = 6;         // max upward pixel offset during bump
@@ -359,10 +359,10 @@ const BLOCK_BUMP_HEIGHT = 6;         // max upward pixel offset during bump
 // ── Hidden Block Constants ──────────────────────────
 const HIDDEN_BLOCK_SCORE = 10;        // points awarded when a hidden block is revealed
 const HIDDEN_BLOCK_CHANCE = 0.20;     // chance a chunk spawns a hidden block (shortcut stepping stone)
-const HIDDEN_HINT_RANGE = 60;         // horizontal proximity range for spark hint (px)
-const HIDDEN_HINT_FREQ = 8;           // spawn a hint spark every N frames (low frequency)
+const HIDDEN_HINT_RANGE = 50;         // horizontal proximity range for spark hint (tighter trigger)
+const HIDDEN_HINT_FREQ = 12;          // spawn a hint spark every N frames (subtler, less noisy)
 const HIDDEN_REVEAL_BONUS = 5;        // extra bonus points on reveal ("SECRET!" reward)
-const HIDDEN_SHORTCUT_CHANCE = 0.12;  // chance a chunk spawns a 2-block shortcut corridor
+const HIDDEN_SHORTCUT_CHANCE = 0.10;  // chance a chunk spawns a 2-block shortcut corridor (slightly rarer)
 const HIDDEN_SHORTCUT_COIN = true;    // shortcut blocks award a bonus coin on reveal
 
 // ── Special Brick & Mushroom Constants ───────────────
@@ -393,16 +393,16 @@ const TURTLE_SHELL_KILL_SCORE = 20;  // points for shell killing another turtle
 const TURTLE_SHELL_STOMP_SCORE = 5;  // points for stomping an idle shell
 const TURTLE_STOMP_BOUNCE_VY = -5.5; // bounce velocity when player stomps turtle
 const TURTLE_SPAWN_CHANCE = 0.30;    // chance to spawn turtle per pipe spawn
-const TURTLE_MIN_SPAWN_GAP = 400;    // min px between turtle spawns
+const TURTLE_MIN_SPAWN_GAP = 440;    // min px between turtle spawns (more breathing room)
 const TURTLE_SHELL_IDLE_KICK_GRACE = 10; // frames after stomp before shell can be kicked
 const TURTLE_DEAD_FRAMES = 30;       // frames for dead turtle to linger before removal
 const TURTLE_TURN_COOLDOWN = 12;     // min frames between direction reversals (prevents jitter)
 const SHELL_BOUNCE_COOLDOWN = 4;     // frames of bounce immunity after shell wall-bounce (prevents sticking)
-const SHELL_COMBO_MAX = 5;           // max shell combo multiplier
-const SHELL_COMBO_BASE = 20;         // base score for shell kill (doubles each combo hit)
+const SHELL_COMBO_MAX = 4;           // max shell combo multiplier (capped earlier to prevent score burst)
+const SHELL_COMBO_BASE = 15;         // base score for shell kill (doubles each combo hit, lower base)
 const TURTLE_NEARBY_CAP = 2;         // max walk/idle turtles within TURTLE_MIN_SPAWN_GAP of a new spawn
 const SPAWN_RHYTHM_CYCLE = 1200;     // px per full pressure+relief cycle
-const SPAWN_RHYTHM_RELIEF = 0.4;     // fraction of cycle that is "relief" (no random spawns)
+const SPAWN_RHYTHM_RELIEF = 0.45;    // fraction of cycle that is "relief" (longer breathing windows)
 
 // ── Difficulty System ─────────────────────────────────
 // 5 levels with smooth interpolation between them
@@ -1732,12 +1732,12 @@ const MAX_AIR_JUMPS = 1;      // maximum air jumps allowed when mushroom is acti
 // ── Player Form State (small / big) ─────────────────────
 let playerForm = 'small';        // 'small' | 'big'
 let hurtInvincibleTimer = 0;     // frames of invincibility after taking a hit (big→small)
-const HURT_INVINCIBLE_FRAMES = 120; // ~2 seconds at 60fps
+const HURT_INVINCIBLE_FRAMES = 150; // ~2.5 seconds at 60fps (more recovery time)
 const BIG_SPEED_BONUS = 1.05;        // BIG form: +5% movement speed (subtle advantage)
 
 // ── Hurt Feedback State ─────────────────────────────────
 let hurtShakeTimer = 0;             // frames of screen-shake on big→small
-const HURT_SHAKE_FRAMES = 12;       // short 12-frame shake (~0.2s)
+const HURT_SHAKE_FRAMES = 10;       // short 10-frame shake (~0.17s, less jarring)
 let hurtFlashTimer = 0;             // frames of red flash overlay on big→small
 const HURT_FLASH_FRAMES = 8;        // quick 8-frame red flash
 
@@ -3214,7 +3214,7 @@ function updateTurtles() {
           other.state = 'dead';
           other.vy = -3;
           other.deadTimer = TURTLE_DEAD_FRAMES;
-          // Shell combo scoring: 20, 40, 80, 160, 320 (capped at SHELL_COMBO_MAX)
+          // Shell combo scoring: 15, 30, 60, 120 (capped at SHELL_COMBO_MAX)
           t.shellCombo++;
           const comboLevel = Math.min(t.shellCombo, SHELL_COMBO_MAX);
           const killScore = SHELL_COMBO_BASE * Math.pow(2, comboLevel - 1);
@@ -3372,7 +3372,7 @@ function spawnScorePopup(x, y, points) {
     x: x,
     y: y,
     text: `+${points}`,
-    life: 45,
+    life: 38,
   });
 }
 
@@ -3452,7 +3452,7 @@ function respawnPlayer() {
   // Remove nearby enemies/shells that could instantly re-kill
   turtles = turtles.filter(t => {
     const dist = Math.abs(t.x - player.x);
-    return dist > 200;
+    return dist > 250;
   });
   // Brief invincibility popup
   spawnScorePopup(player.x, player.y - 20, 0);
