@@ -1636,6 +1636,28 @@ The old uniform 4-frame on/off blink is replaced with an **adaptive-rate ghost f
 - Blink period starts at **3 frames** (fast, urgent) and gradually slows to **8 frames** (calm, fading).
 - Instead of fully hiding the sprite, the "dim" phase renders at **25% opacity** — player is always visible, avoiding confusion about character position.
 
+## Form & Life Flow Final Integration (Mario List Item 6, Step 3 — Trunk Complete)
+
+Step 3 is the **final consistency pass** for the big/small form system and life cycle, closing out Item 6's main trunk.
+
+### What was audited & fixed
+
+| Flow | Before | After |
+|------|--------|-------|
+| **big → hurt → small** | Correct: downgrades + invincibility | Unchanged (verified) |
+| **small → hurt → respawn** | Respawn granted **no** invincibility — player could be instantly re-killed | Respawn now grants `HURT_INVINCIBLE_FRAMES` (120 frames / ~2 s) of post-respawn invincibility with the same flicker feedback |
+| **small → hurt → game over** | Correct: triggers overlay | Unchanged (verified) |
+| **Level clear → restart** | `resetGame()` resets form to small, clears all hurt timers | Unchanged (verified) |
+| **Game over → restart** | Same `resetGame()` path | Unchanged (verified) |
+
+### Key change
+
+- `respawnPlayer()` now sets `hurtInvincibleTimer = HURT_INVINCIBLE_FRAMES` instead of `0`, so the player gets the same invincibility flicker window after losing a life as after a big→small downgrade. Nearby enemies are still cleared within 200 px as before.
+
+### Version
+
+Updated `GAME_VERSION` from `v0.5.4` → **`v0.5.5`**.
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.

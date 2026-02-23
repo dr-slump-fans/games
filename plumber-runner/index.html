@@ -271,7 +271,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.5.4';
+const GAME_VERSION = 'v0.5.5';
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -3446,7 +3446,7 @@ function respawnPlayer() {
   isAirJump = false;
   doubleJumpTimer = 0;
   playerForm = 'small';
-  hurtInvincibleTimer = 0;
+  hurtInvincibleTimer = HURT_INVINCIBLE_FRAMES; // grant post-respawn invincibility
   hurtShakeTimer = 0;
   hurtFlashTimer = 0;
   // Remove nearby enemies/shells that could instantly re-kill
