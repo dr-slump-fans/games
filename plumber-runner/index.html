@@ -271,6 +271,10 @@ canvas {
       <div id="ol-lb-rows"></div>
       <button id="ol-lb-clear" style="font-size:11px;padding:3px 10px;margin-top:5px;background:#555;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-family:monospace">Clear Today</button>
     </div>
+    <div id="ol-ach-wrap" style="margin:6px 0 0;font-size:11px;color:#aaa;display:none">
+      <div id="ol-ach-summary" style="color:#cf8;margin-bottom:2px"></div>
+      <div id="ol-ach-list" style="white-space:pre;line-height:1.5;color:#888"></div>
+    </div>
     <button id="ol-btn">START</button>
     <p id="ol-version" style="font-size:12px;color:#888;margin:0"></p>
   </div>
@@ -278,7 +282,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.5';
+const GAME_VERSION = 'v0.6.6';
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -368,6 +372,48 @@ function clearTodayLeaderboard() {
     saveLeaderboard(lb);
   } catch { /* graceful fallback */ }
 }
+
+// ── Local Achievements (localStorage) ──────────────────
+const ACH_STORAGE_KEY = 'plumber_runner_ach';
+const ACHIEVEMENTS = {
+  FIRST_CLEAR:   { name: 'First Clear',   desc: 'Clear the level for the first time' },
+  THREE_STAR:    { name: 'Three Stars',    desc: 'Earn 3 stars in a single run' },
+  NO_DEATH:      { name: 'No Death',       desc: 'Clear with 0 deaths' },
+  FAST_CLEAR:    { name: 'Speed Runner',   desc: 'Clear in ≤90 seconds' },
+};
+
+function loadAchievements() {
+  try {
+    const raw = localStorage.getItem(ACH_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch { return {}; }
+}
+
+function saveAchievements(ach) {
+  try { localStorage.setItem(ACH_STORAGE_KEY, JSON.stringify(ach)); } catch {}
+}
+
+function unlockAchievement(id) {
+  try {
+    const ach = loadAchievements();
+    if (ach[id]) return false; // already unlocked
+    ach[id] = { date: getDailyDateStr(), ts: Date.now() };
+    saveAchievements(ach);
+    return true; // newly unlocked
+  } catch { return false; }
+}
+
+function getUnlockedCount() {
+  try {
+    return Object.keys(loadAchievements()).length;
+  } catch { return 0; }
+}
+
+// Variables set at level clear for the ranking overlay
+let clearRankInfo = null; // { rank: number|null, topScore: number|null }
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -1720,6 +1766,9 @@ const olDailyEl = document.getElementById('ol-daily');
 const olLbWrap = document.getElementById('ol-lb-wrap');
 const olLbRows = document.getElementById('ol-lb-rows');
 const olLbClear = document.getElementById('ol-lb-clear');
+const olAchWrap = document.getElementById('ol-ach-wrap');
+const olAchSummary = document.getElementById('ol-ach-summary');
+const olAchList = document.getElementById('ol-ach-list');
 const hudDaily = document.getElementById('hud-daily');
 hudDaily.textContent = `DAILY: ${DAILY_DATE}`;
 const scoreDisplay = document.getElementById('score-display');
@@ -4768,8 +4817,9 @@ function resetGame() {
   levelClearTimer = 0;
   levelClearPhase = 'none';
   flagpoleX = FLAGPOLE_DISTANCE;
-  // Star rating / checkpoint reset
+  // Star rating / checkpoint / rank reset
   levelClearStars = 0;
+  clearRankInfo = null;
   deathsThisRun = 0;
   checkpointReached = false;
   checkpointActivated = false;
@@ -5545,13 +5595,28 @@ function update() {
       scorePopups[scorePopups.length - 1].text = `LEVEL CLEAR +${LEVEL_CLEAR_BONUS}`;
       // Calculate star rating (1~3)
       levelClearStars = calcStarRating();
-      // Record to daily leaderboard
-      addLeaderboardEntry(DAILY_DATE, {
+      // Record to daily leaderboard & capture rank info
+      const todayAfter = addLeaderboardEntry(DAILY_DATE, {
         score: score,
         time: survivalTime,
         stars: levelClearStars,
         date: DAILY_DATE,
       });
+      // Determine rank: find this run in sorted list (match score+time)
+      clearRankInfo = { rank: null, topScore: null };
+      if (Array.isArray(todayAfter) && todayAfter.length > 0) {
+        clearRankInfo.topScore = todayAfter[0].score;
+        for (let ri = 0; ri < todayAfter.length; ri++) {
+          if (todayAfter[ri].score === score && todayAfter[ri].time === survivalTime) {
+            clearRankInfo.rank = ri + 1; break;
+          }
+        }
+      }
+      // Unlock achievements
+      unlockAchievement('FIRST_CLEAR');
+      if (levelClearStars === 3) unlockAchievement('THREE_STAR');
+      if (deathsThisRun === 0) unlockAchievement('NO_DEATH');
+      if (survivalTime <= 90) unlockAchievement('FAST_CLEAR');
       // Stop checkpoint flash so it doesn't bleed into clear overlay
       checkpointFlashTimer = 0;
       return;
@@ -6149,20 +6214,20 @@ function draw() {
     // Title
     ctx.font = 'bold 32px monospace';
     ctx.fillStyle = '#fff';
-    ctx.fillText('LEVEL CLEAR!', cx, cy - 28);
+    ctx.fillText('LEVEL CLEAR!', cx, cy - 40);
     // Score & time
     ctx.font = '16px monospace';
     const tMins = Math.floor(survivalTime / 60);
     const tSecs = Math.floor(survivalTime % 60);
     const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, cx, cy + 2);
+    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, cx, cy - 12);
     // Star rating display
     ctx.font = 'bold 26px monospace';
     const starFilled = '\u2605';  // ★
     const starEmpty  = '\u2606';  // ☆
     const starStr = starFilled.repeat(levelClearStars) + starEmpty.repeat(3 - levelClearStars);
     ctx.fillStyle = '#ffd700';
-    ctx.fillText(starStr, cx, cy + 32);
+    ctx.fillText(starStr, cx, cy + 18);
     // Star criteria summary (compact)
     ctx.font = '11px monospace';
     ctx.fillStyle = '#bbb';
@@ -6172,11 +6237,24 @@ function draw() {
     const p = [];
     p.push(timeMet ? '\u2713 Time' : '\u2717 Time');
     p.push(coinMet ? '\u2713 Coins' : noDeathMet ? '\u2713 No death' : '\u2717 Coins');
-    ctx.fillText(p.join('   '), cx, cy + 48);
+    ctx.fillText(p.join('   '), cx, cy + 34);
+    // Daily ranking info
+    ctx.font = '12px monospace';
+    if (clearRankInfo && clearRankInfo.rank != null) {
+      ctx.fillStyle = '#8cf';
+      const diff = clearRankInfo.topScore != null ? clearRankInfo.topScore - score : 0;
+      const rankStr = clearRankInfo.rank === 1
+        ? `Today #1!`
+        : `Today #${clearRankInfo.rank}  (${diff > 0 ? '-' + diff + ' from #1' : 'Tied #1'})`;
+      ctx.fillText(rankStr, cx, cy + 52);
+    } else {
+      ctx.fillStyle = '#888';
+      ctx.fillText('Not ranked today', cx, cy + 52);
+    }
     // Restart prompt
     ctx.font = '13px monospace';
     ctx.fillStyle = '#ccc';
-    ctx.fillText('Press any key to restart', cx, cy + 68);
+    ctx.fillText('Press any key to restart', cx, cy + 74);
     ctx.restore();
   }
 
@@ -6416,6 +6494,29 @@ olLbClear.addEventListener('click', (e) => {
   renderTitleLeaderboard();
 });
 
+function renderTitleAchievements() {
+  try {
+    const ach = loadAchievements();
+    const total = Object.keys(ACHIEVEMENTS).length;
+    const unlocked = Object.keys(ach).filter(k => ACHIEVEMENTS[k]).length;
+    olAchWrap.style.display = 'block';
+    olAchSummary.textContent = `Badges: ${unlocked}/${total} unlocked`;
+    let lines = '';
+    for (const id of Object.keys(ACHIEVEMENTS)) {
+      const a = ACHIEVEMENTS[id];
+      if (ach[id]) {
+        lines += `\u2713 ${a.name}\n`;
+      } else {
+        lines += `\u2610 ${a.name}\n`;
+      }
+    }
+    olAchList.textContent = lines.trimEnd();
+    olAchList.style.color = '#aaa';
+  } catch {
+    olAchWrap.style.display = 'none';
+  }
+}
+
 function showOverlay(title, msg, sc) {
   olTitle.textContent = title;
   olMsg.textContent = msg;
@@ -6433,10 +6534,12 @@ function showOverlay(title, msg, sc) {
     olDailyEl.textContent = `DAILY: ${DAILY_DATE}`;
     olDailyEl.style.display = 'block';
     renderTitleLeaderboard();
+    renderTitleAchievements();
   } else {
     olVersion.style.display = 'none';
     olDailyEl.style.display = 'none';
     olLbWrap.style.display = 'none';
+    olAchWrap.style.display = 'none';
   }
   overlay.style.display = 'flex';
   hudBoost.style.display = 'none';

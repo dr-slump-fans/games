@@ -1774,6 +1774,33 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.6.6 Step 1 — Clear Screen Ranking + Local Achievement Badges
+
+### Level Clear Screen — Ranking Info
+- After touching the flagpole, the LEVEL CLEAR overlay now shows **today's rank** (e.g. "Today #2") and the **score gap from #1**
+- If the run didn't make the top 5, shows "Not ranked today"
+- Layout shifted to accommodate the new line while remaining readable on mobile
+
+### Local Achievement Badges (localStorage)
+- 4 verifiable badges stored in `localStorage` (`plumber_runner_ach`):
+  | Badge | Condition |
+  |---|---|
+  | **First Clear** | Clear the level for the first time |
+  | **Three Stars** | Earn 3 stars in a single run |
+  | **No Death** | Clear with 0 deaths |
+  | **Speed Runner** | Clear in ≤90 seconds |
+- Badges persist across sessions; unlocked once and never lost
+- Title screen shows "Badges: X/4 unlocked" summary with a per-badge checklist
+
+### Stability
+- All achievement read/write operations wrapped in try/catch — storage failure never blocks gameplay
+- `clearRankInfo` properly reset in `resetGame()` to prevent stale data
+
+### Version
+Updated `GAME_VERSION` from `v0.6.5` → **`v0.6.6`**.
+
+---
+
 ## v0.6.5 Step 3 — Daily Seed + Local Leaderboard Final Integration
 
 ### Daily Seed Polish
