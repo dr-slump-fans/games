@@ -63,6 +63,7 @@ canvas {
 #hud-level { font-size: 16px; margin-top: 2px; }
 #score-display { font-size: 22px; }
 #hud-coin { font-size: 16px; color: #f4d03f; margin-top: 2px; }
+#hud-life { font-size: 16px; color: #7fff7f; margin-top: 2px; }
 #hud-level-bar {
   margin-top: 4px; width: 100px; height: 6px;
   background: rgba(255,255,255,0.25); border-radius: 3px;
@@ -211,6 +212,7 @@ canvas {
     <div id="hud-right">
       <div id="score-display">SCORE: 0</div>
       <div id="hud-coin">COIN: 0</div>
+      <div id="hud-life">LIFE: 3</div>
       <div id="hud-mushroom" style="font-size:14px;margin-top:4px;display:none;"></div>
     </div>
   </div>
@@ -1153,6 +1155,25 @@ function sfxBossClear() {
   });
 }
 
+// ── SFX: 1UP (classic ascending two-note jingle) ─────
+function sfx1UP() {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  const now = ctx.currentTime;
+  const notes = [660, 880]; // E5 → A5
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now + i * 0.12);
+    gain.gain.setValueAtTime(0.12, now + i * 0.12);
+    gain.gain.linearRampToValueAtTime(0, now + i * 0.12 + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + i * 0.12);
+    osc.stop(now + i * 0.12 + 0.20);
+  });
+}
+
 // ── SFX: Coin Pop (short chirp, pitch rises with combo) ──
 function sfxCoinPop(comboLevel) {
   if (!sfxEnabled) return;
@@ -1281,6 +1302,7 @@ const olScore = document.getElementById('ol-score');
 const olBtn = document.getElementById('ol-btn');
 const scoreDisplay = document.getElementById('score-display');
 const hudCoin = document.getElementById('hud-coin');
+const hudLife = document.getElementById('hud-life');
 const hudTime = document.getElementById('hud-time');
 const hudLevel = document.getElementById('hud-level');
 const hudLevelFill = document.getElementById('hud-level-fill');
@@ -1366,6 +1388,10 @@ let bossWaveClearTimer = 0;          // frames remaining for BOSS CLEAR popup
 let bossWaveSpawnX = 0;              // tracks next boss obstacle spawn X position
 let bossWaveStepCounter = 0;         // obstacle step counter within current boss wave (for Mode B pattern)
 let bossWaveNextTrigger = BOSS_WAVE_INTERVAL; // survivalTime threshold for next boss wave
+
+// ── Life / 1UP State ───────────────────────────────────
+const INITIAL_LIVES = 3;
+let lives = INITIAL_LIVES;
 
 // ── Coin State ──────────────────────────────────────────
 let coins = 0;                // total coins collected this run
@@ -2951,6 +2977,51 @@ function drawScorePopups() {
   }
 }
 
+// ── 1UP: 100 coins → extra life ──────────────────────
+function check1UP() {
+  while (coins >= 100) {
+    coins -= 100;
+    lives++;
+    sfx1UP();
+    spawnScorePopup(player.x, player.y - 30, 0);
+    scorePopups[scorePopups.length - 1].text = '1UP!';
+    if (DEBUG_MODE) console.log(`%c[1UP] Extra life! lives=${lives}`, 'color: #7fff7f; font-weight: bold');
+  }
+}
+
+// ── Respawn player in-place (life lost, keep score/coins) ──
+function respawnPlayer() {
+  lives--;
+  // Reset player position to safe ground near camera
+  player.x = cameraX + RECENTER_TARGET_X;
+  player.y = DESIGN_H - GROUND_H - player.h;
+  player.vy = 0;
+  player.onGround = true;
+  player.frame = 0;
+  player.animState = 'idle';
+  player.landTimer = 0;
+  player.wasOnGround = true;
+  playerVX = 0;
+  playerBraking = false;
+  brakeTimer = 0;
+  jumpHoldFrames = 0;
+  jumpConsumed = false;
+  coyoteFrames = 0;
+  justJumped = false;
+  airJumpsUsed = 0;
+  isAirJump = false;
+  doubleJumpTimer = 0;
+  // Remove nearby enemies/shells that could instantly re-kill
+  turtles = turtles.filter(t => {
+    const dist = Math.abs(t.x - player.x);
+    return dist > 200;
+  });
+  // Brief invincibility popup
+  spawnScorePopup(player.x, player.y - 20, 0);
+  scorePopups[scorePopups.length - 1].text = `LIFE -1 (${lives} left)`;
+  if (DEBUG_MODE) console.log(`%c[Life] Respawn! lives=${lives}`, 'color: #ff9800; font-weight: bold');
+}
+
 // ── Time Bonus Popup ──────────────────────────────────
 let timeBonusPopups = []; // { x, y, life }
 
@@ -3442,6 +3513,7 @@ function resolveSweptMovement(playerVY, playerDX) {
           brick.used = true;
           brick.bumpTimer = BLOCK_BUMP_FRAMES;  // start bump animation
           coins++;
+          check1UP();
           score += COIN_SCORE;
           // Coin combo: track rapid hits for pitch-rising SFX
           coinComboLevel = (coinComboTimer > 0) ? coinComboLevel + 1 : 0;
@@ -3986,6 +4058,7 @@ function resetGame() {
   lastTurtleSpawnX = -9999;
   score = 0;
   coins = 0;
+  lives = INITIAL_LIVES;
   coinPops = [];
   coinComboLevel = 0;
   coinComboTimer = 0;
@@ -4666,13 +4739,16 @@ function update() {
   // Update turtles (physics, collisions, state machine, player interaction)
   if (updateTurtles()) {
     // Player killed by turtle
-    state = 'dead';
-    if (score > highScore) highScore = score;
-    const tMins = Math.floor(survivalTime / 60);
-    const tSecs = Math.floor(survivalTime % 60);
-    const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-    showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
-    return;
+    if (lives > 0) { respawnPlayer(); }
+    else {
+      state = 'dead';
+      if (score > highScore) highScore = score;
+      const tMins = Math.floor(survivalTime / 60);
+      const tSecs = Math.floor(survivalTime % 60);
+      const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
+      showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
+      return;
+    }
   }
 
   // Update double jump timer (count down at ~60fps)
@@ -4762,24 +4838,30 @@ function update() {
   // ── Phase 5: Death checks (after obstacles moved) ────
   // Check crush death
   if (checkCrush()) {
-    state = 'dead';
-    if (score > highScore) highScore = score;
-    const tMins = Math.floor(survivalTime / 60);
-    const tSecs = Math.floor(survivalTime % 60);
-    const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-    showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
-    return;
+    if (lives > 0) { respawnPlayer(); }
+    else {
+      state = 'dead';
+      if (score > highScore) highScore = score;
+      const tMins = Math.floor(survivalTime / 60);
+      const tSecs = Math.floor(survivalTime % 60);
+      const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
+      showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
+      return;
+    }
   }
 
   // If player goes off left edge of camera view, die
   if (player.x + player.w < cameraX - 20) {
-    state = 'dead';
-    if (score > highScore) highScore = score;
-    const tMins = Math.floor(survivalTime / 60);
-    const tSecs = Math.floor(survivalTime % 60);
-    const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-    showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
-    return;
+    if (lives > 0) { respawnPlayer(); }
+    else {
+      state = 'dead';
+      if (score > highScore) highScore = score;
+      const tMins = Math.floor(survivalTime / 60);
+      const tSecs = Math.floor(survivalTime % 60);
+      const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
+      showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
+      return;
+    }
   }
 
   // Score: passed pipe
@@ -4900,6 +4982,7 @@ function update() {
   hudCoin.textContent = (coinComboLevel >= 1 && coinComboTimer > 0)
     ? `COIN: ${coins}  x${coinComboLevel + 1}`
     : `COIN: ${coins}`;
+  hudLife.textContent = `LIFE: ${lives}`;
 
   // Update HUD
   const mins = Math.floor(survivalTime / 60);

@@ -1142,6 +1142,30 @@ When a question block is hit from below, the block now plays a quick **bump anim
 ### HUD Coin Combo Indicator
 When hitting question blocks in rapid succession, the coin HUD shows **`x2`, `x3`, …** next to the coin count for the duration of the combo window, giving immediate visual feedback for combo streaks.
 
+## Step 4: Coin Accumulation & 1UP Life System
+
+Classic Mario-style extra-life mechanic tied to coin collection.
+
+### Lives System
+- Player starts each run with **3 lives** (`INITIAL_LIVES = 3`)
+- HUD displays `LIFE: N` in green below the coin counter
+- On death with lives remaining: player **respawns in place** (near camera center) instead of Game Over
+  - Score, coins, timer, and world state are preserved
+  - Nearby turtles (within 200 px) are cleared to prevent instant re-death
+  - Mushroom power-up timer is reset on respawn
+- On death with 0 lives: standard Game Over flow (unchanged)
+
+### 100-Coin 1UP
+- When `coins >= 100`: `lives += 1`, `coins -= 100` (handles multiples via `while` loop)
+- Floating popup displays **`1UP!`** above the player
+- Ascending two-note SFX jingle (E5 → A5, triangle wave)
+- `check1UP()` is called immediately after each coin increment
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `INITIAL_LIVES` | `3` | Starting lives per run |
+| 1UP threshold | `100 coins` | Coins needed for an extra life |
+
 ## Frame-rate Independent Simulation
 
 The game uses a **fixed timestep** loop to ensure identical physics and game speed regardless of the display's refresh rate. Whether running on a 30 Hz phone, a 60 Hz laptop, or a 144+ Hz gaming monitor, the gameplay experience is the same.
