@@ -1774,6 +1774,46 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.6.8 Step 3 — Achievement System Final Polish + Clear Screen Layout
+
+### Achievement System Polish
+- Verified all 4 badge conditions match their descriptions and are correctly triggered:
+  | Badge | Condition | Code check |
+  |---|---|---|
+  | **First Clear** | Clear the level for the first time | `unlockAchievement('FIRST_CLEAR')` on every clear |
+  | **Three Stars** | Earn 3 stars in a single run | `levelClearStars === 3` |
+  | **No Death** | Clear with 0 deaths | `deathsThisRun === 0` |
+  | **No Checkpoint** | Clear without using checkpoint | `!checkpointActivated` |
+- **Save compatibility**: old `SPEED_RUNNER` key (from v0.6.6) is silently removed on load — no stale badges
+- `getUnlockedCount()` now filters against `ACHIEVEMENTS` keys, preventing phantom counts from legacy data
+- All localStorage operations remain fully try/catch wrapped — storage failure never blocks gameplay
+
+### LEVEL CLEAR Screen — Layout Overhaul (Mobile-First)
+- Replaced fixed `cy +/- offset` layout with a `ly` (layout-Y) cursor that flows top-to-bottom
+- Increased vertical spacing between each info block (stars → criteria → rank → badges → prompt)
+- Slightly darker overlay backdrop (`0.5` alpha) for better text contrast on bright levels
+- "Press any key" prompt now auto-positions after the last visible element — no overlap with badge line
+- Restart prompt dimmed to `#aaa` to avoid competing with the gold badge notification
+
+### Title Screen Badge Area Polish
+- Unlocked badges now use ★ (filled star) in gold `#ffd700` instead of ✓
+- Locked badges use ☆ (hollow star) in `#777` with em-dash separator for description
+- When all 4 badges are unlocked, summary turns gold with "★ All 4 Badges Unlocked!" text
+- Increased `line-height` from 1.5 → 1.7 and top margin from 6 → 8 px for better readability
+- Summary-to-list gap increased from 2 → 4 px
+
+### Stability
+- No changes to core gameplay, balance, or level generation
+- All existing localStorage fallbacks preserved
+- `newlyUnlockedBadges` reset paths unchanged
+
+### Version
+Updated `GAME_VERSION` from `v0.6.7` → **`v0.6.8`**.
+
+**Achievement system main trunk: complete.**
+
+---
+
 ## v0.6.7 Step 2 — 4th Badge Challenge + Unlock Feedback
 
 ### 4th Badge → No Checkpoint

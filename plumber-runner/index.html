@@ -271,9 +271,9 @@ canvas {
       <div id="ol-lb-rows"></div>
       <button id="ol-lb-clear" style="font-size:11px;padding:3px 10px;margin-top:5px;background:#555;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-family:monospace">Clear Today</button>
     </div>
-    <div id="ol-ach-wrap" style="margin:6px 0 0;font-size:11px;color:#aaa;display:none">
-      <div id="ol-ach-summary" style="color:#cf8;margin-bottom:2px"></div>
-      <div id="ol-ach-list" style="white-space:pre;line-height:1.5;color:#888"></div>
+    <div id="ol-ach-wrap" style="margin:8px 0 0;font-size:11px;color:#aaa;display:none">
+      <div id="ol-ach-summary" style="color:#cf8;margin-bottom:4px"></div>
+      <div id="ol-ach-list" style="white-space:pre;line-height:1.7;color:#888"></div>
     </div>
     <button id="ol-btn">START</button>
     <p id="ol-version" style="font-size:12px;color:#888;margin:0"></p>
@@ -282,7 +282,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.7';
+const GAME_VERSION = 'v0.6.8';
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -388,6 +388,13 @@ function loadAchievements() {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    // Migrate old SPEED_RUNNER key from v0.6.6 — drop it silently
+    let migrated = false;
+    if (parsed['SPEED_RUNNER'] && !ACHIEVEMENTS['SPEED_RUNNER']) {
+      delete parsed['SPEED_RUNNER'];
+      migrated = true;
+    }
+    if (migrated) saveAchievements(parsed);
     return parsed;
   } catch { return {}; }
 }
@@ -408,7 +415,7 @@ function unlockAchievement(id) {
 
 function getUnlockedCount() {
   try {
-    return Object.keys(loadAchievements()).length;
+    return Object.keys(loadAchievements()).filter(k => ACHIEVEMENTS[k]).length;
   } catch { return 0; }
 }
 
@@ -6209,28 +6216,32 @@ function draw() {
   // ── Level Clear overlay ────────────────────────────────
   if (levelCleared && levelClearPhase === 'done') {
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
     const cx = DESIGN_W / 2;
-    const cy = DESIGN_H / 2;
+    let ly = DESIGN_H / 2 - 52; // layout cursor — top of block
     ctx.textAlign = 'center';
     // Title
     ctx.font = 'bold 32px monospace';
     ctx.fillStyle = '#fff';
-    ctx.fillText('LEVEL CLEAR!', cx, cy - 40);
+    ctx.fillText('LEVEL CLEAR!', cx, ly);
+    ly += 30;
     // Score & time
     ctx.font = '16px monospace';
+    ctx.fillStyle = '#fff';
     const tMins = Math.floor(survivalTime / 60);
     const tSecs = Math.floor(survivalTime % 60);
     const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, cx, cy - 12);
+    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, cx, ly);
+    ly += 32;
     // Star rating display
     ctx.font = 'bold 26px monospace';
     const starFilled = '\u2605';  // ★
     const starEmpty  = '\u2606';  // ☆
     const starStr = starFilled.repeat(levelClearStars) + starEmpty.repeat(3 - levelClearStars);
     ctx.fillStyle = '#ffd700';
-    ctx.fillText(starStr, cx, cy + 18);
+    ctx.fillText(starStr, cx, ly);
+    ly += 18;
     // Star criteria summary (compact)
     ctx.font = '11px monospace';
     ctx.fillStyle = '#bbb';
@@ -6240,20 +6251,22 @@ function draw() {
     const p = [];
     p.push(timeMet ? '\u2713 Time' : '\u2717 Time');
     p.push(coinMet ? '\u2713 Coins' : noDeathMet ? '\u2713 No death' : '\u2717 Coins');
-    ctx.fillText(p.join('   '), cx, cy + 34);
+    ctx.fillText(p.join('   '), cx, ly);
+    ly += 20;
     // Daily ranking info
     ctx.font = '12px monospace';
     if (clearRankInfo && clearRankInfo.rank != null) {
       ctx.fillStyle = '#8cf';
       const diff = clearRankInfo.topScore != null ? clearRankInfo.topScore - score : 0;
       const rankStr = clearRankInfo.rank === 1
-        ? `Today #1!`
+        ? 'Today #1!'
         : `Today #${clearRankInfo.rank}  (${diff > 0 ? '-' + diff + ' from #1' : 'Tied #1'})`;
-      ctx.fillText(rankStr, cx, cy + 52);
+      ctx.fillText(rankStr, cx, ly);
     } else {
       ctx.fillStyle = '#888';
-      ctx.fillText('Not ranked today', cx, cy + 52);
+      ctx.fillText('Not ranked today', cx, ly);
     }
+    ly += 20;
     // Newly unlocked badges feedback
     if (newlyUnlockedBadges.length > 0) {
       const badgeNames = newlyUnlockedBadges.map(id => ACHIEVEMENTS[id] ? ACHIEVEMENTS[id].name : id);
@@ -6261,13 +6274,14 @@ function draw() {
       ctx.globalAlpha = pulse;
       ctx.font = 'bold 13px monospace';
       ctx.fillStyle = '#ffd700';
-      ctx.fillText('\u2605 NEW: ' + badgeNames.join(', '), cx, cy + 68);
+      ctx.fillText('\u2605 NEW: ' + badgeNames.join(', '), cx, ly);
       ctx.globalAlpha = 1;
+      ly += 20;
     }
     // Restart prompt
     ctx.font = '13px monospace';
-    ctx.fillStyle = '#ccc';
-    ctx.fillText('Press any key to restart', cx, cy + (newlyUnlockedBadges.length > 0 ? 86 : 74));
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('Press any key to restart', cx, ly);
     ctx.restore();
   }
 
@@ -6513,18 +6527,20 @@ function renderTitleAchievements() {
     const total = Object.keys(ACHIEVEMENTS).length;
     const unlocked = Object.keys(ach).filter(k => ACHIEVEMENTS[k]).length;
     olAchWrap.style.display = 'block';
-    olAchSummary.textContent = `Badges: ${unlocked}/${total} unlocked`;
+    olAchSummary.textContent = unlocked === total
+      ? `\u2605 All ${total} Badges Unlocked!`
+      : `Badges: ${unlocked}/${total} unlocked`;
+    olAchSummary.style.color = unlocked === total ? '#ffd700' : '#cf8';
     let html = '';
     for (const id of Object.keys(ACHIEVEMENTS)) {
       const a = ACHIEVEMENTS[id];
       if (ach[id]) {
-        html += `<span style="color:#ffd700">\u2713 ${a.name}</span>\n`;
+        html += `<span style="color:#ffd700">\u2605 ${a.name}</span>\n`;
       } else {
-        html += `<span style="color:#666">\u2610 ${a.name} — ${a.desc}</span>\n`;
+        html += `<span style="color:#777">\u2606 ${a.name} \u2014 ${a.desc}</span>\n`;
       }
     }
     olAchList.innerHTML = html.trimEnd();
-    olAchList.style.color = '#aaa';
   } catch {
     olAchWrap.style.display = 'none';
   }
