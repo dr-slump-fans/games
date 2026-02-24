@@ -62,6 +62,9 @@ The level is generated using a **chunk-based system** that produces playable, re
 | `pipe_mix` | Mixed obstacles: bottom pipe + optional ceiling pipe, bricks | High |
 | `turtle_zone` | Flat/low terrain with turtle enemies — room for stomping | Low |
 | `reward` | Brick cluster (2–4 bricks) with high special brick chance | Safe |
+| `rolling_hills` | 3-4 pipes in sine-wave elevation profile (v0.9.0) | Low-Mid |
+| `bridge` | Ceiling overhang connector with entry/exit pillars (v0.9.0) | Low |
+| `island_hop` | 3-5 small pipe islands at varied heights (v0.9.0) | Mid |
 
 ### Reachability Constraints
 
@@ -2060,6 +2063,61 @@ Updated `GAME_VERSION` from `v0.6.3` → **`v0.6.4`**.
 ### Version
 
 Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
+
+---
+
+## v0.9.0 Step 1 — Map Richness: Terrain Variety & Route Layering
+
+### Design Intent
+Makes procedurally generated maps feel like **designed levels** rather than repeated obstacle templates. Adds terrain silhouette contrast (elevation groups, bridge zones, island clusters), optional side-routes that reward skilled play, and section-aware terrain shaping — all without breaking existing gameplay stability.
+
+### New Terrain Chunk Types
+
+| Type | Description | Terrain Shape | Danger |
+|------|-------------|---------------|--------|
+| `rolling_hills` | 3-4 pipes in a continuous sine-wave elevation profile (ascend → peak → descend) | Horizontal undulation | Low-Mid |
+| `bridge` | Low-pressure connector with ceiling overhang + entry/exit pillars | Horizontal with overhead | Low |
+| `island_hop` | 3-5 small pipe "islands" at varied heights with narrow landing zones | Scattered vertical | Mid |
+
+### Side-Route System (Optional Reward Paths)
+Every chunk type now has a chance to generate **optional side-route bricks** — elevated reward bricks placed above obstacles that are non-essential for progress but reward skilled platforming:
+
+- **single_platform**: 30% chance of reward brick above pipe top
+- **double_platform**: 35% chance of reward brick above taller pipe
+- **pipe_mix**: 30% chance of reward brick between obstacles
+- **turtle_zone**: 30% chance of elevated brick above pipe
+- **rolling_hills**: 50% chance at wave peak + 35% in valley
+- **bridge**: 45% above ceiling bridge + 40% ground-level
+- **island_hop**: 50% above middle island + 35% near exit
+
+Side-route bricks never block the main path and are always reachable with a full jump (capped at `CHUNK_PLAYER_MAX_JUMP_H`).
+
+### Section-Aware Terrain Shaping
+New terrain types respond to the active **rhythm section** (`UNDERWORLD` / `TOWER`) with distinct terrain profiles — not just weight changes but actual shape differences:
+
+| Section | `rolling_hills` | `bridge` | `island_hop` |
+|---------|-----------------|----------|-------------|
+| **UNDERWORLD** | Low dense undulation (base 45, amp 25) | Lower ceiling, very low floor bumps | 4-5 dense islands, tight 80-120px gaps |
+| **TOWER** | Tall vertical steps (base 70, amp 45) | Higher ceiling, taller pillars | 3-4 islands, wider 100-160px gaps, more height variance |
+| **Default** | Medium wave (base 55, amp 35) | Standard clearance | 3-4 islands, moderate spacing |
+
+### Weight Integration
+New chunk types are integrated into all existing weight systems:
+
+- **Difficulty phases**: `rolling_hills` 10→8%, `bridge` 5→4%, `island_hop` 0→8% (unlocks in Phase 1)
+- **Theme multipliers**: PLAINS favors rolling_hills (1.6x), CAVE favors bridge (1.5x), TOWER favors island_hop (1.6x)
+- **Section multipliers**: UNDERWORLD favors bridge (1.8x), TOWER favors island_hop (1.8x)
+- **Safety overrides**: All new types zeroed during forced-rest/forced-reward; `island_hop` dampened in post-breather protection
+
+### Fairness (Preserved)
+- **Reachability validation**: All new chunk types use only `pipe_bottom`, `pipe_top`, and `brick` obstacle types — fully covered by existing `validateChunkReachability()`
+- **Height caps**: All pipe heights capped at `CHUNK_PLAYER_MAX_JUMP_H` (150px); all bricks capped at reachable height
+- **No collision/physics changes**: Core movement, collision detection, and enemy rules untouched
+- **Reroll fallback**: New types reroll to `rest`/`single_platform` on 3+ failures, same as existing types
+- `island_hop` classified as dangerous for consecutive-danger tracking
+
+### Version
+Updated `GAME_VERSION` from `v0.8.4` → **`v0.9.0`**.
 
 ---
 

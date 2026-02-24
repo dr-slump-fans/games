@@ -297,7 +297,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.8.4';
+const GAME_VERSION = 'v0.9.0';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -639,9 +639,9 @@ const THEME_ANNOUNCE_DURATION = 120; // frames to show theme transition announce
 // Theme-specific weight multipliers (applied on top of difficulty phase weights)
 // Values > 1 increase that chunk type's weight, < 1 decrease it
 const THEME_WEIGHT_MULTS = {
-  PLAINS: { rest: 1.8, single_platform: 1.2, double_platform: 0.5, pipe_mix: 0.3, turtle_zone: 0.7, reward: 1.5 },
-  CAVE:   { rest: 0.5, single_platform: 1.0, double_platform: 1.5, pipe_mix: 1.8, turtle_zone: 0.8, reward: 0.8 },
-  TOWER:  { rest: 0.4, single_platform: 1.3, double_platform: 1.8, pipe_mix: 1.0, turtle_zone: 0.5, reward: 1.2 },
+  PLAINS: { rest: 1.8, single_platform: 1.2, double_platform: 0.5, pipe_mix: 0.3, turtle_zone: 0.7, reward: 1.5, rolling_hills: 1.6, bridge: 0.6, island_hop: 0.4 },
+  CAVE:   { rest: 0.5, single_platform: 1.0, double_platform: 1.5, pipe_mix: 1.8, turtle_zone: 0.8, reward: 0.8, rolling_hills: 0.6, bridge: 1.5, island_hop: 1.3 },
+  TOWER:  { rest: 0.4, single_platform: 1.3, double_platform: 1.8, pipe_mix: 1.0, turtle_zone: 0.5, reward: 1.2, rolling_hills: 0.8, bridge: 0.4, island_hop: 1.6 },
 };
 
 // Theme-specific parameter offsets (added to difficulty phase params)
@@ -820,8 +820,8 @@ const SECTION_ANNOUNCE_DURATION = 120; // frames
 
 // Section-specific weight multipliers (stacked on top of theme mults)
 const SECTION_WEIGHT_MULTS = {
-  UNDERWORLD: { rest: 0.6, single_platform: 1.4, double_platform: 0.5, pipe_mix: 1.6, turtle_zone: 1.3, reward: 1.0 },
-  TOWER:      { rest: 0.5, single_platform: 0.8, double_platform: 1.8, pipe_mix: 0.7, turtle_zone: 0.4, reward: 1.3 },
+  UNDERWORLD: { rest: 0.6, single_platform: 1.4, double_platform: 0.5, pipe_mix: 1.6, turtle_zone: 1.3, reward: 1.0, rolling_hills: 0.5, bridge: 1.8, island_hop: 0.7 },
+  TOWER:      { rest: 0.5, single_platform: 0.8, double_platform: 1.8, pipe_mix: 0.7, turtle_zone: 0.4, reward: 1.3, rolling_hills: 1.0, bridge: 0.3, island_hop: 1.8 },
 };
 
 // Section-specific parameter offsets (stacked on top of theme offsets)
@@ -1373,17 +1373,20 @@ function pickAndGenerateSetPiece(entry, chunkX, diffParams) {
 // 'pipe_mix'        – pipe pair (bottom+top) or mixed obstacles
 // 'turtle_zone'     – flat ground with turtle enemies + low obstacles
 // 'reward'          – brick clusters with high special chance + easy spacing
-const CHUNK_TYPES = ['rest', 'single_platform', 'double_platform', 'pipe_mix', 'turtle_zone', 'reward'];
+// 'rolling_hills'   – v0.9.0: continuous elevation undulation (3-4 pipes ascending then descending)
+// 'bridge'          – v0.9.0: low-pressure connector with ceiling overhang + ground gap
+// 'island_hop'      – v0.9.0: short-distance multi-point landing (3-5 small pipe islands)
+const CHUNK_TYPES = ['rest', 'single_platform', 'double_platform', 'pipe_mix', 'turtle_zone', 'reward', 'rolling_hills', 'bridge', 'island_hop'];
 
 // Difficulty phase definitions for chunk system
 // Phase 0: Tutorial (0-60s) – mostly rest + single_platform
 // Phase 1: Medium (60-180s) – add double_platform, pipe_mix, turtle_zone
 // Phase 2: Hard (180s+) – all types, higher complexity, still reachable
 const CHUNK_DIFFICULTY_PHASES = [
-  { time: 0,   maxPipeH: 100, maxTopH: 80,  weights: { rest: 35, single_platform: 40, double_platform: 5, pipe_mix: 0,  turtle_zone: 15, reward: 5 } },
-  { time: 60,  maxPipeH: 140, maxTopH: 120, weights: { rest: 15, single_platform: 25, double_platform: 15, pipe_mix: 15, turtle_zone: 15, reward: 15 } },
-  { time: 180, maxPipeH: 200, maxTopH: 170, weights: { rest: 10, single_platform: 20, double_platform: 20, pipe_mix: 25, turtle_zone: 10, reward: 15 } },
-  { time: 300, maxPipeH: 240, maxTopH: 200, weights: { rest: 8,  single_platform: 18, double_platform: 22, pipe_mix: 30, turtle_zone: 10, reward: 12 } },
+  { time: 0,   maxPipeH: 100, maxTopH: 80,  weights: { rest: 30, single_platform: 33, double_platform: 5, pipe_mix: 0,  turtle_zone: 12, reward: 5, rolling_hills: 10, bridge: 5, island_hop: 0 } },
+  { time: 60,  maxPipeH: 140, maxTopH: 120, weights: { rest: 12, single_platform: 20, double_platform: 12, pipe_mix: 12, turtle_zone: 12, reward: 12, rolling_hills: 10, bridge: 5, island_hop: 5 } },
+  { time: 180, maxPipeH: 200, maxTopH: 170, weights: { rest: 8,  single_platform: 16, double_platform: 16, pipe_mix: 20, turtle_zone: 8,  reward: 12, rolling_hills: 8,  bridge: 5, island_hop: 7 } },
+  { time: 300, maxPipeH: 240, maxTopH: 200, weights: { rest: 6,  single_platform: 14, double_platform: 18, pipe_mix: 24, turtle_zone: 8,  reward: 10, rolling_hills: 8,  bridge: 4, island_hop: 8 } },
 ];
 
 // Chunk state tracking
@@ -1432,7 +1435,7 @@ function selectChunkType(weights) {
 
 // Check if a chunk type is "dangerous" (can potentially kill the player)
 function isChunkDangerous(type) {
-  return type === 'double_platform' || type === 'pipe_mix';
+  return type === 'double_platform' || type === 'pipe_mix' || type === 'island_hop';
 }
 
 // Check if a chunk type is "safe" (breathing room)
@@ -1560,6 +1563,15 @@ function generateChunk(chunkX, type, diffParams) {
         }
       }
 
+      // v0.9.0: optional side-route reward above pipe (non-essential, rewards platform mastery)
+      if (pipeH >= 80 && rng() < 0.3) {
+        const srx = pipeX + LIP_W + 15 + rng() * 40;
+        const sry = groundY - pipeH - 30 - rng() * 15;
+        if (sry > 25 && srx < chunkX + width - 40 && groundY - sry <= CHUNK_PLAYER_MAX_JUMP_H) {
+          result.bricks.push(makeBrick(srx, sry, 0.45));
+        }
+      }
+
       // Hidden block shortcut: placed higher up near pipe top as a secret stepping stone
       if (pipeH >= 100 && rng() < HIDDEN_BLOCK_CHANCE) {
         const hbx = pipeX - 40 - rng() * 50;
@@ -1624,6 +1636,15 @@ function generateChunk(chunkX, type, diffParams) {
         }
       }
 
+      // v0.9.0: optional side-route reward brick above second pipe (non-essential, rewards skilled play)
+      if (h2 >= 80 && rng() < 0.35) {
+        const srx = pipe2X + rng() * 20;
+        const sry = groundY - h2 - 35 - rng() * 15;
+        if (sry > 25 && groundY - sry <= CHUNK_PLAYER_MAX_JUMP_H) {
+          result.bricks.push(makeBrick(srx, sry, 0.5));
+        }
+      }
+
       // Make sure pipe2 is still within chunk bounds
       if (pipe2X + LIP_W > chunkX + width) {
         result.width = pipe2X + LIP_W + 60 - chunkX;
@@ -1668,6 +1689,15 @@ function generateChunk(chunkX, type, diffParams) {
           const h2 = randBottomH(Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H));
           result.pipes.push({ x: pipe2X, h: h2, fromTop: false, scored: false });
           result.obstacles.push({ type: 'pipe_bottom', x: pipe2X, h: h2 });
+        }
+      }
+
+      // v0.9.0: optional side-route reward brick between obstacles (non-essential)
+      if (bottomH >= 70 && rng() < 0.3) {
+        const srx = pipeX + LIP_W + 40 + rng() * 80;
+        const sry = groundY - bottomH - 25 - rng() * 15;
+        if (sry > 25 && srx < chunkX + width - 50 && groundY - sry <= CHUNK_PLAYER_MAX_JUMP_H) {
+          result.bricks.push(makeBrick(srx, sry, 0.45));
         }
       }
 
@@ -1742,6 +1772,15 @@ function generateChunk(chunkX, type, diffParams) {
         const by = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 20);
         result.bricks.push(makeBrick(bx, by, SPECIAL_BRICK_CHANCE));
       }
+      // v0.9.0: optional elevated side-route brick (above pipe, if present)
+      if (result.pipes.length > 0 && rng() < 0.3) {
+        const tp = result.pipes[0];
+        const srx = tp.x + LIP_W + 10;
+        const sry = groundY - tp.h - 30;
+        if (sry > 30 && srx < chunkX + width - 40 && groundY - sry <= CHUNK_PLAYER_MAX_JUMP_H) {
+          result.bricks.push(makeBrick(srx, sry, 0.4));
+        }
+      }
       break;
     }
 
@@ -1775,6 +1814,218 @@ function generateChunk(chunkX, type, diffParams) {
         const ph = 50 + Math.floor(rng() * 30);
         result.pipes.push({ x: px, h: ph, fromTop: false, scored: false });
         result.obstacles.push({ type: 'pipe_bottom', x: px, h: ph });
+      }
+      break;
+    }
+
+    // ── v0.9.0 new terrain types ──────────────────────────
+
+    case 'rolling_hills': {
+      // Continuous elevation undulation: 3-4 pipes in a wave pattern (up-down-up or down-up-down)
+      // Creates a terrain silhouette with clear high/low contrast
+      const hillCount = 3 + (rng() < 0.4 ? 1 : 0); // 3-4 hills
+      const spacing = Math.floor((width - 200) / hillCount);
+      const startX = chunkX + 80 + rng() * 40;
+
+      // Section-biased shape: UNDERWORLD = low+dense, TOWER = tall+vertical, default = medium
+      const sectionBias = (typeof currentSection !== 'undefined') ? currentSection : '';
+      let baseH, amplitude;
+      if (sectionBias === 'UNDERWORLD') {
+        baseH = 45; amplitude = 25; // low dense undulation
+      } else if (sectionBias === 'TOWER') {
+        baseH = 70; amplitude = 45; // tall vertical steps
+      } else {
+        baseH = 55; amplitude = 35; // default medium wave
+      }
+      const capH = Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H);
+
+      // Wave pattern: ascending then descending
+      for (let i = 0; i < hillCount; i++) {
+        const px = startX + i * spacing;
+        // Sine-like wave: peaks in the middle
+        const wave = Math.sin((i / (hillCount - 1)) * Math.PI);
+        const h = Math.min(capH, Math.max(40, Math.round(baseH + amplitude * wave)));
+        result.pipes.push({ x: px, h, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: px, h });
+      }
+
+      // Optional side-route reward brick at the peak (above tallest pipe)
+      const peakIdx = Math.floor(hillCount / 2);
+      const peakX = startX + peakIdx * spacing;
+      const peakH = result.pipes[peakIdx].h;
+      if (peakH >= 70 && rng() < 0.5) {
+        const bx = peakX + LIP_W + 10 + rng() * 30;
+        const by = groundY - peakH - 30 - rng() * 15;
+        if (by > 25 && bx < chunkX + width - 40) {
+          result.bricks.push(makeBrick(bx, by, 0.4));
+          result.obstacles.push({ type: 'brick', x: bx, y: by });
+        }
+      }
+
+      // Optional valley reward brick (between two low points)
+      if (rng() < 0.35 && hillCount >= 3) {
+        const valleyX = startX + spacing * 0.5;
+        const valleyBY = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 15);
+        result.bricks.push(makeBrick(valleyX, valleyBY, 0.35));
+        result.obstacles.push({ type: 'brick', x: valleyX, y: valleyBY });
+      }
+
+      // Extend width if pipes go beyond
+      const lastPipeX = startX + (hillCount - 1) * spacing;
+      if (lastPipeX + LIP_W > chunkX + width) {
+        result.width = lastPipeX + LIP_W + 80 - chunkX;
+      }
+      break;
+    }
+
+    case 'bridge': {
+      // Low-pressure connector: a ceiling overhang creates a "bridge" feel
+      // Player passes through a visually distinct low-clearance zone
+      // Main route is always ground-level (safe), optional upper route for reward
+
+      // Section-biased shape
+      const sectionBias2 = (typeof currentSection !== 'undefined') ? currentSection : '';
+      let bridgeCeilH, floorPipeH;
+      if (sectionBias2 === 'UNDERWORLD') {
+        bridgeCeilH = 90 + Math.floor(rng() * 40);  // lower ceiling = more cramped
+        floorPipeH = 30 + Math.floor(rng() * 20);   // very low floor bumps
+      } else if (sectionBias2 === 'TOWER') {
+        bridgeCeilH = 60 + Math.floor(rng() * 30);  // higher ceiling
+        floorPipeH = 50 + Math.floor(rng() * 30);   // taller entry/exit pillars
+      } else {
+        bridgeCeilH = 75 + Math.floor(rng() * 35);
+        floorPipeH = 40 + Math.floor(rng() * 25);
+      }
+
+      // Ensure clearance is safe: ceiling bottom must leave enough room
+      const ceilingBottom = bridgeCeilH;
+      const clearance = groundY - ceilingBottom;
+      if (clearance < player.h + 30) {
+        bridgeCeilH = Math.max(40, groundY - player.h - 35);
+      }
+
+      // Entry pillar (low bottom pipe)
+      const entryX = chunkX + 120 + rng() * 60;
+      if (floorPipeH <= CHUNK_PLAYER_MAX_JUMP_H) {
+        result.pipes.push({ x: entryX, h: floorPipeH, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: entryX, h: floorPipeH });
+      }
+
+      // Ceiling overhang (bridge structure)
+      const ceilX = entryX + 140 + rng() * 80;
+      if (maxTopH >= 50 && bridgeCeilH >= 50 && ceilX < chunkX + width - 80) {
+        const topH = Math.min(maxTopH, bridgeCeilH);
+        result.pipes.push({ x: ceilX, h: topH, fromTop: true, scored: false });
+        result.obstacles.push({ type: 'pipe_top', x: ceilX, h: topH });
+      }
+
+      // Exit pillar (low bottom pipe)
+      const exitX = ceilX + 160 + rng() * 80;
+      if (exitX + LIP_W < chunkX + width - 40 && floorPipeH <= CHUNK_PLAYER_MAX_JUMP_H) {
+        const exitH = Math.max(30, floorPipeH + Math.floor((rng() - 0.5) * 20));
+        result.pipes.push({ x: exitX, h: Math.min(exitH, CHUNK_PLAYER_MAX_JUMP_H), fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: exitX, h: Math.min(exitH, CHUNK_PLAYER_MAX_JUMP_H) });
+      }
+
+      // Side-route: optional reward brick above the bridge (requires jumping onto entry pillar)
+      if (floorPipeH >= 40 && rng() < 0.45) {
+        const sideX = ceilX - 30 + rng() * 60;
+        const sideY = Math.max(20, ceilingBottom - 35 - rng() * 20);
+        if (sideY > 15 && groundY - sideY <= CHUNK_PLAYER_MAX_JUMP_H) {
+          result.bricks.push(makeBrick(sideX, sideY, 0.5));
+        }
+      }
+
+      // Ground-level reward brick (easy to grab on main route)
+      if (rng() < 0.4) {
+        const grndBX = chunkX + width * 0.6 + rng() * (width * 0.2);
+        const grndBY = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 10);
+        if (grndBX < chunkX + width - 50) {
+          result.bricks.push(makeBrick(grndBX, grndBY, 0.35));
+          result.obstacles.push({ type: 'brick', x: grndBX, y: grndBY });
+        }
+      }
+
+      if (exitX + LIP_W + 60 > chunkX + width) {
+        result.width = exitX + LIP_W + 80 - chunkX;
+      }
+      break;
+    }
+
+    case 'island_hop': {
+      // Short-distance multi-point landing: 3-5 small pipe "islands" at varied heights
+      // Each island is a short pipe (low-medium height) with narrow landing zones
+      // Tests precise lateral movement and jump timing
+
+      const sectionBias3 = (typeof currentSection !== 'undefined') ? currentSection : '';
+      let islandCount, heightRange, gapRange;
+      if (sectionBias3 === 'UNDERWORLD') {
+        islandCount = 4 + (rng() < 0.3 ? 1 : 0);  // 4-5 dense islands
+        heightRange = { min: 35, max: 70 };
+        gapRange = { min: 80, max: 120 };           // tight spacing
+      } else if (sectionBias3 === 'TOWER') {
+        islandCount = 3 + (rng() < 0.4 ? 1 : 0);  // 3-4 islands
+        heightRange = { min: 50, max: 110 };
+        gapRange = { min: 100, max: 160 };          // wider with height variance
+      } else {
+        islandCount = 3 + (rng() < 0.5 ? 1 : 0);  // 3-4 islands
+        heightRange = { min: 40, max: 90 };
+        gapRange = { min: 90, max: 140 };           // moderate
+      }
+
+      const capH2 = Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H);
+      const islandStartX = chunkX + 100 + rng() * 60;
+      let curX = islandStartX;
+      let prevH = 0;
+
+      for (let i = 0; i < islandCount; i++) {
+        const gap = gapRange.min + rng() * (gapRange.max - gapRange.min);
+        if (i > 0) curX += gap;
+        // Heights jump around — not monotonic, creates true island feel
+        let h = heightRange.min + Math.floor(rng() * (heightRange.max - heightRange.min));
+        h = Math.min(h, capH2);
+        // Ensure reachable from previous island or ground
+        if (prevH > 0) {
+          const maxReachable = prevH + CHUNK_PLAYER_MAX_JUMP_H - 20;
+          h = Math.min(h, maxReachable);
+        }
+        h = Math.max(30, h);
+
+        if (curX + LIP_W < chunkX + width + 100) {
+          result.pipes.push({ x: curX, h, fromTop: false, scored: false });
+          result.obstacles.push({ type: 'pipe_bottom', x: curX, h });
+        }
+        prevH = h;
+      }
+
+      // Side-route: elevated reward brick chain above middle islands
+      if (islandCount >= 3 && rng() < 0.5) {
+        const midIdx = Math.floor(islandCount / 2);
+        if (midIdx < result.pipes.length) {
+          const midPipe = result.pipes[midIdx];
+          const bx = midPipe.x + rng() * 30;
+          const by = groundY - midPipe.h - 35 - rng() * 20;
+          if (by > 20 && groundY - by <= CHUNK_PLAYER_MAX_JUMP_H) {
+            result.bricks.push(makeBrick(bx, by, 0.45));
+            result.obstacles.push({ type: 'brick', x: bx, y: by });
+          }
+        }
+      }
+
+      // Second optional side-route brick near last island
+      if (result.pipes.length >= 2 && rng() < 0.35) {
+        const lastPipe = result.pipes[result.pipes.length - 1];
+        const bx2 = lastPipe.x + LIP_W + 15;
+        const by2 = groundY - (BRICK_MIN_HEIGHT_ABOVE_GROUND + rng() * 20);
+        if (bx2 < chunkX + width + 60) {
+          result.bricks.push(makeBrick(bx2, by2, 0.4));
+        }
+      }
+
+      // Extend width if islands extend beyond
+      const lastIslandX = curX;
+      if (lastIslandX + LIP_W + 60 > chunkX + width) {
+        result.width = lastIslandX + LIP_W + 80 - chunkX;
       }
       break;
     }
@@ -1896,12 +2147,12 @@ function spawnChunk() {
 
   // Force rest chunk after too many consecutive danger chunks
   if (consecutiveDangerChunks >= CHUNK_MAX_CONSEC_DANGER) {
-    weights = { rest: 70, single_platform: 15, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 5 };
+    weights = { rest: 70, single_platform: 15, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 5, rolling_hills: 0, bridge: 0, island_hop: 0 };
   }
 
   // Force safe/reward chunk periodically
   if (chunksSinceLastSafe >= CHUNK_SAFE_INTERVAL) {
-    weights = { rest: 30, single_platform: 10, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 50 };
+    weights = { rest: 30, single_platform: 10, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 50, rolling_hills: 0, bridge: 0, island_hop: 0 };
   }
 
   // During theme transition, bias toward safe chunk types
@@ -1925,6 +2176,7 @@ function spawnChunk() {
     weights.single_platform = Math.max(weights.single_platform, 25);
     weights.pipe_mix *= 0.3;
     weights.double_platform *= 0.4;
+    weights.island_hop *= 0.4;
     postBreatherProtection--;
   }
 
