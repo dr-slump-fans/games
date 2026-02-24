@@ -2063,6 +2063,40 @@ Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
 
 ---
 
+## v0.8.3 Step 1 — Set-Piece Readability Cue Micro-Enhancement
+
+### Design Intent
+Adds lightweight visual cues so players can faster read **what each set-piece segment is testing** — without changing any difficulty, collision, or enemy parameters. Follows two principles: (1) cues hint at structure, never spoil the answer, and (2) nothing should obscure the play area on mobile screens.
+
+### Teach / Remix / Exam Role Cues
+
+| Layer | What's Added | Purpose |
+|-------|-------------|---------|
+| **HUD announcement** | Sub-text hint line below the `★ ROLE: FAMILY ★` banner — "LEARN THE PATTERN" (teach), "MIXED SIGNALS" (remix), "PROVE IT" (exam) | Instantly communicates the pedagogical intent of the segment |
+| **Ground edge stripe** | Thin (3px) semi-transparent colored stripe across the full set-piece width on the ground surface — green/orange/red matching role | Peripheral spatial cue marking set-piece boundaries without blocking gameplay |
+| **Ground entry symbol** | Small role-specific glyph at the set-piece start: ● (teach), ~ ~ (remix), ▶▶▶ (exam) | Readable at a glance; signals escalation within a sequence |
+
+### Fake-Safe / Anti-Pattern Pre-Warning
+
+| What | Where | Cue |
+|------|-------|-----|
+| **Anti-pattern zones** (height reversals) | All exam chunks | Small ⚠ triangle at ~15% into the chunk, gold color, 40% opacity |
+| **Fake-safe zones** (calm intro → sudden spike) | Precision remix, corridor remix | Same ⚠ triangle — warns "something is off" without revealing the trap |
+
+### Timing
+- Announcement duration extended from 75 → 90 frames (~1.25s → ~1.5s) to accommodate the two-line display
+
+### Fairness (Unchanged)
+- **No chunk parameters changed** — pipe heights, spacing, widths, speeds all identical to v0.8.2
+- **No enemy or collision rule changes**
+- **No reachability or difficulty curve changes**
+- Ground markers are purely decorative (no gameplay effect)
+
+### Version
+Updated `GAME_VERSION` from `v0.8.2` → **`v0.8.3`**.
+
+---
+
 ## v0.8.2 Step 3 — Set-Piece Sequence Polish & Failure Hotspot De-Spike
 
 ### Design Intent

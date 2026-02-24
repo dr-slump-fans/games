@@ -224,6 +224,8 @@ canvas {
   z-index: 12;
   transition: opacity 0.4s ease;
   letter-spacing: 1px;
+  text-align: center;
+  line-height: 1.6;
 }
 </style>
 </head>
@@ -295,7 +297,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.8.2';
+const GAME_VERSION = 'v0.8.3';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -920,7 +922,7 @@ function applySectionParams(diffParams, section, isTransition) {
 // Set-pieces follow the teach→remix→exam philosophy of Mario-style level design.
 // v0.8.1: Sequence planner layer — groups set-pieces into teach→remix→exam triplets
 // inspired by Lost Levels' precision-and-rhythm philosophy.
-const SETPIECE_ANNOUNCE_DURATION = 75; // frames to show set-piece cue (~1.25s)
+const SETPIECE_ANNOUNCE_DURATION = 90; // frames to show set-piece cue (~1.5s, extended for hint sub-text)
 const SETPIECE_SEQUENCES_PER_RUN_MIN = 1; // min teach→remix→exam sequences per run
 const SETPIECE_SEQUENCES_PER_RUN_MAX = 2; // max sequences per run
 const SETPIECE_MIN_INTERVAL = 2;     // min chunks between set-pieces within a sequence
@@ -929,9 +931,9 @@ const SETPIECE_EARLY_GRACE = 5;      // no set-pieces in first N chunks
 
 // Sequence role colors for HUD cue differentiation
 const SEQ_ROLE_STYLE = {
-  teach: { prefix: 'TEACH', color: '#88ee44' },   // green — safe learning
-  remix: { prefix: 'REMIX', color: '#ffaa22' },    // orange — interference added
-  exam:  { prefix: 'EXAM',  color: '#ff4466' },    // red — skill check
+  teach: { prefix: 'TEACH', color: '#88ee44', hint: 'LEARN THE PATTERN' },   // green — safe learning
+  remix: { prefix: 'REMIX', color: '#ffaa22', hint: 'MIXED SIGNALS' },       // orange — interference added
+  exam:  { prefix: 'EXAM',  color: '#ff4466', hint: 'PROVE IT' },            // red — skill check
 };
 
 // Set-piece technique families — each has teach / remix / exam generators
@@ -1277,7 +1279,11 @@ let setPieceChunkCounter = 0; // counts chunks since game start
 let setPieceAnnounceTimer = 0;
 let setPieceAnnounceName = '';
 let setPieceAnnounceColor = '';
+let setPieceAnnounceHint = '';  // v0.8.3: sub-text hint for role readability
 let postBreatherProtection = 0; // v0.8.2: chunks of safe-bias after breather
+// v0.8.3: ground markers for set-piece readability cues
+// Each: { x, width, role, color, hasAntiPattern, hasFakeSafe }
+let setPieceGroundMarkers = [];
 
 // Build teach→remix→exam sequences at game start
 function initSetPieceState() {
@@ -1287,7 +1293,9 @@ function initSetPieceState() {
   setPieceAnnounceTimer = 0;
   setPieceAnnounceName = '';
   setPieceAnnounceColor = '';
+  setPieceAnnounceHint = '';
   postBreatherProtection = 0;
+  setPieceGroundMarkers = [];
 
   const seqCount = SETPIECE_SEQUENCES_PER_RUN_MIN +
     Math.floor(rng() * (SETPIECE_SEQUENCES_PER_RUN_MAX - SETPIECE_SEQUENCES_PER_RUN_MIN + 1));
@@ -1821,11 +1829,24 @@ function spawnChunk() {
           postBreatherProtection = 2;
         }
         chunkDebugInfo = chunkRecord;
-        // Trigger set-piece announcement with role prefix
+        // v0.8.3: record ground marker for visual cue
+        const _hasAnti = chunk.type.includes('exam');
+        const _hasFake = chunk.type.includes('remix') && (chunk.type.includes('precision') || chunk.type.includes('corridor'));
+        setPieceGroundMarkers.push({
+          x: nextChunkX, width: chunk.width, role: sp.role,
+          color: sp.color, hasAntiPattern: _hasAnti, hasFakeSafe: _hasFake,
+        });
+        // Trim old markers far behind camera
+        while (setPieceGroundMarkers.length > 0 && setPieceGroundMarkers[0].x + setPieceGroundMarkers[0].width < cameraX - 200) {
+          setPieceGroundMarkers.shift();
+        }
+        // Trigger set-piece announcement with role prefix + hint
         setPieceAnnounceTimer = SETPIECE_ANNOUNCE_DURATION;
+        const _roleStyle = SEQ_ROLE_STYLE[sp.role];
         setPieceAnnounceName = sp.role === 'breather' ? 'BREATHER'
           : (sp.rolePrefix + ': ' + sp.name);
         setPieceAnnounceColor = sp.color;
+        setPieceAnnounceHint = (sp.role === 'breather') ? '' : (_roleStyle ? _roleStyle.hint : '');
         if (DEBUG_MODE) {
           console.log(`%c[SetPiece] #${chunkId} ${sp.id} [${sp.role}] x=${Math.round(nextChunkX)} w=${chunk.width}`, 'color: ' + sp.color);
         }
@@ -6586,10 +6607,12 @@ function update() {
     hudSectionAnnounce.style.display = 'none';
   }
 
-  // Set-piece announcement
+  // Set-piece announcement (v0.8.3: adds sub-text hint line)
   if (setPieceAnnounceTimer > 0 && setPieceAnnounceName) {
-    hudSetpieceAnnounce.textContent = '\u2605 ' + setPieceAnnounceName + ' \u2605';
+    const _hintText = setPieceAnnounceHint ? ('\n' + setPieceAnnounceHint) : '';
+    hudSetpieceAnnounce.textContent = '\u2605 ' + setPieceAnnounceName + ' \u2605' + _hintText;
     hudSetpieceAnnounce.style.color = setPieceAnnounceColor || '#ffd700';
+    hudSetpieceAnnounce.style.whiteSpace = 'pre-line';
     hudSetpieceAnnounce.style.display = 'block';
     hudSetpieceAnnounce.style.opacity = Math.min(1, setPieceAnnounceTimer / 20);
   } else {
@@ -6661,6 +6684,50 @@ function draw() {
 
   // Ground
   drawGround();
+
+  // v0.8.3: Set-piece ground markers (role-colored edge stripe + caution symbols)
+  {
+    const _groundY = DESIGN_H - GROUND_H;
+    for (const gm of setPieceGroundMarkers) {
+      if (gm.x + gm.width < _cullL || gm.x > _cullR) continue;
+      // Colored ground-edge stripe (3px, semi-transparent)
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = gm.color;
+      ctx.fillRect(gm.x, _groundY, gm.width, 3);
+      ctx.globalAlpha = 1.0;
+      // Role entry chevrons on ground surface
+      if (gm.role === 'exam') {
+        // Red chevrons >>> at entry
+        ctx.fillStyle = gm.color;
+        ctx.globalAlpha = 0.5;
+        ctx.font = 'bold 10px monospace';
+        ctx.fillText('\u25B6\u25B6\u25B6', gm.x + 8, _groundY + 14);
+        ctx.globalAlpha = 1.0;
+      } else if (gm.role === 'remix') {
+        // Orange ~ at entry
+        ctx.fillStyle = gm.color;
+        ctx.globalAlpha = 0.45;
+        ctx.font = 'bold 10px monospace';
+        ctx.fillText('~ ~', gm.x + 8, _groundY + 14);
+        ctx.globalAlpha = 1.0;
+      } else if (gm.role === 'teach') {
+        // Green dot at entry
+        ctx.fillStyle = gm.color;
+        ctx.globalAlpha = 0.45;
+        ctx.font = '10px monospace';
+        ctx.fillText('\u25CF', gm.x + 10, _groundY + 14);
+        ctx.globalAlpha = 1.0;
+      }
+      // Caution triangle for anti-pattern / fake-safe zones
+      if (gm.hasAntiPattern || gm.hasFakeSafe) {
+        ctx.fillStyle = '#ffcc00';
+        ctx.globalAlpha = 0.4;
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText('\u26A0', gm.x + gm.width * 0.15, _groundY + 14);
+        ctx.globalAlpha = 1.0;
+      }
+    }
+  }
 
   // Pipes (cull off-screen)
   for (const pipe of pipes) {
