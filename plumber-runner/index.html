@@ -297,7 +297,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.8.3';
+const GAME_VERSION = 'v0.8.4';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -922,7 +922,16 @@ function applySectionParams(diffParams, section, isTransition) {
 // Set-pieces follow the teach→remix→exam philosophy of Mario-style level design.
 // v0.8.1: Sequence planner layer — groups set-pieces into teach→remix→exam triplets
 // inspired by Lost Levels' precision-and-rhythm philosophy.
-const SETPIECE_ANNOUNCE_DURATION = 90; // frames to show set-piece cue (~1.5s, extended for hint sub-text)
+const SETPIECE_ANNOUNCE_DURATION = 100; // frames (~1.67s, unified with theme/section fade cadence)
+
+// v0.8.4: Family visual vocabulary — short prefix + icon for each set-piece family
+const FAMILY_VOCAB = {
+  staircase: { tag: 'STAIR', icon: '\u25B2' },   // ▲
+  corridor:  { tag: 'CORR',  icon: '\u25AC' },   // ▬
+  precision: { tag: 'PREC',  icon: '\u25C6' },   // ◆
+  ladder:    { tag: 'LAD',   icon: '\u2261' },    // ≡
+  breather:  { tag: 'REST',  icon: '\u2661' },    // ♡
+};
 const SETPIECE_SEQUENCES_PER_RUN_MIN = 1; // min teach→remix→exam sequences per run
 const SETPIECE_SEQUENCES_PER_RUN_MAX = 2; // max sequences per run
 const SETPIECE_MIN_INTERVAL = 2;     // min chunks between set-pieces within a sequence
@@ -1280,9 +1289,10 @@ let setPieceAnnounceTimer = 0;
 let setPieceAnnounceName = '';
 let setPieceAnnounceColor = '';
 let setPieceAnnounceHint = '';  // v0.8.3: sub-text hint for role readability
+let setPieceAnnounceFamily = '';  // v0.8.4: family tag line (icon + abbreviation)
 let postBreatherProtection = 0; // v0.8.2: chunks of safe-bias after breather
 // v0.8.3: ground markers for set-piece readability cues
-// Each: { x, width, role, color, hasAntiPattern, hasFakeSafe }
+// Each: { x, width, role, color, hasAntiPattern, hasFakeSafe, familyId }
 let setPieceGroundMarkers = [];
 
 // Build teach→remix→exam sequences at game start
@@ -1294,6 +1304,7 @@ function initSetPieceState() {
   setPieceAnnounceName = '';
   setPieceAnnounceColor = '';
   setPieceAnnounceHint = '';
+  setPieceAnnounceFamily = '';
   postBreatherProtection = 0;
   setPieceGroundMarkers = [];
 
@@ -1330,7 +1341,8 @@ function pickAndGenerateSetPiece(entry, chunkX, diffParams) {
   if (entry.role === 'breather') {
     return {
       chunk: generateBreatherSetPiece(chunkX, diffParams),
-      id: 'breather', name: 'BREATHER', color: '#88ee44', role: 'breather'
+      id: 'breather', name: 'BREATHER', color: '#88ee44', role: 'breather',
+      familyId: entry.familyId || 'breather',
     };
   }
   const family = SETPIECE_FAMILIES.find(f => f.id === entry.familyId);
@@ -1350,6 +1362,7 @@ function pickAndGenerateSetPiece(entry, chunkX, diffParams) {
     color: roleStyle.color,
     role: entry.role,
     rolePrefix: roleStyle.prefix,
+    familyId: family.id,
   };
 }
 
@@ -1829,24 +1842,32 @@ function spawnChunk() {
           postBreatherProtection = 2;
         }
         chunkDebugInfo = chunkRecord;
-        // v0.8.3: record ground marker for visual cue
+        // v0.8.3→v0.8.4: record ground marker for visual cue (now includes familyId)
         const _hasAnti = chunk.type.includes('exam');
         const _hasFake = chunk.type.includes('remix') && (chunk.type.includes('precision') || chunk.type.includes('corridor'));
         setPieceGroundMarkers.push({
           x: nextChunkX, width: chunk.width, role: sp.role,
           color: sp.color, hasAntiPattern: _hasAnti, hasFakeSafe: _hasFake,
+          familyId: sp.familyId || 'breather',
         });
         // Trim old markers far behind camera
         while (setPieceGroundMarkers.length > 0 && setPieceGroundMarkers[0].x + setPieceGroundMarkers[0].width < cameraX - 200) {
           setPieceGroundMarkers.shift();
         }
-        // Trigger set-piece announcement with role prefix + hint
-        setPieceAnnounceTimer = SETPIECE_ANNOUNCE_DURATION;
+        // v0.8.4: build family tag line for announce
+        const _fv = FAMILY_VOCAB[sp.familyId] || FAMILY_VOCAB.breather;
+        const _familyTag = _fv ? (_fv.icon + ' ' + _fv.tag) : '';
+        // Trigger set-piece announcement with role prefix + family tag + hint
+        // v0.8.4: defer announce if theme/section announce is still active (avoid overlap)
+        const _announceDeferFrames = (themeAnnounceTimer > 20 || sectionAnnounceTimer > 20)
+          ? Math.max(themeAnnounceTimer, sectionAnnounceTimer) - 20 : 0;
+        setPieceAnnounceTimer = SETPIECE_ANNOUNCE_DURATION + _announceDeferFrames;
         const _roleStyle = SEQ_ROLE_STYLE[sp.role];
-        setPieceAnnounceName = sp.role === 'breather' ? 'BREATHER'
-          : (sp.rolePrefix + ': ' + sp.name);
+        setPieceAnnounceName = sp.role === 'breather' ? ('\u2661 REST')
+          : (sp.rolePrefix + ' ' + _familyTag);
         setPieceAnnounceColor = sp.color;
         setPieceAnnounceHint = (sp.role === 'breather') ? '' : (_roleStyle ? _roleStyle.hint : '');
+        setPieceAnnounceFamily = _familyTag;
         if (DEBUG_MODE) {
           console.log(`%c[SetPiece] #${chunkId} ${sp.id} [${sp.role}] x=${Math.round(nextChunkX)} w=${chunk.width}`, 'color: ' + sp.color);
         }
@@ -6607,14 +6628,15 @@ function update() {
     hudSectionAnnounce.style.display = 'none';
   }
 
-  // Set-piece announcement (v0.8.3: adds sub-text hint line)
+  // Set-piece announcement (v0.8.4: role + family vocab + hint, unified fade)
   if (setPieceAnnounceTimer > 0 && setPieceAnnounceName) {
     const _hintText = setPieceAnnounceHint ? ('\n' + setPieceAnnounceHint) : '';
     hudSetpieceAnnounce.textContent = '\u2605 ' + setPieceAnnounceName + ' \u2605' + _hintText;
     hudSetpieceAnnounce.style.color = setPieceAnnounceColor || '#ffd700';
     hudSetpieceAnnounce.style.whiteSpace = 'pre-line';
     hudSetpieceAnnounce.style.display = 'block';
-    hudSetpieceAnnounce.style.opacity = Math.min(1, setPieceAnnounceTimer / 20);
+    // v0.8.4: unified fade cadence — fade in over 30 frames (matches theme/section)
+    hudSetpieceAnnounce.style.opacity = Math.min(1, setPieceAnnounceTimer / 30);
   } else {
     hudSetpieceAnnounce.style.display = 'none';
   }
@@ -6685,7 +6707,7 @@ function draw() {
   // Ground
   drawGround();
 
-  // v0.8.3: Set-piece ground markers (role-colored edge stripe + caution symbols)
+  // v0.8.4: Set-piece ground markers (role chevron + family tag + caution symbols)
   {
     const _groundY = DESIGN_H - GROUND_H;
     for (const gm of setPieceGroundMarkers) {
@@ -6696,26 +6718,43 @@ function draw() {
       ctx.fillRect(gm.x, _groundY, gm.width, 3);
       ctx.globalAlpha = 1.0;
       // Role entry chevrons on ground surface
+      let _labelOffset = 0; // track x offset for family tag placement
       if (gm.role === 'exam') {
-        // Red chevrons >>> at entry
         ctx.fillStyle = gm.color;
         ctx.globalAlpha = 0.5;
         ctx.font = 'bold 10px monospace';
         ctx.fillText('\u25B6\u25B6\u25B6', gm.x + 8, _groundY + 14);
+        _labelOffset = 42;
         ctx.globalAlpha = 1.0;
       } else if (gm.role === 'remix') {
-        // Orange ~ at entry
         ctx.fillStyle = gm.color;
         ctx.globalAlpha = 0.45;
         ctx.font = 'bold 10px monospace';
         ctx.fillText('~ ~', gm.x + 8, _groundY + 14);
+        _labelOffset = 30;
         ctx.globalAlpha = 1.0;
       } else if (gm.role === 'teach') {
-        // Green dot at entry
         ctx.fillStyle = gm.color;
         ctx.globalAlpha = 0.45;
         ctx.font = '10px monospace';
         ctx.fillText('\u25CF', gm.x + 10, _groundY + 14);
+        _labelOffset = 22;
+        ctx.globalAlpha = 1.0;
+      } else if (gm.role === 'breather') {
+        ctx.fillStyle = gm.color;
+        ctx.globalAlpha = 0.4;
+        ctx.font = '10px monospace';
+        ctx.fillText('\u2661', gm.x + 10, _groundY + 14);
+        _labelOffset = 22;
+        ctx.globalAlpha = 1.0;
+      }
+      // v0.8.4: Family abbreviation tag after role chevron
+      const _fv = FAMILY_VOCAB[gm.familyId];
+      if (_fv && gm.role !== 'breather') {
+        ctx.fillStyle = '#ddd';
+        ctx.globalAlpha = 0.4;
+        ctx.font = 'bold 8px monospace';
+        ctx.fillText(_fv.icon + _fv.tag, gm.x + 8 + _labelOffset, _groundY + 14);
         ctx.globalAlpha = 1.0;
       }
       // Caution triangle for anti-pattern / fake-safe zones

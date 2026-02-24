@@ -2063,6 +2063,49 @@ Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
 
 ---
 
+## v0.8.4 Step 2 — Set-Piece Family Visual Vocabulary Unification (Cue Layer Only)
+
+### Design Intent
+Unifies the visual vocabulary across all set-piece families so players can **identify both the role (teach/remix/exam) AND the family (staircase/corridor/precision/ladder/breather)** at a glance. Only the cue/prompt layer is modified — no chunk difficulty, enemy, collision, or physics changes.
+
+### Family Visual Vocabulary (`FAMILY_VOCAB`)
+
+| Family | Tag | Icon | Example HUD Announce |
+|--------|-----|------|---------------------|
+| **Staircase** | `STAIR` | ▲ | `★ TEACH ▲ STAIR ★` |
+| **Corridor** | `CORR` | ▬ | `★ REMIX ▬ CORR ★` |
+| **Precision** | `PREC` | ◆ | `★ EXAM ◆ PREC ★` |
+| **Ladder** | `LAD` | ≡ | `★ TEACH ≡ LAD ★` |
+| **Breather** | `REST` | ♡ | `★ ♡ REST ★` |
+
+### Ground Marker Enhancements
+- Each ground marker now shows the **family abbreviation** (icon + tag) after the role chevron
+- Role chevrons remain unchanged: `●` teach, `~ ~` remix, `▶▶▶` exam, `♡` breather
+- Family tag rendered at 8px bold monospace, 40% opacity white — readable but non-obstructive
+- Breather markers now have their own `♡` ground icon (previously had no entry mark)
+
+### HUD Announce Format
+- **Before (v0.8.3):** `★ TEACH: STAIRCASE ★` + hint sub-line
+- **After (v0.8.4):** `★ TEACH ▲ STAIR ★` + hint sub-line
+- Role prefix + family icon + family tag = simultaneous role + family identification
+- Breather announces as `★ ♡ REST ★` (clean, no hint sub-line)
+
+### Cue Timing Unification
+- Set-piece announce duration: 90 → 100 frames (~1.67s), closer to theme/section cadence (120 frames)
+- Fade-in divisor unified to `/30` across all three announce types (theme, section, set-piece)
+- **Announce collision prevention:** if a theme or section announce is still active (>20 frames remaining), the set-piece announce is deferred by that amount — prevents simultaneous text overlap on mobile
+
+### Fairness (Unchanged)
+- **No chunk parameters changed** — pipe heights, spacing, widths, speeds all identical to v0.8.3
+- **No enemy or collision rule changes**
+- **No reachability or difficulty curve changes**
+- All changes are purely in the visual cue/prompt layer
+
+### Version
+Updated `GAME_VERSION` from `v0.8.3` → **`v0.8.4`**.
+
+---
+
 ## v0.8.3 Step 1 — Set-Piece Readability Cue Micro-Enhancement
 
 ### Design Intent
