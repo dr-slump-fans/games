@@ -2063,6 +2063,62 @@ Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
 
 ---
 
+## v0.8.1 Step 2 — Set-Piece Sequence Orchestrator (teach → remix → exam)
+
+### Design Intent
+Evolves the v0.8.0 set-piece system from isolated hand-crafted chunks into **structured learning sequences** inspired by Super Mario Bros. 2 (JP) / Lost Levels. Each sequence follows a **teach → remix → exam** arc within a single technique family, creating a rhythm of escalating challenge that rewards player adaptation.
+
+### Sequence Structure
+Each run generates **1–2 complete sequences**. A single sequence consists of 4 consecutive set-piece slots:
+
+| Phase | Purpose | Characteristics |
+|-------|---------|-----------------|
+| **TEACH** | Introduce a single technique with low risk | Generous spacing, gentle heights, no enemies, helper bricks |
+| **REMIX** | Same technique with added interference | Tighter spacing, steeper heights, turtle patrols, rhythm disruption |
+| **EXAM** | Short combined skill check using the same technique | Anti-pattern heights, minimal helpers, turtle at exit, precision required |
+| **BREATHER** | Mandatory recovery after exam | Flat ground, generous brick rewards, no threats |
+
+### Technique Families (4 families × 3 roles)
+
+| Family | TEACH | REMIX | EXAM |
+|--------|-------|-------|------|
+| **STAIRCASE** | 3 gentle ascending pipes (45/75/105), wide spacing | Steeper pipes (55/90/125), tighter spacing, turtle between steps | 4-step up-then-down reversal (50/90/130/90), turtle at exit |
+| **CORRIDOR** | Single bottom+ceiling pipe pair, wide passage | 2 corridor pairs, offset ceilings, turtle between | 3 rapid-fire corridors, anti-pattern heights, reversed middle ceiling |
+| **PRECISION** | 2 measured-height pipes with helper brick | Fake-safe intro → sudden tall pipe → rhythm-break pipe, turtle | High-low-high-low alternation (110/50/130/65), Lost Levels signature |
+| **LADDER** | Gentle brick staircase to 110px pipe | Steeper ladder to 130px pipe, turtle at base forcing committed timing | Double-peak climb with gap bridge, second peak near jump limit |
+
+### Lost Levels Style Alignment
+- **Precision over spectacle**: challenges demand exact jump timing and height reading, not flashy new mechanics
+- **Anti-pattern traps**: exam phases use height reversals (tall→short→tall) that punish autopilot
+- **Fake-safe elements**: remix phases include calm intros before sudden challenges
+- **Rhythm pressure**: turtle placement disrupts comfortable jump cadences
+- **No new items/enemies**: difficulty comes purely from obstacle arrangement and timing
+
+### Fairness Protections
+- **Mandatory breather**: every exam is followed by a breather set-piece (flat ground, reward bricks)
+- **Reachability validation**: all set-pieces pass `validateChunkReachability()` — if validation fails, the set-piece is skipped and normal generation takes over
+- **Phase gating**: corridor family requires Phase 1 (60s+) for remix/exam roles
+- **Danger counter reset**: teach and breather phases reset the consecutive-danger and chunks-since-safe counters
+- **No core rule changes**: collision, enemy behavior, and physics remain identical
+
+### HUD Cue
+- Set-piece announcement now shows role prefix: `★ TEACH: STAIRCASE ★`, `★ REMIX: CORRIDOR ★`, `★ EXAM: PRECISION ★`
+- Role-specific colors: TEACH = green (#88ee44), REMIX = orange (#ffaa22), EXAM = red (#ff4466), BREATHER = green (#88ee44)
+- Same fade pattern as before (75 frames ≈ 1.25s)
+- No new art assets
+
+### Scheduling Rules
+- **1–2 sequences per run** (randomized at game start)
+- **Grace period**: first 5 chunks are set-piece-free
+- **Intra-sequence spacing**: 2–3 chunks between teach/remix/exam within a sequence
+- **Inter-sequence gap**: 5–7 chunks between sequences
+- **Breather immediately follows exam** (1-chunk gap)
+
+### Version
+Updated `GAME_VERSION` from `v0.8.0` → **`v0.8.1`**.
+
+---
+
 ## v0.8.0 Step 1 — Set-Piece Chunk System (Level Language Upgrade)
 
 ### Design Intent

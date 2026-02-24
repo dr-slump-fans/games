@@ -295,7 +295,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.8.0';
+const GAME_VERSION = 'v0.8.1';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -918,212 +918,362 @@ function applySectionParams(diffParams, section, isTransition) {
 // Hand-crafted chunk sequences injected periodically for intentional level design.
 // Each set-piece is a function that generates obstacles given (chunkX, diffParams).
 // Set-pieces follow the teach→remix→exam philosophy of Mario-style level design.
+// v0.8.1: Sequence planner layer — groups set-pieces into teach→remix→exam triplets
+// inspired by Lost Levels' precision-and-rhythm philosophy.
 const SETPIECE_ANNOUNCE_DURATION = 75; // frames to show set-piece cue (~1.25s)
-const SETPIECE_MIN_PER_RUN = 3;
-const SETPIECE_MAX_PER_RUN = 5;
-const SETPIECE_MIN_INTERVAL = 4;     // min chunks between set-pieces
+const SETPIECE_SEQUENCES_PER_RUN_MIN = 1; // min teach→remix→exam sequences per run
+const SETPIECE_SEQUENCES_PER_RUN_MAX = 2; // max sequences per run
+const SETPIECE_MIN_INTERVAL = 2;     // min chunks between set-pieces within a sequence
+const SETPIECE_INTER_SEQ_GAP = 5;    // min chunks between sequences
 const SETPIECE_EARLY_GRACE = 5;      // no set-pieces in first N chunks
 
-// Set-piece definitions
-const SETPIECE_LIBRARY = [
+// Sequence role colors for HUD cue differentiation
+const SEQ_ROLE_STYLE = {
+  teach: { prefix: 'TEACH', color: '#88ee44' },   // green — safe learning
+  remix: { prefix: 'REMIX', color: '#ffaa22' },    // orange — interference added
+  exam:  { prefix: 'EXAM',  color: '#ff4466' },    // red — skill check
+};
+
+// Set-piece technique families — each has teach / remix / exam generators
+// Lost Levels style: precision landings, rhythm pressure, anti-pattern traps
+const SETPIECE_FAMILIES = [
   {
-    id: 'staircase_jump',
+    id: 'staircase',
     name: 'STAIRCASE',
-    color: '#ffd700',
-    // High-low alternating jumps — teach: reading height differences
-    minPhase: 0, // available from start
-    generate(chunkX, diffParams) {
+    minPhase: 0,
+    // teach: 3 gentle ascending pipes, generous spacing, stepping bricks
+    teach(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
       const width = 850;
-      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_staircase_jump', obstacles: [] };
-      // 3 pipes at ascending heights with stepping bricks
-      const steps = 3;
-      const spacing = 200;
-      const startX = chunkX + 120;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_staircase_teach', obstacles: [] };
+      const steps = 3, spacing = 220, startX = chunkX + 120;
       for (let i = 0; i < steps; i++) {
         const px = startX + i * spacing;
-        const h = 50 + i * 35; // 50, 85, 120
+        const h = 45 + i * 30; // 45, 75, 105 — gentle
         result.pipes.push({ x: px, h, fromTop: false, scored: false });
         result.obstacles.push({ type: 'pipe_bottom', x: px, h });
-        // Stepping brick between pipes (except before first)
         if (i > 0) {
           const bx = px - spacing / 2;
-          const prevH = 50 + (i - 1) * 35;
+          const prevH = 45 + (i - 1) * 30;
           const by = groundY - (prevH + h) / 2 - 10;
           result.bricks.push(makeBrick(bx, by, 0.35));
           result.obstacles.push({ type: 'brick', x: bx, y: by });
         }
       }
-      // Reward brick at the top
       const topX = startX + (steps - 1) * spacing + 30;
-      const topY = groundY - (50 + (steps - 1) * 35) - 50;
+      const topY = groundY - 105 - 50;
       result.bricks.push(makeBrick(topX, topY, 0.6));
       result.obstacles.push({ type: 'brick', x: topX, y: topY });
       return result;
-    }
-  },
-  {
-    id: 'risk_shortcut',
-    name: 'SHORTCUT',
-    color: '#ff6644',
-    // Optional high path with extra rewards vs safe ground path — reward risk-takers
-    minPhase: 0,
-    generate(chunkX, diffParams) {
+    },
+    // remix: tighter spacing, higher pipes, turtle patrol between steps
+    remix(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 850;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_staircase_remix', obstacles: [] };
+      const steps = 3, spacing = 180, startX = chunkX + 100;
+      for (let i = 0; i < steps; i++) {
+        const px = startX + i * spacing;
+        const h = 55 + i * 35; // 55, 90, 125 — steeper
+        result.pipes.push({ x: px, h, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: px, h });
+        if (i > 0) {
+          const bx = px - spacing / 2;
+          const prevH = 55 + (i - 1) * 35;
+          const by = groundY - (prevH + h) / 2 - 8;
+          result.bricks.push(makeBrick(bx, by, 0.3));
+          result.obstacles.push({ type: 'brick', x: bx, y: by });
+        }
+      }
+      // Turtle patrols the gap between pipe 1 and 2 — rhythm disruption
+      result.turtleSpawns.push(startX + spacing * 0.6);
+      const topX = startX + (steps - 1) * spacing + 30;
+      const topY = groundY - 125 - 45;
+      result.bricks.push(makeBrick(topX, topY, 0.55));
+      result.obstacles.push({ type: 'brick', x: topX, y: topY });
+      return result;
+    },
+    // exam: 4 steps with tight spacing, descending return path, turtle at exit
+    exam(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
       const width = 900;
-      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_risk_shortcut', obstacles: [] };
-      // Ground path: safe, 1 low pipe
-      const safePipeX = chunkX + 400;
-      result.pipes.push({ x: safePipeX, h: 50, fromTop: false, scored: false });
-      result.obstacles.push({ type: 'pipe_bottom', x: safePipeX, h: 50 });
-      // High path: tall pipe as launch point + elevated brick chain
-      const launchX = chunkX + 120;
-      const launchH = 110;
-      result.pipes.push({ x: launchX, h: launchH, fromTop: false, scored: false });
-      result.obstacles.push({ type: 'pipe_bottom', x: launchX, h: launchH });
-      // Elevated reward bricks (risky but rewarding)
-      const brickY = groundY - 130;
-      for (let i = 0; i < 3; i++) {
-        const bx = launchX + 80 + i * 90;
-        result.bricks.push(makeBrick(bx, brickY, 0.55));
-        result.obstacles.push({ type: 'brick', x: bx, y: brickY });
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_staircase_exam', obstacles: [] };
+      const heights = [50, 90, 130, 90]; // up-then-down — Lost Levels reversal
+      const spacing = 170, startX = chunkX + 80;
+      for (let i = 0; i < heights.length; i++) {
+        const px = startX + i * spacing;
+        const h = heights[i];
+        result.pipes.push({ x: px, h, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: px, h });
+        if (i > 0) {
+          const bx = px - spacing / 2;
+          const avgH = (heights[i - 1] + h) / 2;
+          const by = groundY - avgH - 5;
+          result.bricks.push(makeBrick(bx, by, 0.25));
+          result.obstacles.push({ type: 'brick', x: bx, y: by });
+        }
       }
+      // Turtle at exit — punishes careless landing
+      result.turtleSpawns.push(startX + heights.length * spacing + 20);
       return result;
-    }
+    },
   },
   {
-    id: 'pressure_corridor',
+    id: 'corridor',
     name: 'CORRIDOR',
-    color: '#ff4488',
-    // Short tight section with ceiling+floor pipes — pressure reading
     minPhase: 1,
-    generate(chunkX, diffParams) {
+    // teach: single bottom+ceiling pair, wide passage
+    teach(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const maxTopH = Math.min(diffParams.maxTopH, groundY - 90);
+      const width = 750;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_corridor_teach', obstacles: [] };
+      const px = chunkX + 300;
+      const bh = 55;
+      result.pipes.push({ x: px, h: bh, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: px, h: bh });
+      const topX = px + 100;
+      const topH = Math.min(maxTopH, groundY - bh - 70);
+      if (topH >= 50 && topX < chunkX + width - 40) {
+        result.pipes.push({ x: topX, h: topH, fromTop: true, scored: false });
+        result.obstacles.push({ type: 'pipe_top', x: topX, h: topH });
+      }
+      const bx = chunkX + width - 140;
+      const by = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 10;
+      result.bricks.push(makeBrick(bx, by, 0.5));
+      result.obstacles.push({ type: 'brick', x: bx, y: by });
+      return result;
+    },
+    // remix: 2 corridor pairs, tighter gaps, offset ceiling
+    remix(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
       const maxTopH = Math.min(diffParams.maxTopH, groundY - 80);
-      const width = 750;
-      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_pressure_corridor', obstacles: [] };
-      // 2 bottom pipes with ceiling pipes creating corridors
-      const positions = [chunkX + 180, chunkX + 450];
+      const width = 800;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_corridor_remix', obstacles: [] };
+      const positions = [chunkX + 180, chunkX + 480];
       for (let i = 0; i < positions.length; i++) {
         const px = positions[i];
-        const bh = 60 + i * 20; // 60, 80
+        const bh = 60 + i * 25; // 60, 85
         result.pipes.push({ x: px, h: bh, fromTop: false, scored: false });
         result.obstacles.push({ type: 'pipe_bottom', x: px, h: bh });
-        // Ceiling pipe offset to create a passage
-        const topX = px + (i === 0 ? 90 : -90);
-        const topH = Math.min(maxTopH, groundY - bh - 60);
+        const topX = px + (i === 0 ? 85 : -85);
+        const topH = Math.min(maxTopH, groundY - bh - 55);
         if (topH >= 50 && topX > chunkX + 40 && topX < chunkX + width - 40) {
           result.pipes.push({ x: topX, h: topH, fromTop: true, scored: false });
           result.obstacles.push({ type: 'pipe_top', x: topX, h: topH });
         }
       }
-      // Small reward for surviving
-      const bx = chunkX + width - 150;
-      const by = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 10;
-      result.bricks.push(makeBrick(bx, by, 0.5));
+      // Turtle between corridors
+      result.turtleSpawns.push(chunkX + 350);
+      const bx = chunkX + width - 130;
+      const by = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 8;
+      result.bricks.push(makeBrick(bx, by, 0.45));
       result.obstacles.push({ type: 'brick', x: bx, y: by });
       return result;
-    }
-  },
-  {
-    id: 'fake_safe',
-    name: 'FAKE SAFE',
-    color: '#aa66ff',
-    // Looks like a rest area but has a hidden challenge — teaches attention
-    minPhase: 1,
-    generate(chunkX, diffParams) {
+    },
+    // exam: 3 corridors rapid-fire, alternating heights, anti-pattern ceiling
+    exam(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
-      const width = 800;
-      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_fake_safe', obstacles: [] };
-      // Looks calm: low bricks, inviting spacing
-      const b1x = chunkX + 200;
-      const b1y = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
-      result.bricks.push(makeBrick(b1x, b1y, 0.4));
-      result.obstacles.push({ type: 'brick', x: b1x, y: b1y });
-      const b2x = chunkX + 350;
-      result.bricks.push(makeBrick(b2x, b1y, 0.4));
-      result.obstacles.push({ type: 'brick', x: b2x, y: b1y });
-      // The catch: a mid-height pipe placed right after the "easy" bricks
-      const trickX = chunkX + 500;
-      const trickH = 100;
-      result.pipes.push({ x: trickX, h: trickH, fromTop: false, scored: false });
-      result.obstacles.push({ type: 'pipe_bottom', x: trickX, h: trickH });
-      // A turtle patrolling behind the trick pipe
-      result.turtleSpawns.push(trickX + 100);
-      // Another reward brick past the challenge
-      const b3x = chunkX + 650;
-      const b3y = groundY - 100;
-      result.bricks.push(makeBrick(b3x, b3y, 0.5));
-      result.obstacles.push({ type: 'brick', x: b3x, y: b3y });
+      const maxTopH = Math.min(diffParams.maxTopH, groundY - 75);
+      const width = 900;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_corridor_exam', obstacles: [] };
+      const positions = [chunkX + 120, chunkX + 380, chunkX + 640];
+      const bottomHeights = [65, 85, 60]; // anti-pattern: tall then short
+      for (let i = 0; i < positions.length; i++) {
+        const px = positions[i];
+        const bh = bottomHeights[i];
+        result.pipes.push({ x: px, h: bh, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: px, h: bh });
+        const topOff = i === 1 ? -80 : 80; // middle one reverses
+        const topX = px + topOff;
+        const topH = Math.min(maxTopH, groundY - bh - 50);
+        if (topH >= 50 && topX > chunkX + 40 && topX < chunkX + width - 40) {
+          result.pipes.push({ x: topX, h: topH, fromTop: true, scored: false });
+          result.obstacles.push({ type: 'pipe_top', x: topX, h: topH });
+        }
+      }
+      result.turtleSpawns.push(chunkX + width - 80);
       return result;
-    }
+    },
   },
   {
-    id: 'vertical_ladder',
-    name: 'LADDER',
-    color: '#44ccff',
-    // Vertical climbing via stacked bricks and pipes — vertical skill check
+    id: 'precision',
+    name: 'PRECISION',
     minPhase: 0,
-    generate(chunkX, diffParams) {
+    // teach: 2 platforms at precise heights, generous landing zones
+    teach(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 750;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_precision_teach', obstacles: [] };
+      // Two pipes requiring measured jumps
+      const p1x = chunkX + 200, p1h = 70;
+      const p2x = chunkX + 450, p2h = 95;
+      result.pipes.push({ x: p1x, h: p1h, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: p1x, h: p1h });
+      result.pipes.push({ x: p2x, h: p2h, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: p2x, h: p2h });
+      // Helper brick between
+      const bx = chunkX + 330, by = groundY - 85;
+      result.bricks.push(makeBrick(bx, by, 0.4));
+      result.obstacles.push({ type: 'brick', x: bx, y: by });
+      // Reward
+      const rx = chunkX + 600, ry = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
+      result.bricks.push(makeBrick(rx, ry, 0.5));
+      result.obstacles.push({ type: 'brick', x: rx, y: ry });
+      return result;
+    },
+    // remix: tighter gaps, fake-safe flat section before sudden tall pipe
+    remix(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 850;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_precision_remix', obstacles: [] };
+      // Calm intro bricks (fake-safe vibes)
+      const b1x = chunkX + 150, b1y = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
+      result.bricks.push(makeBrick(b1x, b1y, 0.35));
+      result.obstacles.push({ type: 'brick', x: b1x, y: b1y });
+      // Sudden tall pipe requiring precise full-jump
+      const px1 = chunkX + 350, ph1 = 120;
+      result.pipes.push({ x: px1, h: ph1, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: px1, h: ph1 });
+      // Second pipe at different height — rhythm break
+      const px2 = chunkX + 560, ph2 = 70;
+      result.pipes.push({ x: px2, h: ph2, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: px2, h: ph2 });
+      result.turtleSpawns.push(chunkX + 480);
+      const rx = chunkX + 700, ry = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 10;
+      result.bricks.push(makeBrick(rx, ry, 0.45));
+      result.obstacles.push({ type: 'brick', x: rx, y: ry });
+      return result;
+    },
+    // exam: alternating high-low-high pipes requiring precise jump timing
+    exam(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 900;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_precision_exam', obstacles: [] };
+      // Lost Levels signature: high-low-high with tight horizontal spacing
+      const pipeData = [
+        { x: chunkX + 130, h: 110 },
+        { x: chunkX + 310, h: 50 },  // low — tempts short jump
+        { x: chunkX + 480, h: 130 }, // tall — punishes momentum
+        { x: chunkX + 650, h: 65 },  // low again — rhythm reset
+      ];
+      for (const pd of pipeData) {
+        result.pipes.push({ x: pd.x, h: pd.h, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: pd.x, h: pd.h });
+      }
+      // Turtle after the gauntlet
+      result.turtleSpawns.push(chunkX + 780);
+      return result;
+    },
+  },
+  {
+    id: 'ladder',
+    name: 'LADDER',
+    minPhase: 0,
+    // teach: gentle vertical climb via bricks to one tall pipe
+    teach(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
       const width = 700;
-      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_vertical_ladder', obstacles: [] };
-      // Tall pipe as the target
-      const mainX = chunkX + 350;
-      const mainH = 130;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_ladder_teach', obstacles: [] };
+      const mainX = chunkX + 380, mainH = 110;
       result.pipes.push({ x: mainX, h: mainH, fromTop: false, scored: false });
       result.obstacles.push({ type: 'pipe_bottom', x: mainX, h: mainH });
-      // Stepping bricks forming a ladder approach
       const ladderSteps = [
         { x: chunkX + 150, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 10 },
-        { x: chunkX + 230, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 45 },
-        { x: chunkX + 310, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 80 },
+        { x: chunkX + 250, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 40 },
+        { x: chunkX + 340, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 70 },
       ];
       for (const step of ladderSteps) {
         const by = groundY - step.h;
-        result.bricks.push(makeBrick(step.x, by, 0.3));
+        result.bricks.push(makeBrick(step.x, by, 0.35));
         result.obstacles.push({ type: 'brick', x: step.x, y: by });
       }
-      // Reward at the summit
-      const rewardX = mainX + 10;
-      const rewardY = groundY - mainH - 45;
+      const rewardX = mainX + 10, rewardY = groundY - mainH - 40;
       result.bricks.push(makeBrick(rewardX, rewardY, 0.6));
       result.obstacles.push({ type: 'brick', x: rewardX, y: rewardY });
       return result;
-    }
-  },
-  {
-    id: 'breather',
-    name: 'BREATHER',
-    color: '#88ee44',
-    // Pure recovery zone with generous rewards — pace reset
-    minPhase: 0,
-    generate(chunkX, diffParams) {
+    },
+    // remix: steeper ladder, turtle at base, tighter brick spacing
+    remix(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
-      const width = 700;
-      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_breather', obstacles: [] };
-      // No pipes — pure flat ground
-      // Generous brick row at comfortable height
-      const brickY = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
-      for (let i = 0; i < 4; i++) {
-        const bx = chunkX + 120 + i * 130;
-        result.bricks.push(makeBrick(bx, brickY, 0.5));
-        result.obstacles.push({ type: 'brick', x: bx, y: brickY });
+      const width = 750;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_ladder_remix', obstacles: [] };
+      const mainX = chunkX + 400, mainH = 130;
+      result.pipes.push({ x: mainX, h: mainH, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: mainX, h: mainH });
+      const ladderSteps = [
+        { x: chunkX + 150, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 15 },
+        { x: chunkX + 230, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 50 },
+        { x: chunkX + 320, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 85 },
+      ];
+      for (const step of ladderSteps) {
+        const by = groundY - step.h;
+        result.bricks.push(makeBrick(step.x, by, 0.25));
+        result.obstacles.push({ type: 'brick', x: step.x, y: by });
       }
+      // Turtle patrols at base — forces committed jump timing
+      result.turtleSpawns.push(chunkX + 180);
+      const rewardX = mainX + 10, rewardY = groundY - mainH - 40;
+      result.bricks.push(makeBrick(rewardX, rewardY, 0.5));
+      result.obstacles.push({ type: 'brick', x: rewardX, y: rewardY });
       return result;
-    }
+    },
+    // exam: double ladder — climb up, cross gap, climb second peak
+    exam(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 900;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_ladder_exam', obstacles: [] };
+      // First peak
+      const peak1X = chunkX + 280, peak1H = 120;
+      result.pipes.push({ x: peak1X, h: peak1H, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: peak1X, h: peak1H });
+      const steps1 = [
+        { x: chunkX + 100, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 10 },
+        { x: chunkX + 190, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 55 },
+      ];
+      for (const step of steps1) {
+        const by = groundY - step.h;
+        result.bricks.push(makeBrick(step.x, by, 0.2));
+        result.obstacles.push({ type: 'brick', x: step.x, y: by });
+      }
+      // Gap + second peak
+      const peak2X = chunkX + 600, peak2H = 140;
+      result.pipes.push({ x: peak2X, h: Math.min(peak2H, CHUNK_PLAYER_MAX_JUMP_H - 5), fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: peak2X, h: Math.min(peak2H, CHUNK_PLAYER_MAX_JUMP_H - 5) });
+      // Bridge brick in the gap
+      const bridgeX = chunkX + 440, bridgeY = groundY - 95;
+      result.bricks.push(makeBrick(bridgeX, bridgeY, 0.3));
+      result.obstacles.push({ type: 'brick', x: bridgeX, y: bridgeY });
+      result.turtleSpawns.push(chunkX + 750);
+      return result;
+    },
   },
 ];
 
-// Set-piece state
-let setPieceSchedule = [];    // array of chunk indices at which to insert set-pieces
+// Breather set-piece (standalone, used after exam phases)
+function generateBreatherSetPiece(chunkX, diffParams) {
+  const groundY = DESIGN_H - GROUND_H;
+  const width = 700;
+  const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_breather', obstacles: [] };
+  const brickY = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
+  for (let i = 0; i < 4; i++) {
+    const bx = chunkX + 120 + i * 130;
+    result.bricks.push(makeBrick(bx, brickY, 0.5));
+    result.obstacles.push({ type: 'brick', x: bx, y: brickY });
+  }
+  return result;
+}
+
+// ── Set-piece Sequence Planner State ──
+// Schedule is an array of { chunkIdx, familyId, role ('teach'|'remix'|'exam'|'breather') }
+let setPieceSchedule = [];    // planned sequence entries
 let setPieceNextIdx = 0;      // pointer into schedule
-let setPieceChunkCounter = 0; // counts chunks since game start (for scheduling)
+let setPieceChunkCounter = 0; // counts chunks since game start
 let setPieceAnnounceTimer = 0;
 let setPieceAnnounceName = '';
 let setPieceAnnounceColor = '';
 
-// Build a schedule of chunk indices for set-piece insertion at game start
+// Build teach→remix→exam sequences at game start
 function initSetPieceState() {
   setPieceSchedule = [];
   setPieceNextIdx = 0;
@@ -1132,20 +1282,60 @@ function initSetPieceState() {
   setPieceAnnounceName = '';
   setPieceAnnounceColor = '';
 
-  const count = SETPIECE_MIN_PER_RUN + Math.floor(rng() * (SETPIECE_MAX_PER_RUN - SETPIECE_MIN_PER_RUN + 1));
-  // Distribute set-pieces across the run: after grace period, spaced by min interval
-  // Use a simple spread: divide remaining space into count slots
-  let cursor = SETPIECE_EARLY_GRACE + 1 + Math.floor(rng() * 3); // first one at chunk 6-8
-  for (let i = 0; i < count; i++) {
-    setPieceSchedule.push(cursor);
-    cursor += SETPIECE_MIN_INTERVAL + Math.floor(rng() * 4); // 4-7 chunk spacing
+  const seqCount = SETPIECE_SEQUENCES_PER_RUN_MIN +
+    Math.floor(rng() * (SETPIECE_SEQUENCES_PER_RUN_MAX - SETPIECE_SEQUENCES_PER_RUN_MIN + 1));
+
+  let cursor = SETPIECE_EARLY_GRACE + 1 + Math.floor(rng() * 3); // first at chunk 6-8
+
+  for (let s = 0; s < seqCount; s++) {
+    // Pick a random family for this sequence
+    const familyIdx = Math.floor(rng() * SETPIECE_FAMILIES.length);
+    const familyId = SETPIECE_FAMILIES[familyIdx].id;
+
+    // teach
+    setPieceSchedule.push({ chunkIdx: cursor, familyId, role: 'teach' });
+    cursor += SETPIECE_MIN_INTERVAL + Math.floor(rng() * 2); // 2-3 chunks gap
+
+    // remix
+    setPieceSchedule.push({ chunkIdx: cursor, familyId, role: 'remix' });
+    cursor += SETPIECE_MIN_INTERVAL + Math.floor(rng() * 2);
+
+    // exam
+    setPieceSchedule.push({ chunkIdx: cursor, familyId, role: 'exam' });
+    cursor += 1; // breather immediately after
+
+    // breather (mandatory after exam)
+    setPieceSchedule.push({ chunkIdx: cursor, familyId, role: 'breather' });
+    cursor += SETPIECE_INTER_SEQ_GAP + Math.floor(rng() * 3); // 5-7 gap to next sequence
   }
 }
 
-// Pick an appropriate set-piece for the current difficulty phase
-function pickSetPiece(phase) {
-  const eligible = SETPIECE_LIBRARY.filter(sp => sp.minPhase <= phase);
-  return eligible[Math.floor(rng() * eligible.length)];
+// Pick the family and invoke the correct role generator
+function pickAndGenerateSetPiece(entry, chunkX, diffParams) {
+  if (entry.role === 'breather') {
+    return {
+      chunk: generateBreatherSetPiece(chunkX, diffParams),
+      id: 'breather', name: 'BREATHER', color: '#88ee44', role: 'breather'
+    };
+  }
+  const family = SETPIECE_FAMILIES.find(f => f.id === entry.familyId);
+  if (!family) return null;
+  // Check phase eligibility
+  const phase = diffParams.phase !== undefined ? diffParams.phase : 0;
+  if (family.minPhase > phase && entry.role !== 'teach') return null;
+  // Generate for this role
+  const gen = family[entry.role];
+  if (!gen) return null;
+  const chunk = gen(chunkX, diffParams);
+  const roleStyle = SEQ_ROLE_STYLE[entry.role] || SEQ_ROLE_STYLE.teach;
+  return {
+    chunk,
+    id: family.id + '_' + entry.role,
+    name: family.name,
+    color: roleStyle.color,
+    role: entry.role,
+    rolePrefix: roleStyle.prefix,
+  };
 }
 
 // Chunk types:
@@ -1569,17 +1759,18 @@ function generateChunk(chunkX, type, diffParams) {
 function spawnChunk() {
   setPieceChunkCounter++;
 
-  // ── Set-piece insertion check ──
+  // ── Set-piece sequence insertion check ──
   if (setPieceNextIdx < setPieceSchedule.length &&
-      setPieceChunkCounter >= setPieceSchedule[setPieceNextIdx]) {
+      setPieceChunkCounter >= setPieceSchedule[setPieceNextIdx].chunkIdx) {
+    const entry = setPieceSchedule[setPieceNextIdx];
     const diffParams = getChunkDiffPhase();
     const sectionedParams = applySectionParams(
       applyThemeParams(diffParams, currentTheme, themeTransitionActive),
       currentSection, sectionTransitionActive
     );
-    const sp = pickSetPiece(diffParams.phase);
-    if (sp) {
-      const chunk = sp.generate(nextChunkX, sectionedParams);
+    const sp = pickAndGenerateSetPiece(entry, nextChunkX, sectionedParams);
+    if (sp && sp.chunk) {
+      const chunk = sp.chunk;
       // Validate reachability — fall through to normal spawn if set-piece fails
       if (validateChunkReachability(chunk.obstacles, nextChunkX, chunk.width)) {
         // Commit set-piece chunk
@@ -1609,19 +1800,23 @@ function spawnChunk() {
         const chunkRecord = {
           id: chunkId, type: chunk.type, x: nextChunkX, width: chunk.width,
           diffPhase: diffParams.phase, rerolls: 0, reachable: true,
-          theme: currentTheme, setpiece: sp.id,
+          theme: currentTheme, setpiece: sp.id, seqRole: sp.role,
         };
         chunkHistory.push(chunkRecord);
         if (chunkHistory.length > 20) chunkHistory.shift();
-        consecutiveDangerChunks = 0;
-        chunksSinceLastSafe = 0;
+        // Breather/teach reset danger counters; remix/exam don't
+        if (sp.role === 'breather' || sp.role === 'teach') {
+          consecutiveDangerChunks = 0;
+          chunksSinceLastSafe = 0;
+        }
         chunkDebugInfo = chunkRecord;
-        // Trigger set-piece announcement
+        // Trigger set-piece announcement with role prefix
         setPieceAnnounceTimer = SETPIECE_ANNOUNCE_DURATION;
-        setPieceAnnounceName = sp.name;
+        setPieceAnnounceName = sp.role === 'breather' ? 'BREATHER'
+          : (sp.rolePrefix + ': ' + sp.name);
         setPieceAnnounceColor = sp.color;
         if (DEBUG_MODE) {
-          console.log(`%c[SetPiece] #${chunkId} ${sp.id} (${sp.name}) x=${Math.round(nextChunkX)} w=${chunk.width}`, 'color: #ffd700');
+          console.log(`%c[SetPiece] #${chunkId} ${sp.id} [${sp.role}] x=${Math.round(nextChunkX)} w=${chunk.width}`, 'color: ' + sp.color);
         }
         nextChunkX += chunk.width;
         setPieceNextIdx++;
