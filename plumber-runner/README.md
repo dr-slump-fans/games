@@ -1774,6 +1774,40 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.6.9 Step 1 — Clear Screen Animation Polish
+
+### LEVEL CLEAR Overlay — Entrance Animations
+- All overlay elements now fade/scale in sequentially instead of appearing instantly
+- **Background overlay** fades from transparent to 50% black over 200 ms
+- **"LEVEL CLEAR!" title** eases in over 0–300 ms (ease-out cubic)
+- **Score & time** fades in 150–450 ms
+- **Star rating**: each star enters individually with staggered scale+fade (350 ms base, 200 ms stagger per star, scaling from 50%→100%)
+- **Criteria summary** fades in after all stars have appeared
+- **Daily ranking text** fades in with additional 200 ms delay after criteria
+- **Restart prompt** delayed until all info is visible, then soft fade-in over 400 ms
+
+### NEW Badge Unlock — Highlight Pulse
+- Newly unlocked badges now enter with a **bright gold flash** that decays to a gentle settled pulse
+- Initial entrance includes a subtle **scale pop** (1.15×→1.0×) for tactile feel
+- Flash decays over 500 ms then settles into a soft 0.8±0.1 alpha oscillation — not distracting
+- Non-intrusive: no overlay, no blocking, fits within existing layout flow
+
+### Timing & Feel
+- Clear-to-restart flow is smoother: elements cascade in naturally over ~1.5 s
+- Restart prompt only appears after all information has settled (varies by badge count)
+- No changes to core gameplay timing, balance, or enemy rules
+
+### Stability
+- New `clearOverlayStartTime` variable tracks overlay entrance; reset in `resetGame()`
+- No lingering timers or requestAnimationFrame — all animation driven by elapsed-time delta
+- All existing localStorage fallbacks preserved
+- Works correctly across start / restart / game-over flows
+
+### Version
+Updated `GAME_VERSION` from `v0.6.8` → **`v0.6.9`**.
+
+---
+
 ## v0.6.8 Step 3 — Achievement System Final Polish + Clear Screen Layout
 
 ### Achievement System Polish
