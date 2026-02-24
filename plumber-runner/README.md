@@ -1774,6 +1774,43 @@ Updated `GAME_VERSION` from `v0.6.1` → **`v0.6.2`**.
 
 ---
 
+## v0.7.0 Step 2 — UI Flow Unification (Mobile-First)
+
+### UI Full-Chain Consistency
+- Unified font sizes across Title / HUD / LEVEL CLEAR screens:
+  - Title `h1`: `bold 28px` with `clamp(20px, 5vw, 28px)` floor
+  - LEVEL CLEAR title: `bold 28px` (was `bold 32px`) — matches title overlay
+  - HUD primary (time, score): `clamp(16px, 4.5vw, 22px)`
+  - HUD secondary (level, coin, life): `clamp(13px, 3.5vw, 16px)`
+- DAILY label now consistently `12px #8cf` across HUD, title overlay, and clear screen (was 11/13/12px)
+- Section label unified to `12px` (was `11px`)
+- Score/time format unified to uppercase (`SCORE: / TIME:`) across HUD, LEVEL CLEAR, and Game Over
+- `HIGH SCORE:` label unified to uppercase on game-over overlay
+- Version (`GAME_VERSION`) now shown on game-over screen as well as title — useful for bug reports
+
+### Interaction Rhythm Unification
+- Added `RESTART_GUARD_MS` (500 ms) delay before accepting restart input on both game-over and level-clear screens — prevents accidental taps during screen transitions
+- All restart paths (jump, left, right) now go through unified `_canRestart()` guard
+- Clear screen restart prompt updated: "Tap or press any key to restart" (was keyboard-only wording)
+
+### Small-Screen Readability
+- Overlay container: `max-width: 92vw; max-height: 88vh; overflow-y: auto` — prevents clipping on narrow viewports
+- Overlay padding reduced from `32px 48px` to `28px 40px`, gap from `16px` to `12px` for tighter mobile fit
+- Leaderboard and achievement font sizes use `clamp(10px, 2.5vw, 12px)` / `clamp(10px, 2.5vw, 11px)` — readable floor on small screens
+- LEVEL CLEAR overlay: regularized vertical spacing with uniform `rowH = 24px` between elements (was irregular 30/32/18/20/20)
+- Criteria line font bumped from `11px` to `12px` for consistency; "No death" capitalized to "No Death"
+
+### Fallback Text Standardization
+- Empty leaderboard: "No runs yet" (unchanged)
+- Leaderboard error: "No data" (was "Leaderboard unavailable")
+- No rank on clear: "No rank data" (was "Not ranked today")
+- All fallback text uses `#888` grey — no color/format variance
+
+### Version
+Updated `GAME_VERSION` from `v0.6.9` → **`v0.7.0`**.
+
+---
+
 ## v0.6.9 Step 1 — Clear Screen Animation Polish
 
 ### LEVEL CLEAR Overlay — Entrance Animations

@@ -33,16 +33,17 @@ canvas {
 }
 #overlay {
   display: none;
-  flex-direction: column; align-items: center; gap: 16px;
+  flex-direction: column; align-items: center; gap: 12px;
   pointer-events: auto;
   background: rgba(0,0,0,0.7);
-  padding: 32px 48px; border-radius: 12px;
+  padding: 28px 40px; border-radius: 12px;
   color: #fff; font-family: monospace; text-align: center;
+  max-width: 92vw; max-height: 88vh; overflow-y: auto;
 }
-#overlay h1 { font-size: 28px; }
-#overlay p { font-size: 18px; }
+#overlay h1 { font-size: clamp(20px, 5vw, 28px); font-weight: bold; }
+#overlay p { font-size: clamp(13px, 3.5vw, 18px); }
 #overlay button {
-  font-family: monospace; font-size: 20px;
+  font-family: monospace; font-size: clamp(16px, 4vw, 20px);
   padding: 12px 32px; border: none; border-radius: 8px;
   background: #e74c3c; color: #fff; cursor: pointer;
 }
@@ -54,16 +55,16 @@ canvas {
 #hud-top {
   display: flex; justify-content: space-between; align-items: flex-start;
   padding: 10px 16px;
-  font-family: monospace; font-size: 18px;
+  font-family: monospace; font-size: clamp(14px, 3.5vw, 18px);
   color: #fff; text-shadow: 2px 2px 0 #000;
 }
 #hud-left { text-align: left; }
 #hud-right { text-align: right; }
-#hud-time { font-size: 22px; font-weight: bold; }
-#hud-level { font-size: 16px; margin-top: 2px; }
-#score-display { font-size: 22px; }
-#hud-coin { font-size: 16px; color: #f4d03f; margin-top: 2px; }
-#hud-life { font-size: 16px; color: #7fff7f; margin-top: 2px; }
+#hud-time { font-size: clamp(16px, 4.5vw, 22px); font-weight: bold; }
+#hud-level { font-size: clamp(13px, 3.5vw, 16px); margin-top: 2px; }
+#score-display { font-size: clamp(16px, 4.5vw, 22px); }
+#hud-coin { font-size: clamp(13px, 3.5vw, 16px); color: #f4d03f; margin-top: 2px; }
+#hud-life { font-size: clamp(13px, 3.5vw, 16px); color: #7fff7f; margin-top: 2px; }
 #hud-level-bar {
   margin-top: 4px; width: 100px; height: 6px;
   background: rgba(255,255,255,0.25); border-radius: 3px;
@@ -197,7 +198,7 @@ canvas {
   transition: opacity 0.5s ease;
 }
 #hud-section-label {
-  font-size: 11px; margin-top: 2px; color: #aaa;
+  font-size: 12px; margin-top: 2px; color: #aaa;
   transition: color 0.4s ease, text-shadow 0.4s ease;
 }
 #hud-section-label.highlight {
@@ -222,7 +223,7 @@ canvas {
 <div id="hud">
   <div id="hud-top">
     <div id="hud-left">
-      <div id="hud-daily" style="font-size:11px;color:#8cf;margin-bottom:1px;"></div>
+      <div id="hud-daily" style="font-size:12px;color:#8cf;margin-bottom:1px;"></div>
       <div id="hud-time">00:00</div>
       <div id="hud-level">Lv.1 EASY</div>
       <div id="hud-level-bar"><div id="hud-level-fill"></div></div>
@@ -265,13 +266,13 @@ canvas {
     <h1 id="ol-title">Plumber Runner</h1>
     <p id="ol-msg">MOVE: Arrows/AD  |  JUMP: Space</p>
     <p id="ol-score"></p>
-    <p id="ol-daily" style="font-size:13px;color:#8cf;margin:4px 0 0"></p>
-    <div id="ol-lb-wrap" style="margin:6px 0 0;font-size:12px;color:#ff0;white-space:pre;line-height:1.6;display:none">
+    <p id="ol-daily" style="font-size:12px;color:#8cf;margin:4px 0 0"></p>
+    <div id="ol-lb-wrap" style="margin:6px 0 0;font-size:clamp(10px,2.5vw,12px);color:#ff0;white-space:pre;line-height:1.6;display:none">
       <div id="ol-lb-title" style="font-size:12px;color:#8cf;margin-bottom:3px">Today Top 5</div>
       <div id="ol-lb-rows"></div>
       <button id="ol-lb-clear" style="font-size:11px;padding:3px 10px;margin-top:5px;background:#555;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-family:monospace">Clear Today</button>
     </div>
-    <div id="ol-ach-wrap" style="margin:8px 0 0;font-size:11px;color:#aaa;display:none">
+    <div id="ol-ach-wrap" style="margin:8px 0 0;font-size:clamp(10px,2.5vw,11px);color:#aaa;display:none">
       <div id="ol-ach-summary" style="color:#cf8;margin-bottom:4px"></div>
       <div id="ol-ach-list" style="white-space:pre;line-height:1.7;color:#888"></div>
     </div>
@@ -282,7 +283,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.6.9';
+const GAME_VERSION = 'v0.7.0';
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -423,6 +424,8 @@ function getUnlockedCount() {
 let clearRankInfo = null; // { rank: number|null, topScore: number|null }
 let newlyUnlockedBadges = []; // badge IDs unlocked this clear
 let clearOverlayStartTime = 0; // Date.now() when overlay phase becomes 'done'
+let gameOverStartTime = 0;     // Date.now() when game-over overlay appears
+const RESTART_GUARD_MS = 500;  // minimum ms before restart input is accepted
 
 // ── Constants ──────────────────────────────────────────
 const DESIGN_W = 800;
@@ -5511,11 +5514,12 @@ function update() {
     if (lives > 0) { respawnPlayer(); }
     else {
       state = 'dead';
+      gameOverStartTime = Date.now();
       if (score > highScore) highScore = score;
       const tMins = Math.floor(survivalTime / 60);
       const tSecs = Math.floor(survivalTime % 60);
       const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-      showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
+      showOverlay('Game Over', `SCORE: ${score}  |  TIME: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
       return;
     }
   }
@@ -5657,11 +5661,12 @@ function update() {
     if (lives > 0) { respawnPlayer(); }
     else {
       state = 'dead';
+      gameOverStartTime = Date.now();
       if (score > highScore) highScore = score;
       const tMins = Math.floor(survivalTime / 60);
       const tSecs = Math.floor(survivalTime % 60);
       const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-      showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
+      showOverlay('Game Over', `SCORE: ${score}  |  TIME: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
       return;
     }
   }
@@ -5671,11 +5676,12 @@ function update() {
     if (lives > 0) { respawnPlayer(); }
     else {
       state = 'dead';
+      gameOverStartTime = Date.now();
       if (score > highScore) highScore = score;
       const tMins = Math.floor(survivalTime / 60);
       const tSecs = Math.floor(survivalTime % 60);
       const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-      showOverlay('Game Over', `Score: ${score}  |  Time: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
+      showOverlay('Game Over', `SCORE: ${score}  |  TIME: ${timeStr}  |  ${DIFFICULTY_LEVELS[diffLevel].name}`, score);
       return;
     }
   }
@@ -6227,16 +6233,18 @@ function draw() {
     ctx.fillStyle = `rgba(0, 0, 0, ${bgAlpha})`;
     ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
     const cx = DESIGN_W / 2;
-    let ly = DESIGN_H / 2 - 52; // layout cursor — top of block
+    // Uniform vertical spacing: 24px between rows
+    const rowH = 24;
+    let ly = DESIGN_H / 2 - 60; // layout cursor — top of block
     ctx.textAlign = 'center';
-    // Title — fade in over 0–300ms
+    // Title — fade in over 0–300ms (bold 28px to match overlay h1)
     const titleAlpha = ease(elapsed / 300);
     ctx.globalAlpha = titleAlpha;
-    ctx.font = 'bold 32px monospace';
+    ctx.font = 'bold 28px monospace';
     ctx.fillStyle = '#fff';
     ctx.fillText('LEVEL CLEAR!', cx, ly);
-    ly += 30;
-    // Score & time — fade in 150–450ms
+    ly += rowH + 6;
+    // Score & time — fade in 150–450ms (unified casing: SCORE / TIME)
     const scoreAlpha = ease((elapsed - 150) / 300);
     ctx.globalAlpha = scoreAlpha;
     ctx.font = '16px monospace';
@@ -6244,8 +6252,8 @@ function draw() {
     const tMins = Math.floor(survivalTime / 60);
     const tSecs = Math.floor(survivalTime % 60);
     const timeStr = `${String(tMins).padStart(2, '0')}:${String(tSecs).padStart(2, '0')}`;
-    ctx.fillText(`Score: ${score}  |  Time: ${timeStr}`, cx, ly);
-    ly += 32;
+    ctx.fillText(`SCORE: ${score}  |  TIME: ${timeStr}`, cx, ly);
+    ly += rowH + 4;
     // Star rating display — each star enters individually with scale+fade
     ctx.fillStyle = '#ffd700';
     const starFilled = '\u2605';  // ★
@@ -6275,23 +6283,23 @@ function draw() {
       ctx.fillText(ch, 0, 0);
       ctx.restore();
     }
-    ly += 18;
+    ly += rowH - 4;
     // Star criteria summary (compact) — fade in after last star
     const criteriaDelay = starBaseDelay + 3 * starStagger + 100;
     const criteriaAlpha = ease((elapsed - criteriaDelay) / 300);
     ctx.globalAlpha = criteriaAlpha;
-    ctx.font = '11px monospace';
+    ctx.font = '12px monospace';
     ctx.fillStyle = '#bbb';
     ctx.textAlign = 'center';
     const timeMet = survivalTime <= STAR_TIME_THRESHOLDS[0];
     const coinMet = coins >= STAR_COIN_THRESHOLD;
     const noDeathMet = deathsThisRun === 0;
-    const p = [];
-    p.push(timeMet ? '\u2713 Time' : '\u2717 Time');
-    p.push(coinMet ? '\u2713 Coins' : noDeathMet ? '\u2713 No death' : '\u2717 Coins');
-    ctx.fillText(p.join('   '), cx, ly);
-    ly += 20;
-    // Daily ranking info — fade in after criteria
+    const cp = [];
+    cp.push(timeMet ? '\u2713 Time' : '\u2717 Time');
+    cp.push(coinMet ? '\u2713 Coins' : noDeathMet ? '\u2713 No Death' : '\u2717 Coins');
+    ctx.fillText(cp.join('   '), cx, ly);
+    ly += rowH;
+    // Daily ranking info — fade in after criteria (12px #8cf to match HUD daily)
     const rankDelay = criteriaDelay + 200;
     const rankAlpha = ease((elapsed - rankDelay) / 300);
     ctx.globalAlpha = rankAlpha;
@@ -6305,9 +6313,9 @@ function draw() {
       ctx.fillText(rankStr, cx, ly);
     } else {
       ctx.fillStyle = '#888';
-      ctx.fillText('Not ranked today', cx, ly);
+      ctx.fillText('No rank data', cx, ly);
     }
-    ly += 20;
+    ly += rowH;
     // Newly unlocked badges feedback — gold flash then settle
     if (newlyUnlockedBadges.length > 0) {
       const badgeNames = newlyUnlockedBadges.map(id => ACHIEVEMENTS[id] ? ACHIEVEMENTS[id].name : id);
@@ -6335,7 +6343,7 @@ function draw() {
           ctx.fillText('\u2605 NEW: ' + badgeNames.join(', '), cx, ly);
         }
         ctx.globalAlpha = 1;
-        ly += 20;
+        ly += rowH;
       }
     }
     // Restart prompt — delayed fade-in (appears after everything else settles)
@@ -6344,7 +6352,7 @@ function draw() {
     ctx.globalAlpha = restartAlpha;
     ctx.font = '13px monospace';
     ctx.fillStyle = '#aaa';
-    ctx.fillText('Press any key to restart', cx, ly);
+    ctx.fillText('Tap or press any key to restart', cx, ly);
     ctx.globalAlpha = 1;
     ctx.restore();
   }
@@ -6573,7 +6581,7 @@ function renderTitleLeaderboard() {
       olLbClear.style.display = 'none';
     }
   } catch {
-    olLbRows.textContent = 'Leaderboard unavailable';
+    olLbRows.textContent = 'No data';
     olLbRows.style.color = '#888';
     olLbClear.style.display = 'none';
   }
@@ -6614,22 +6622,21 @@ function showOverlay(title, msg, sc) {
   olTitle.textContent = title;
   olMsg.textContent = msg;
   if (sc !== undefined) {
-    olScore.textContent = `High Score: ${highScore}`;
+    olScore.textContent = `HIGH SCORE: ${highScore}`;
     olScore.style.display = 'block';
   } else {
     olScore.style.display = 'none';
   }
   olBtn.textContent = state === 'title' ? 'START' : 'RESTART';
-  // Show daily seed + leaderboard on title screen
+  // Show version on both title and game-over; daily + leaderboard only on title
+  olVersion.textContent = GAME_VERSION;
+  olVersion.style.display = 'block';
   if (state === 'title') {
-    olVersion.textContent = GAME_VERSION;
-    olVersion.style.display = 'block';
     olDailyEl.textContent = `DAILY: ${DAILY_DATE}`;
     olDailyEl.style.display = 'block';
     renderTitleLeaderboard();
     renderTitleAchievements();
   } else {
-    olVersion.style.display = 'none';
     olDailyEl.style.display = 'none';
     olLbWrap.style.display = 'none';
     olAchWrap.style.display = 'none';
@@ -6670,9 +6677,14 @@ function startGame() {
 }
 
 // ── Input ──────────────────────────────────────────────
+function _canRestart() {
+  if (state === 'dead') return Date.now() - gameOverStartTime >= RESTART_GUARD_MS;
+  if (levelCleared && levelClearPhase === 'done') return Date.now() - clearOverlayStartTime >= RESTART_GUARD_MS;
+  return false;
+}
 function onJumpDown() {
-  if (levelCleared) { if (levelClearPhase === 'done') startGame(); return; }
-  if (state === 'dead') { startGame(); return; }
+  if (levelCleared) { if (levelClearPhase === 'done' && _canRestart()) startGame(); return; }
+  if (state === 'dead') { if (_canRestart()) startGame(); return; }
   if (state === 'title') { startGame(); jumpPressed = true; return; }
   jumpPressed = true;
 }
@@ -6681,8 +6693,8 @@ function onJumpUp() {
   jumpConsumed = false;
 }
 function onMoveLeftDown() {
-  if (levelCleared) { if (levelClearPhase === 'done') startGame(); return; }
-  if (state === 'dead') { startGame(); return; }
+  if (levelCleared) { if (levelClearPhase === 'done' && _canRestart()) startGame(); return; }
+  if (state === 'dead') { if (_canRestart()) startGame(); return; }
   if (state === 'title') { startGame(); }
   moveLeftPressed = true;
 }
@@ -6690,8 +6702,8 @@ function onMoveLeftUp() {
   moveLeftPressed = false;
 }
 function onMoveRightDown() {
-  if (levelCleared) { if (levelClearPhase === 'done') startGame(); return; }
-  if (state === 'dead') { startGame(); return; }
+  if (levelCleared) { if (levelClearPhase === 'done' && _canRestart()) startGame(); return; }
+  if (state === 'dead') { if (_canRestart()) startGame(); return; }
   if (state === 'title') { startGame(); }
   moveRightPressed = true;
 }
