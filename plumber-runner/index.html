@@ -283,7 +283,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.7.0';
+const GAME_VERSION = 'v0.7.1';
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -423,8 +423,8 @@ function getUnlockedCount() {
 // Variables set at level clear for the ranking overlay
 let clearRankInfo = null; // { rank: number|null, topScore: number|null }
 let newlyUnlockedBadges = []; // badge IDs unlocked this clear
-let clearOverlayStartTime = 0; // Date.now() when overlay phase becomes 'done'
-let gameOverStartTime = 0;     // Date.now() when game-over overlay appears
+let clearOverlayStartTime = 0; // rAF timestamp (ms) when overlay phase becomes 'done'
+let gameOverStartTime = 0;     // rAF timestamp (ms) when game-over overlay appears
 const RESTART_GUARD_MS = 500;  // minimum ms before restart input is accepted
 
 // ── Constants ──────────────────────────────────────────
@@ -712,38 +712,57 @@ function applyThemeParams(diffParams, theme, isTransition) {
 
 // Lerp hex color helper
 function lerpColor(c1, c2, t) {
+  if (t <= 0) return c1;
+  if (t >= 1) return c2;
   const r1 = parseInt(c1.slice(1, 3), 16), g1 = parseInt(c1.slice(3, 5), 16), b1 = parseInt(c1.slice(5, 7), 16);
   const r2 = parseInt(c2.slice(1, 3), 16), g2 = parseInt(c2.slice(3, 5), 16), b2 = parseInt(c2.slice(5, 7), 16);
   const r = Math.round(r1 + (r2 - r1) * t), g = Math.round(g1 + (g2 - g1) * t), b = Math.round(b1 + (b2 - b1) * t);
   return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
 }
 
+// Cached theme color results — avoids hex parsing every frame when not transitioning
+let _cachedSky = null, _cachedSkyKey = '';
+let _cachedGround = null, _cachedGroundKey = '';
+let _cachedHill = '', _cachedHillKey = '';
+
 // Get current sky colors (with smooth transition)
 function getThemeSkyColors() {
+  const key = themeColorFrom + themeColorTarget + themeColorLerp;
+  if (key === _cachedSkyKey) return _cachedSky;
   const from = THEME_SKY_COLORS[themeColorFrom];
   const to = THEME_SKY_COLORS[themeColorTarget];
   const t = themeColorLerp;
-  return {
+  _cachedSky = {
     top: lerpColor(from.top, to.top, t),
     bottom: lerpColor(from.bottom, to.bottom, t),
   };
+  _cachedSkyKey = key;
+  return _cachedSky;
 }
 
 // Get current ground colors (with smooth transition)
 function getThemeGroundColors() {
+  const key = themeColorFrom + themeColorTarget + themeColorLerp;
+  if (key === _cachedGroundKey) return _cachedGround;
   const from = THEME_GROUND_COLORS[themeColorFrom];
   const to = THEME_GROUND_COLORS[themeColorTarget];
   const t = themeColorLerp;
-  return {
+  _cachedGround = {
     fill: lerpColor(from.fill, to.fill, t),
     line: lerpColor(from.line, to.line, t),
     top: lerpColor(from.top, to.top, t),
   };
+  _cachedGroundKey = key;
+  return _cachedGround;
 }
 
 // Get current hill color (with smooth transition)
 function getThemeHillColor() {
-  return lerpColor(THEME_HILL_COLORS[themeColorFrom], THEME_HILL_COLORS[themeColorTarget], themeColorLerp);
+  const key = themeColorFrom + themeColorTarget + themeColorLerp;
+  if (key === _cachedHillKey) return _cachedHill;
+  _cachedHill = lerpColor(THEME_HILL_COLORS[themeColorFrom], THEME_HILL_COLORS[themeColorTarget], themeColorLerp);
+  _cachedHillKey = key;
+  return _cachedHill;
 }
 
 // ── Rhythm Section System ────────────────────────────────
@@ -2598,9 +2617,11 @@ function drawGround() {
   // Align bricks to world grid (camera transform handles visual scrolling)
   const startX = Math.floor(drawLeft / brickW) * brickW;
   ctx.fillStyle = gc.line;
-  for (let row = 0; row < Math.ceil(GROUND_H / brickH); row++) {
+  const groundRows = ((GROUND_H + brickH - 1) / brickH) | 0;  // ceil division (GROUND_H is constant)
+  const groundCols = ((drawW / brickW) | 0) + 5;
+  for (let row = 0; row < groundRows; row++) {
     const rowOffset = (row % 2) * (brickW / 2);
-    for (let col = 0; col < Math.ceil(drawW / brickW) + 4; col++) {
+    for (let col = 0; col < groundCols; col++) {
       const bx = startX + col * brickW + rowOffset;
       const by = groundY + row * brickH;
       ctx.fillRect(bx, by, brickW, 1);
@@ -5185,7 +5206,7 @@ function update() {
       }
       if (levelClearTimer >= LEVEL_CLEAR_SLIDE_FRAMES) {
         levelClearPhase = 'done';
-        clearOverlayStartTime = Date.now();
+        clearOverlayStartTime = _frameNow;
         player.y = groundY;
       }
     }
@@ -5514,7 +5535,7 @@ function update() {
     if (lives > 0) { respawnPlayer(); }
     else {
       state = 'dead';
-      gameOverStartTime = Date.now();
+      gameOverStartTime = _frameNow;
       if (score > highScore) highScore = score;
       const tMins = Math.floor(survivalTime / 60);
       const tSecs = Math.floor(survivalTime % 60);
@@ -5661,7 +5682,7 @@ function update() {
     if (lives > 0) { respawnPlayer(); }
     else {
       state = 'dead';
-      gameOverStartTime = Date.now();
+      gameOverStartTime = _frameNow;
       if (score > highScore) highScore = score;
       const tMins = Math.floor(survivalTime / 60);
       const tSecs = Math.floor(survivalTime % 60);
@@ -5676,7 +5697,7 @@ function update() {
     if (lives > 0) { respawnPlayer(); }
     else {
       state = 'dead';
-      gameOverStartTime = Date.now();
+      gameOverStartTime = _frameNow;
       if (score > highScore) highScore = score;
       const tMins = Math.floor(survivalTime / 60);
       const tSecs = Math.floor(survivalTime % 60);
@@ -5805,22 +5826,30 @@ function update() {
     }
   }
 
-  scoreDisplay.textContent = `SCORE: ${score}`;
-  hudCoin.textContent = (coinComboLevel >= 1 && coinComboTimer > 0)
-    ? `COIN: ${coins}  x${coinComboLevel + 1}`
-    : `COIN: ${coins}`;
-  hudLife.textContent = `LIFE: ${lives}`;
-  hudForm.textContent = playerForm === 'big' ? '\u2605 BIG' : 'SMALL';
-  hudForm.style.color = playerForm === 'big' ? '#fdd835' : '#adf';
-  hudForm.style.textShadow = playerForm === 'big' ? '0 0 6px #f1c40f' : 'none';
+  // HUD DOM updates — guarded to avoid redundant textContent writes
+  { const v = `SCORE: ${score}`; if (scoreDisplay.textContent !== v) scoreDisplay.textContent = v; }
+  { const v = (coinComboLevel >= 1 && coinComboTimer > 0)
+      ? `COIN: ${coins}  x${coinComboLevel + 1}`
+      : `COIN: ${coins}`;
+    if (hudCoin.textContent !== v) hudCoin.textContent = v; }
+  { const v = `LIFE: ${lives}`; if (hudLife.textContent !== v) hudLife.textContent = v; }
+  { const v = playerForm === 'big' ? '\u2605 BIG' : 'SMALL';
+    if (hudForm.textContent !== v) {
+      hudForm.textContent = v;
+      hudForm.style.color = playerForm === 'big' ? '#fdd835' : '#adf';
+      hudForm.style.textShadow = playerForm === 'big' ? '0 0 6px #f1c40f' : 'none';
+    }
+  }
 
   // Update HUD
   const mins = Math.floor(survivalTime / 60);
   const secs = Math.floor(survivalTime % 60);
-  hudTime.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  { const v = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    if (hudTime.textContent !== v) hudTime.textContent = v; }
 
   const lvl = DIFFICULTY_LEVELS[diffLevel];
-  hudLevel.textContent = `Lv.${diffLevel + 1} ${lvl.name}`;
+  { const v = `Lv.${diffLevel + 1} ${lvl.name}`;
+    if (hudLevel.textContent !== v) hudLevel.textContent = v; }
 
   const fillPct = diffLevel >= DIFFICULTY_LEVELS.length - 1 ? 100 : Math.round(diffProgress * 100);
   hudLevelFill.style.width = fillPct + '%';
@@ -5919,9 +5948,13 @@ function update() {
   }
 
   // ── Theme Chunk System HUD ──────────────────────────
-  hudTheme.textContent = `THEME: ${currentTheme}`;
-  const themeAnnInfo = THEME_ANNOUNCE[currentTheme];
-  hudTheme.style.color = themeAnnInfo ? themeAnnInfo.color : '#adf';
+  { const v = `THEME: ${currentTheme}`;
+    if (hudTheme.textContent !== v) {
+      hudTheme.textContent = v;
+      const themeAnnInfo = THEME_ANNOUNCE[currentTheme];
+      hudTheme.style.color = themeAnnInfo ? themeAnnInfo.color : '#adf';
+    }
+  }
 
   // Theme transition announcement
   if (themeAnnounceTimer > 0 && themeAnnounceName) {
@@ -5947,7 +5980,7 @@ function update() {
 
   // Persistent section label with highlight glow on transition
   const sLabelInfo = SECTION_ANNOUNCE[currentSection];
-  hudSectionLabel.textContent = currentSection;
+  if (hudSectionLabel.textContent !== currentSection) hudSectionLabel.textContent = currentSection;
   if (sectionAnnounceTimer > 0) {
     hudSectionLabel.style.color = sLabelInfo ? sLabelInfo.color : '#fff';
     hudSectionLabel.classList.add('highlight');
@@ -5956,6 +5989,11 @@ function update() {
     hudSectionLabel.classList.remove('highlight');
   }
 }
+
+// Cached sky gradient to avoid createLinearGradient per frame
+let _skyGrad = null, _skyGradTop = '', _skyGradBottom = '';
+// Cached star character measureText width (clear overlay)
+let _starMeasureW = 0;
 
 function draw() {
   // Screen shake for hurt feedback
@@ -5966,12 +6004,16 @@ function draw() {
     ctx.save();
     ctx.translate(sx, sy);
   }
-  // Sky gradient (theme-aware)
+  // Sky gradient (theme-aware) — cached to avoid createLinearGradient every frame
   const themeSky = getThemeSkyColors();
-  const grad = ctx.createLinearGradient(0, 0, 0, DESIGN_H - GROUND_H);
-  grad.addColorStop(0, themeSky.top);
-  grad.addColorStop(1, themeSky.bottom);
-  ctx.fillStyle = grad;
+  if (themeSky.top !== _skyGradTop || themeSky.bottom !== _skyGradBottom) {
+    _skyGrad = ctx.createLinearGradient(0, 0, 0, DESIGN_H - GROUND_H);
+    _skyGrad.addColorStop(0, themeSky.top);
+    _skyGrad.addColorStop(1, themeSky.bottom);
+    _skyGradTop = themeSky.top;
+    _skyGradBottom = themeSky.bottom;
+  }
+  ctx.fillStyle = _skyGrad;
   ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
 
   // Subtle section sky tint overlay for ambient differentiation
@@ -5995,12 +6037,16 @@ function draw() {
   ctx.save();
   ctx.translate(-cameraX, 0);
 
+  // Visible range for off-screen culling (world coords, with margin)
+  const _cullL = cameraX - 64;
+  const _cullR = cameraX + DESIGN_W + 64;
+
   // Ground
   drawGround();
 
-  // Pipes
+  // Pipes (cull off-screen)
   for (const pipe of pipes) {
-    if (pipe.h <= 0) continue;
+    if (pipe.h <= 0 || pipe.x + LIP_W < _cullL || pipe.x > _cullR) continue;
     if (pipe.fromTop) {
       drawTopPipe(pipe.x, pipe.h);
     } else {
@@ -6008,8 +6054,9 @@ function draw() {
     }
   }
 
-  // Breakable bricks & question blocks
+  // Breakable bricks & question blocks (cull off-screen)
   for (const brick of bricks) {
+    if (brick.x + BRICK_W < _cullL || brick.x > _cullR) continue;
     // Hidden blocks: invisible until revealed
     if (brick.hidden) {
       if (brick.revealed) {
@@ -6035,13 +6082,15 @@ function draw() {
     }
   }
 
-  // Mushrooms
+  // Mushrooms (cull off-screen)
   for (const m of mushrooms) {
+    if (m.x + MUSHROOM_W < _cullL || m.x > _cullR) continue;
     drawMushroom(m.x, m.y);
   }
 
-  // Turtles
+  // Turtles (cull off-screen)
   for (const t of turtles) {
+    if (t.x + TURTLE_W < _cullL || t.x > _cullR) continue;
     if (t.state === 'walk') {
       drawTurtleWalk(t.x, t.y, t.vx, t.animFrame, t.turnCooldown || 0);
     } else if (t.state === 'shell_idle') {
@@ -6225,7 +6274,7 @@ function draw() {
   // ── Level Clear overlay ────────────────────────────────
   if (levelCleared && levelClearPhase === 'done') {
     ctx.save();
-    const elapsed = Date.now() - clearOverlayStartTime; // ms since overlay appeared
+    const elapsed = _frameNow - clearOverlayStartTime; // ms since overlay appeared
     // Helper: smooth ease-out clamp 0→1
     const ease = (t) => t >= 1 ? 1 : t < 0 ? 0 : 1 - Math.pow(1 - t, 3);
     // Overlay background fade-in (200ms)
@@ -6262,8 +6311,11 @@ function draw() {
     const starStagger = 200;  // 200ms between each star
     // Measure total star string width to center
     ctx.font = 'bold 26px monospace';
-    const fullStarStr = starFilled.repeat(3);
-    const totalW = ctx.measureText(fullStarStr).width;
+    // Cache star measurement (font is constant across frames)
+    if (!_starMeasureW) {
+      _starMeasureW = ctx.measureText(starFilled.repeat(3)).width;
+    }
+    const totalW = _starMeasureW;
     const charW = totalW / 3;
     const startX = cx - totalW / 2 + charW / 2;
     for (let si = 0; si < 3; si++) {
@@ -6327,7 +6379,7 @@ function draw() {
         const flashT = Math.max(0, elapsed - badgeDelay) / 1000;
         const flashBright = 0.85 + 0.15 * Math.max(0, 1 - flashT * 2);
         // Gentle ongoing pulse after settled
-        const pulse = flashT > 0.5 ? 0.8 + 0.1 * Math.sin(Date.now() * 0.004) : flashBright;
+        const pulse = flashT > 0.5 ? 0.8 + 0.1 * Math.sin(_frameNow * 0.004) : flashBright;
         ctx.globalAlpha = badgeIn * pulse;
         ctx.font = 'bold 13px monospace';
         ctx.fillStyle = '#ffd700';
@@ -6473,16 +6525,19 @@ function draw() {
     ctx.fillText(`SPEED_WAVE:${getSpeedWaveFactor().toFixed(3)} COMBO:${comboCount} COMBO_T:${comboTimer.toFixed(1)} MISSION:${mission ? mission.type + ' ' + mission.progress + '/' + mission.target : 'none'}`, 4, DESIGN_H - 24);
     ctx.fillText(`BOSS:${bossWaveActive ? 'ON' : 'OFF'} BOSS_T:${bossWaveTimer.toFixed(1)} BOSS_MODE:${bossWaveMode} BOSS_COUNT:${bossWaveCount} NEXT:${bossWaveNextTrigger.toFixed(0)}s`, 4, DESIGN_H - 34);
     ctx.fillText(`SFX:${sfxEnabled ? 'ON' : 'OFF'} VIB:${vibEnabled ? 'ON' : 'OFF'} VIB_SUPPORTED:${vibSupported} CONTACT_PICKUP:ON mush:${mushrooms.length}`, 4, DESIGN_H - 44);
-    // Turtle debug info — summary + sample turtle detail
-    const tWalk = turtles.filter(t => t.state === 'walk').length;
-    const tShellIdle = turtles.filter(t => t.state === 'shell_idle').length;
-    const tShellMove = turtles.filter(t => t.state === 'shell_move').length;
-    const tBounceDead = turtles.filter(t => t.state === 'shell_bounce_dead').length;
-    const tDead = turtles.filter(t => t.state === 'dead').length;
-    const tSample = turtles.find(t => t.state !== 'dead' && t.state !== 'shell_bounce_dead');
+    // Turtle debug info — single-pass count (avoids 5 filter() allocations)
+    let tWalk = 0, tShellIdle = 0, tShellMove = 0, tBounceDead = 0, tDead = 0, tSample = null;
+    for (let ti = 0; ti < turtles.length; ti++) {
+      const ts = turtles[ti].state;
+      if (ts === 'walk') { tWalk++; if (!tSample) tSample = turtles[ti]; }
+      else if (ts === 'shell_idle') { tShellIdle++; if (!tSample) tSample = turtles[ti]; }
+      else if (ts === 'shell_move') { tShellMove++; if (!tSample) tSample = turtles[ti]; }
+      else if (ts === 'shell_bounce_dead') tBounceDead++;
+      else if (ts === 'dead') tDead++;
+    }
     const tInfo = tSample ? `vx:${tSample.vx.toFixed(1)} dir:${tSample.direction} st:${tSample.state} y:${tSample.y.toFixed(0)} gnd:${tSample.onGround?1:0}` : '-';
     ctx.fillText(`TURTLES:${turtles.length} walk:${tWalk} idle:${tShellIdle} move:${tShellMove} bdead:${tBounceDead} dead:${tDead} | ${tInfo}`, 4, DESIGN_H - 54);
-    ctx.fillText(`dt:${(_debugDt * 1000).toFixed(1)}ms logicSteps:${_debugLogicSteps} fps(est):${_debugFps.toFixed(1)}`, 4, DESIGN_H - 64);
+    ctx.fillText(`dt:${(_debugDt * 1000).toFixed(1)}ms drawMs:${_debugFrameTime.toFixed(1)} logicSteps:${_debugLogicSteps} fps(est):${_debugFps.toFixed(1)}`, 4, DESIGN_H - 64);
     // Chunk-based level generation debug info
     const cdi = chunkDebugInfo;
     const chunkPhaseNames = ['Tutorial', 'Medium', 'Hard', 'Max'];
@@ -6512,10 +6567,13 @@ let _lastTimestamp = -1;
 let _debugDt = 0;         // raw dt of last render frame (seconds)
 let _debugLogicSteps = 0; // logic steps executed last render frame
 let _debugFps = 60;       // estimated FPS (smoothed)
+let _debugFrameTime = 0;  // frame render time in ms (draw cost)
 let _fpsAlpha = 0.05;     // EMA smoothing factor for FPS
+let _frameNow = 0;        // rAF timestamp (ms) for current frame — avoids Date.now() in draw
 
 function gameLoop(timestamp) {
   requestAnimationFrame(gameLoop);
+  _frameNow = timestamp;   // expose rAF timestamp for draw() — avoids Date.now()
 
   // First frame: seed timestamp, skip logic to avoid a giant dt
   if (_lastTimestamp < 0) {
@@ -6546,7 +6604,9 @@ function gameLoop(timestamp) {
   if (steps >= MAX_STEPS_PER_FRAME) _accumulator = 0;
   _debugLogicSteps = steps;
 
+  const _drawStart = performance.now();
   draw();
+  _debugFrameTime += 0.1 * (performance.now() - _drawStart - _debugFrameTime); // EMA smoothed
 }
 
 // ── Overlay ────────────────────────────────────────────
@@ -6678,8 +6738,8 @@ function startGame() {
 
 // ── Input ──────────────────────────────────────────────
 function _canRestart() {
-  if (state === 'dead') return Date.now() - gameOverStartTime >= RESTART_GUARD_MS;
-  if (levelCleared && levelClearPhase === 'done') return Date.now() - clearOverlayStartTime >= RESTART_GUARD_MS;
+  if (state === 'dead') return _frameNow - gameOverStartTime >= RESTART_GUARD_MS;
+  if (levelCleared && levelClearPhase === 'done') return _frameNow - clearOverlayStartTime >= RESTART_GUARD_MS;
   return false;
 }
 function onJumpDown() {

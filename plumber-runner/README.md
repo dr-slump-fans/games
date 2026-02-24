@@ -1811,6 +1811,28 @@ Updated `GAME_VERSION` from `v0.6.9` → **`v0.7.0`**.
 
 ---
 
+## v0.7.1 Step 1 — Performance & Smoothness Micro-Optimizations
+
+### Performance (mobile-first)
+- **Theme color caching**: `lerpColor()` now short-circuits when `t <= 0` or `t >= 1` (avoids hex parsing when not transitioning). Sky/ground/hill color results are cached per-frame by key — eliminates ~5 redundant `parseInt` + `toString(16)` calls per frame during steady state
+- **Sky gradient caching**: `createLinearGradient()` is only called when sky colors actually change, not every frame
+- **Off-screen culling**: Pipes, bricks, mushrooms, and turtles are skipped in `draw()` when outside the camera viewport (±64 px margin). Reduces draw calls proportionally to world size
+- **HUD DOM throttling**: `textContent` writes are now guarded — only assigned when the value actually changes. Avoids unnecessary DOM layout invalidation for score, coin, life, time, level, theme, and section labels
+- **Ground brick loop**: replaced `Math.ceil()` divisions with integer arithmetic for row/column counts
+- **Debug turtle stats**: replaced 5 `filter()` allocations with a single-pass loop (only affects `?debug=1` mode)
+
+### Smoothness
+- **Consistent frame timing**: replaced all `Date.now()` calls in `draw()` and overlay guards with the rAF timestamp (`_frameNow`). Overlay start times (`clearOverlayStartTime`, `gameOverStartTime`) now use the same clock — eliminates potential timing drift between `Date.now()` and `performance.now()` on mobile
+- **Star measurement cache**: `measureText()` for the clear-overlay star characters is now cached (font is constant) — avoids a font-metric lookup every frame during the level-clear sequence
+
+### Observability (debug only)
+- Added **`drawMs`** (EMA-smoothed draw render time in ms) to the existing `?debug=1` panel alongside dt/fps/logicSteps — useful for identifying frame-budget pressure without external tools
+
+### Version
+Updated `GAME_VERSION` from `v0.7.0` → **`v0.7.1`**.
+
+---
+
 ## v0.6.9 Step 1 — Clear Screen Animation Polish
 
 ### LEVEL CLEAR Overlay — Entrance Animations
