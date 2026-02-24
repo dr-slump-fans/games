@@ -2063,6 +2063,37 @@ Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
 
 ---
 
+## v0.8.2 Step 3 — Set-Piece Sequence Polish & Failure Hotspot De-Spike
+
+### Design Intent
+Finishing pass on the teach → remix → exam sequence system. Focus areas: smoother exam entry/exit transitions (reduces "sudden death" feel), softened failure hotspots where extreme pipe heights + exit turtles created unfair spike combos, and a more stable post-exam breather window that eases players back into normal difficulty. **Core challenge and Lost Levels precision philosophy are preserved** — only the sharpest edges are filed down.
+
+### Exam Transition Polish
+- All 4 exam generators (staircase, corridor, precision, ladder) widened from 900 → 950px, giving more entry run-up and exit buffer space
+- Entry obstacles pulled slightly inward — first obstacle is further from chunk start
+- Exit turtles pushed 30–50px further out — visible earlier, punishes less by ambush
+
+### Failure Hotspot De-Spike
+- **Staircase exam**: peak pipe 130 → 120, descent pipe 90 → 85 (more margin from jump cap)
+- **Corridor exam**: passage gap widened from 50 → 58px clearance; bottom pipes softened (65/85/60 → 60/80/55)
+- **Precision exam**: tallest pipe 130 → 120 (still demands full jump, but not at theoretical max)
+- **Ladder exam**: peak1 120 → 115, peak2 140 → 130 (was dangerously close to CHUNK_PLAYER_MAX_JUMP_H=150)
+
+### Post-Exam Breather Stability
+- Breather set-piece widened from 700 → 800px with 5 reward bricks (was 4), longer recovery feel
+- **Post-breather protection window**: after breather, next 2 normal chunks have suppressed danger weights (pipe_mix ×0.3, double_platform ×0.4, rest/single_platform boosted) — prevents immediate re-spike
+- Protection counter (`postBreatherProtection`) auto-decrements and resets on game init
+
+### Fairness Protections (Unchanged)
+- Reachability validation still runs on all set-pieces
+- Danger counter resets on teach/breather unchanged
+- No collision, enemy, or physics rule changes
+
+### Version
+Updated `GAME_VERSION` from `v0.8.1` → **`v0.8.2`**.
+
+---
+
 ## v0.8.1 Step 2 — Set-Piece Sequence Orchestrator (teach → remix → exam)
 
 ### Design Intent

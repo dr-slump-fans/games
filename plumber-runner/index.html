@@ -295,7 +295,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.8.1';
+const GAME_VERSION = 'v0.8.2';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -994,12 +994,13 @@ const SETPIECE_FAMILIES = [
       return result;
     },
     // exam: 4 steps with tight spacing, descending return path, turtle at exit
+    // v0.8.2: reduced peak 130→120, wider spacing 170→185, turtle pushed out for visibility
     exam(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
-      const width = 900;
+      const width = 950;
       const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_staircase_exam', obstacles: [] };
-      const heights = [50, 90, 130, 90]; // up-then-down — Lost Levels reversal
-      const spacing = 170, startX = chunkX + 80;
+      const heights = [50, 90, 120, 85]; // up-then-down — Lost Levels reversal (peak softened)
+      const spacing = 185, startX = chunkX + 90;
       for (let i = 0; i < heights.length; i++) {
         const px = startX + i * spacing;
         const h = heights[i];
@@ -1013,8 +1014,8 @@ const SETPIECE_FAMILIES = [
           result.obstacles.push({ type: 'brick', x: bx, y: by });
         }
       }
-      // Turtle at exit — punishes careless landing
-      result.turtleSpawns.push(startX + heights.length * spacing + 20);
+      // Turtle at exit — visible earlier due to increased gap
+      result.turtleSpawns.push(startX + heights.length * spacing + 60);
       return result;
     },
   },
@@ -1072,13 +1073,14 @@ const SETPIECE_FAMILIES = [
       return result;
     },
     // exam: 3 corridors rapid-fire, alternating heights, anti-pattern ceiling
+    // v0.8.2: widened passage gap (50→58), more exit space, turtle pushed out
     exam(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
       const maxTopH = Math.min(diffParams.maxTopH, groundY - 75);
-      const width = 900;
+      const width = 950;
       const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_corridor_exam', obstacles: [] };
-      const positions = [chunkX + 120, chunkX + 380, chunkX + 640];
-      const bottomHeights = [65, 85, 60]; // anti-pattern: tall then short
+      const positions = [chunkX + 140, chunkX + 400, chunkX + 660];
+      const bottomHeights = [60, 80, 55]; // anti-pattern: tall then short (peaks softened)
       for (let i = 0; i < positions.length; i++) {
         const px = positions[i];
         const bh = bottomHeights[i];
@@ -1086,13 +1088,13 @@ const SETPIECE_FAMILIES = [
         result.obstacles.push({ type: 'pipe_bottom', x: px, h: bh });
         const topOff = i === 1 ? -80 : 80; // middle one reverses
         const topX = px + topOff;
-        const topH = Math.min(maxTopH, groundY - bh - 50);
+        const topH = Math.min(maxTopH, groundY - bh - 58);
         if (topH >= 50 && topX > chunkX + 40 && topX < chunkX + width - 40) {
           result.pipes.push({ x: topX, h: topH, fromTop: true, scored: false });
           result.obstacles.push({ type: 'pipe_top', x: topX, h: topH });
         }
       }
-      result.turtleSpawns.push(chunkX + width - 80);
+      result.turtleSpawns.push(chunkX + width - 60);
       return result;
     },
   },
@@ -1146,23 +1148,24 @@ const SETPIECE_FAMILIES = [
       return result;
     },
     // exam: alternating high-low-high pipes requiring precise jump timing
+    // v0.8.2: tallest pipe 130→120, wider entry gap, turtle pushed out for visibility
     exam(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
-      const width = 900;
+      const width = 950;
       const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_precision_exam', obstacles: [] };
       // Lost Levels signature: high-low-high with tight horizontal spacing
       const pipeData = [
-        { x: chunkX + 130, h: 110 },
-        { x: chunkX + 310, h: 50 },  // low — tempts short jump
-        { x: chunkX + 480, h: 130 }, // tall — punishes momentum
-        { x: chunkX + 650, h: 65 },  // low again — rhythm reset
+        { x: chunkX + 150, h: 105 },  // entry pipe pulled in slightly
+        { x: chunkX + 330, h: 50 },   // low — tempts short jump
+        { x: chunkX + 500, h: 120 },  // tall — punishes momentum (peak softened)
+        { x: chunkX + 670, h: 60 },   // low again — rhythm reset
       ];
       for (const pd of pipeData) {
         result.pipes.push({ x: pd.x, h: pd.h, fromTop: false, scored: false });
         result.obstacles.push({ type: 'pipe_bottom', x: pd.x, h: pd.h });
       }
-      // Turtle after the gauntlet
-      result.turtleSpawns.push(chunkX + 780);
+      // Turtle after the gauntlet — visible earlier
+      result.turtleSpawns.push(chunkX + 810);
       return result;
     },
   },
@@ -1219,12 +1222,13 @@ const SETPIECE_FAMILIES = [
       return result;
     },
     // exam: double ladder — climb up, cross gap, climb second peak
+    // v0.8.2: peak2 140→130 (more margin from jump cap), wider exit, turtle pushed out
     exam(chunkX, diffParams) {
       const groundY = DESIGN_H - GROUND_H;
-      const width = 900;
+      const width = 950;
       const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_ladder_exam', obstacles: [] };
       // First peak
-      const peak1X = chunkX + 280, peak1H = 120;
+      const peak1X = chunkX + 280, peak1H = 115;
       result.pipes.push({ x: peak1X, h: peak1H, fromTop: false, scored: false });
       result.obstacles.push({ type: 'pipe_bottom', x: peak1X, h: peak1H });
       const steps1 = [
@@ -1236,28 +1240,29 @@ const SETPIECE_FAMILIES = [
         result.bricks.push(makeBrick(step.x, by, 0.2));
         result.obstacles.push({ type: 'brick', x: step.x, y: by });
       }
-      // Gap + second peak
-      const peak2X = chunkX + 600, peak2H = 140;
+      // Gap + second peak (softened from 140→130 for fairer jump margin)
+      const peak2X = chunkX + 600, peak2H = 130;
       result.pipes.push({ x: peak2X, h: Math.min(peak2H, CHUNK_PLAYER_MAX_JUMP_H - 5), fromTop: false, scored: false });
       result.obstacles.push({ type: 'pipe_bottom', x: peak2X, h: Math.min(peak2H, CHUNK_PLAYER_MAX_JUMP_H - 5) });
       // Bridge brick in the gap
       const bridgeX = chunkX + 440, bridgeY = groundY - 95;
       result.bricks.push(makeBrick(bridgeX, bridgeY, 0.3));
       result.obstacles.push({ type: 'brick', x: bridgeX, y: bridgeY });
-      result.turtleSpawns.push(chunkX + 750);
+      result.turtleSpawns.push(chunkX + 800);
       return result;
     },
   },
 ];
 
 // Breather set-piece (standalone, used after exam phases)
+// v0.8.2: widened 700→800, 5 bricks for longer recovery feel
 function generateBreatherSetPiece(chunkX, diffParams) {
   const groundY = DESIGN_H - GROUND_H;
-  const width = 700;
+  const width = 800;
   const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_breather', obstacles: [] };
   const brickY = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
-  for (let i = 0; i < 4; i++) {
-    const bx = chunkX + 120 + i * 130;
+  for (let i = 0; i < 5; i++) {
+    const bx = chunkX + 100 + i * 130;
     result.bricks.push(makeBrick(bx, brickY, 0.5));
     result.obstacles.push({ type: 'brick', x: bx, y: brickY });
   }
@@ -1272,6 +1277,7 @@ let setPieceChunkCounter = 0; // counts chunks since game start
 let setPieceAnnounceTimer = 0;
 let setPieceAnnounceName = '';
 let setPieceAnnounceColor = '';
+let postBreatherProtection = 0; // v0.8.2: chunks of safe-bias after breather
 
 // Build teach→remix→exam sequences at game start
 function initSetPieceState() {
@@ -1281,6 +1287,7 @@ function initSetPieceState() {
   setPieceAnnounceTimer = 0;
   setPieceAnnounceName = '';
   setPieceAnnounceColor = '';
+  postBreatherProtection = 0;
 
   const seqCount = SETPIECE_SEQUENCES_PER_RUN_MIN +
     Math.floor(rng() * (SETPIECE_SEQUENCES_PER_RUN_MAX - SETPIECE_SEQUENCES_PER_RUN_MIN + 1));
@@ -1809,6 +1816,10 @@ function spawnChunk() {
           consecutiveDangerChunks = 0;
           chunksSinceLastSafe = 0;
         }
+        // v0.8.2: post-breather protection — next 2 normal chunks biased safe
+        if (sp.role === 'breather') {
+          postBreatherProtection = 2;
+        }
         chunkDebugInfo = chunkRecord;
         // Trigger set-piece announcement with role prefix
         setPieceAnnounceTimer = SETPIECE_ANNOUNCE_DURATION;
@@ -1864,6 +1875,15 @@ function spawnChunk() {
     weights.rest = Math.max(weights.rest, 20 * safetyMult + 10);
     weights.pipe_mix *= (1 - 0.4 * safetyMult);
     weights.turtle_zone *= (1 - 0.5 * safetyMult);
+  }
+
+  // v0.8.2: post-breather protection — ease back into difficulty after exam→breather
+  if (postBreatherProtection > 0) {
+    weights.rest = Math.max(weights.rest, 30);
+    weights.single_platform = Math.max(weights.single_platform, 25);
+    weights.pipe_mix *= 0.3;
+    weights.double_platform *= 0.4;
+    postBreatherProtection--;
   }
 
   let type = selectChunkType(weights);
