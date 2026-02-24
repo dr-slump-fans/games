@@ -1811,6 +1811,29 @@ Updated `GAME_VERSION` from `v0.6.9` → **`v0.7.0`**.
 
 ---
 
+## v0.7.2 Step 2 — Memory / Object Pool Micro-Optimizations
+
+### Object Pools (GC pressure reduction)
+- **Lightweight `createPool()` utility**: generic acquire/release pool with `drainTo()` for free-list capping. Zero dependencies, ~20 LOC
+- **Pooled particle systems**: `scorePopups`, `timeBonusPopups`, `fragments` (brick debris), `hintSparks`, and `coinPops` now recycle objects instead of creating new ones each spawn. Dead objects are released back to their pool on removal
+- **Pooled collision rects**: `gatherCollisionRects()` (called every frame) now reuses a pre-allocated array and pooled rect objects — eliminates the largest per-frame allocation (previously ~20–40 new objects/frame)
+- **Swap-remove instead of splice**: all particle update loops now use swap-and-truncate removal (`arr[i] = arr[--n]; arr.length = n;`) instead of `Array.splice()`, avoiding O(n) shifts
+- **Pool cleanup on reset**: `resetGame()` releases all active pooled objects back to free-lists and trims pools to bounded sizes to prevent unbounded memory growth
+
+### Per-Frame Allocation Reduction
+- **In-place pipe/brick cleanup**: replaced `pipes.filter()` and `bricks.filter()` (every frame) with in-place compaction loops — zero array allocation
+- **Inlined `getPipeRects()` in collision gather**: pipe rect computation is now done directly inside `gatherCollisionRects()`, eliminating 3 intermediate objects per pipe per frame
+- **Cached `_timeBonusStr`**: the `+5s` draw string is pre-built once instead of template-literal per popup per frame
+- **Hoisted `_fragColors` array**: brick debris color palette moved to module scope (was re-created per `spawnBrickFragments()` call)
+
+### Observability (debug only)
+- Added **pool stats line** to `?debug=1` overlay: shows active counts (popups, fragments, sparks, collision rects) and pool free-list sizes — useful for verifying pool reuse without external tooling
+
+### Version
+Updated `GAME_VERSION` from `v0.7.1` → **`v0.7.2`**.
+
+---
+
 ## v0.7.1 Step 1 — Performance & Smoothness Micro-Optimizations
 
 ### Performance (mobile-first)

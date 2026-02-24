@@ -283,7 +283,37 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.7.1';
+const GAME_VERSION = 'v0.7.2';
+
+// ── Lightweight Object Pool ──────────────────────────
+// Reduces GC pressure from short-lived particles/popups.
+// Each pool stores recycled objects; acquire() returns a recycled or new object,
+// release() returns it to the free list.
+function createPool(factory) {
+  const free = [];
+  let totalCreated = 0;
+  return {
+    acquire() {
+      if (free.length > 0) return free.pop();
+      totalCreated++;
+      return factory();
+    },
+    release(obj) { free.push(obj); },
+    stats() { return { free: free.length, created: totalCreated }; },
+    drainTo(limit) { if (free.length > limit) free.length = limit; },
+  };
+}
+
+const scorePopupPool = createPool(() => ({ x: 0, y: 0, text: '', life: 0, color: null, scale: null }));
+const timeBonusPopupPool = createPool(() => ({ x: 0, y: 0, life: 0 }));
+const fragmentPool = createPool(() => ({ x: 0, y: 0, vx: 0, vy: 0, size: 0, color: '', life: 0 }));
+const hintSparkPool = createPool(() => ({ x: 0, y: 0, vy: 0, life: 0, maxLife: 0 }));
+const coinPopPool = createPool(() => ({ x: 0, y: 0, vy: 0, life: 0, maxLife: 0 }));
+const collisionRectPool = createPool(() => ({ x: 0, y: 0, w: 0, h: 0, type: '', standY: null, brickRef: null }));
+
+// Pre-allocated collision rect array — reused each frame to avoid per-frame allocation
+let _collRects = [];
+let _collRectsLen = 0;
 
 // ── Daily Seed & Deterministic RNG ────────────────────
 function getDailyDateStr() {
@@ -493,6 +523,7 @@ const BRICK_W = 32;
 const BRICK_H = 24;
 const BRICK_SCORE = 5;            // points per brick broken
 const BRICK_TIME_BONUS = 5;       // seconds added to survival timer per brick broken
+const _timeBonusStr = '+' + BRICK_TIME_BONUS + 's'; // cached draw string
 const BRICK_FRAGMENT_COUNT = 6;   // number of debris fragments
 const BRICK_SPAWN_CHANCE = 0.30;  // chance to spawn brick with pipe group
 const STANDALONE_BRICK_MIN_COUNT = 1;
@@ -2818,19 +2849,24 @@ function drawRevealedHiddenBlock(bx, by) {
 // ── Coin Pop Animation ──────────────────────────────────
 // Each coinPop: { x, y, vy, life }
 function spawnCoinPop(x, y) {
-  coinPops.push({ x: x, y: y - 4, vy: -6, life: 40, maxLife: 40 });
+  const c = coinPopPool.acquire();
+  c.x = x; c.y = y - 4; c.vy = -6; c.life = 40; c.maxLife = 40;
+  coinPops.push(c);
 }
 
 function updateCoinPops() {
-  for (let i = coinPops.length - 1; i >= 0; i--) {
+  let n = coinPops.length;
+  for (let i = n - 1; i >= 0; i--) {
     const c = coinPops[i];
     c.y += c.vy;
     c.vy += 0.2; // gravity
     c.life--;
     if (c.life <= 0) {
-      coinPops.splice(i, 1);
+      coinPopPool.release(c);
+      coinPops[i] = coinPops[--n];
     }
   }
+  coinPops.length = n;
 }
 
 function updateBrickBumps() {
@@ -3567,26 +3603,27 @@ function drawFragment(frag) {
   ctx.fillRect(Math.round(frag.x), Math.round(frag.y), frag.size, frag.size);
 }
 
-// Spawn a floating score popup
+// Spawn a floating score popup (pooled)
 function spawnScorePopup(x, y, points) {
-  scorePopups.push({
-    x: x,
-    y: y,
-    text: `+${points}`,
-    life: 38,
-  });
+  const p = scorePopupPool.acquire();
+  p.x = x; p.y = y; p.text = '+' + points; p.life = 38;
+  p.color = null; p.scale = null;
+  scorePopups.push(p);
 }
 
-// Update score popups
+// Update score popups (pooled — swap-remove to avoid splice)
 function updateScorePopups() {
-  for (let i = scorePopups.length - 1; i >= 0; i--) {
+  let n = scorePopups.length;
+  for (let i = n - 1; i >= 0; i--) {
     const p = scorePopups[i];
     p.y -= 1.2; // float upward
     p.life--;
     if (p.life <= 0) {
-      scorePopups.splice(i, 1);
+      scorePopupPool.release(p);
+      scorePopups[i] = scorePopups[--n];
     }
   }
+  scorePopups.length = n;
 }
 
 // Draw score popups
@@ -3707,16 +3744,20 @@ function handlePlayerHurt() {
 let timeBonusPopups = []; // { x, y, life }
 
 function spawnTimeBonusPopup(x, y) {
-  timeBonusPopups.push({ x: x, y: y, life: 60 });
+  const p = timeBonusPopupPool.acquire();
+  p.x = x; p.y = y; p.life = 60;
+  timeBonusPopups.push(p);
 }
 
 function updateTimeBonusPopups() {
-  for (let i = timeBonusPopups.length - 1; i >= 0; i--) {
+  let n = timeBonusPopups.length;
+  for (let i = n - 1; i >= 0; i--) {
     const p = timeBonusPopups[i];
     p.y -= 0.8;
     p.life--;
-    if (p.life <= 0) timeBonusPopups.splice(i, 1);
+    if (p.life <= 0) { timeBonusPopupPool.release(p); timeBonusPopups[i] = timeBonusPopups[--n]; }
   }
+  timeBonusPopups.length = n;
 }
 
 function drawTimeBonusPopups() {
@@ -3728,54 +3769,59 @@ function drawTimeBonusPopups() {
     ctx.fillStyle = '#2ecc71';
     ctx.strokeStyle = '#145a2a';
     ctx.lineWidth = 2;
-    ctx.strokeText(`+${BRICK_TIME_BONUS}s`, Math.round(p.x), Math.round(p.y));
-    ctx.fillText(`+${BRICK_TIME_BONUS}s`, Math.round(p.x), Math.round(p.y));
+    ctx.strokeText(_timeBonusStr, Math.round(p.x), Math.round(p.y));
+    ctx.fillText(_timeBonusStr, Math.round(p.x), Math.round(p.y));
     ctx.restore();
   }
 }
 
-// Spawn debris fragments when a brick breaks
+// Spawn debris fragments when a brick breaks (pooled)
+const _fragColors = ['#c8874a', '#daa06d', '#8b5e3c', '#a07040', '#6b4226', '#f4d03f'];
 function spawnBrickFragments(bx, by) {
-  const colors = ['#c8874a', '#daa06d', '#8b5e3c', '#a07040', '#6b4226', '#f4d03f'];
   for (let i = 0; i < BRICK_FRAGMENT_COUNT; i++) {
     const angle = (Math.PI * 2 * i) / BRICK_FRAGMENT_COUNT + (Math.random() - 0.5) * 0.5;
     const speed = 2.5 + Math.random() * 3;
-    fragments.push({
-      x: bx + BRICK_W / 2 + (Math.random() - 0.5) * BRICK_W * 0.6,
-      y: by + BRICK_H / 2 + (Math.random() - 0.5) * BRICK_H * 0.4,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 3 - Math.random() * 2, // bias upward initially
-      size: 3 + Math.floor(Math.random() * 5),
-      color: colors[Math.floor(Math.random() * colors.length)],
-      life: 40 + Math.floor(Math.random() * 20), // frames before despawn
-    });
+    const f = fragmentPool.acquire();
+    f.x = bx + BRICK_W / 2 + (Math.random() - 0.5) * BRICK_W * 0.6;
+    f.y = by + BRICK_H / 2 + (Math.random() - 0.5) * BRICK_H * 0.4;
+    f.vx = Math.cos(angle) * speed;
+    f.vy = Math.sin(angle) * speed - 3 - Math.random() * 2;
+    f.size = 3 + Math.floor(Math.random() * 5);
+    f.color = _fragColors[Math.floor(Math.random() * _fragColors.length)];
+    f.life = 40 + Math.floor(Math.random() * 20);
+    fragments.push(f);
   }
 }
 
-// Update all fragments (gravity + movement + lifetime)
+// Update all fragments (gravity + movement + lifetime) — pooled swap-remove
 function updateFragments() {
-  for (let i = fragments.length - 1; i >= 0; i--) {
+  let n = fragments.length;
+  for (let i = n - 1; i >= 0; i--) {
     const f = fragments[i];
     f.vy += 0.35; // gravity on fragments
     f.x += f.vx;
     f.y += f.vy;
     f.life--;
     if (f.life <= 0 || f.y > DESIGN_H + 20) {
-      fragments.splice(i, 1);
+      fragmentPool.release(f);
+      fragments[i] = fragments[--n];
     }
   }
+  fragments.length = n;
 }
 
 // ── Hidden Block Hint Sparks ──────────────────────────
 // Check proximity to unrevealed hidden blocks and spawn subtle sparks
 function updateHintSparks() {
-  // Update existing sparks
-  for (let i = hintSparks.length - 1; i >= 0; i--) {
+  // Update existing sparks (pooled swap-remove)
+  let n = hintSparks.length;
+  for (let i = n - 1; i >= 0; i--) {
     const s = hintSparks[i];
     s.y += s.vy;
     s.life--;
-    if (s.life <= 0) { hintSparks.splice(i, 1); }
+    if (s.life <= 0) { hintSparkPool.release(s); hintSparks[i] = hintSparks[--n]; }
   }
+  hintSparks.length = n;
   // Throttle spawning
   hintSparkTimer++;
   if (hintSparkTimer < HIDDEN_HINT_FREQ) return;
@@ -3789,14 +3835,13 @@ function updateHintSparks() {
     const dx = Math.abs(px - bCenterX);
     // Player must be horizontally close and below the block (within ~1.5 block heights)
     if (dx < HIDDEN_HINT_RANGE && py > brick.y && py < brick.y + brick.h + 50) {
-      // Spawn one tiny spark near the hidden block (randomized position)
-      hintSparks.push({
-        x: brick.x + Math.random() * brick.w,
-        y: brick.y + brick.h + Math.random() * 4,
-        vy: -0.5 - Math.random() * 0.5,
-        life: 18,
-        maxLife: 18,
-      });
+      // Spawn one tiny spark near the hidden block (pooled)
+      const sp = hintSparkPool.acquire();
+      sp.x = brick.x + Math.random() * brick.w;
+      sp.y = brick.y + brick.h + Math.random() * 4;
+      sp.vy = -0.5 - Math.random() * 0.5;
+      sp.life = 18; sp.maxLife = 18;
+      hintSparks.push(sp);
       break; // only one spark per check
     }
   }
@@ -3860,26 +3905,37 @@ function collisionSafeMoveX(dx) {
   return safeDX;
 }
 
-// Gather all solid collision AABBs in the world.
-// Each rect: { x, y, w, h, type }
+// Gather all solid collision AABBs in the world (pooled — zero per-frame allocation).
+// Each rect: { x, y, w, h, type, standY, brickRef }
 // type: 'ground' | 'pipe_lip' | 'pipe_body' | 'brick' | 'ceiling_pipe_lip' | 'ceiling_pipe_body'
+function _pushCollRect(x, y, w, h, type, standY, brickRef) {
+  const r = collisionRectPool.acquire();
+  r.x = x; r.y = y; r.w = w; r.h = h; r.type = type;
+  r.standY = standY || null; r.brickRef = brickRef || null;
+  _collRects[_collRectsLen++] = r;
+}
 function gatherCollisionRects() {
-  const rects = [];
+  // Release previous frame's rects back to pool
+  for (let i = 0; i < _collRectsLen; i++) collisionRectPool.release(_collRects[i]);
+  _collRectsLen = 0;
+
   const groundY = DESIGN_H - GROUND_H;
 
   // Ground (extends infinitely left/right, thick enough to never tunnel)
-  rects.push({ x: player.x - 2000, y: groundY, w: 4000, h: 500, type: 'ground' });
+  _pushCollRect(player.x - 2000, groundY, 4000, 500, 'ground', null, null);
 
   // Pipes
+  const lipOffset = (LIP_W - PIPE_W) / 2;
   for (const pipe of pipes) {
     if (pipe.h <= 0) continue;
-    const pr = getPipeRects(pipe);
     if (!pipe.fromTop) {
-      rects.push({ x: pr.lipRect.x, y: pr.lipRect.y, w: pr.lipRect.w, h: pr.lipRect.h, type: 'pipe_lip', standY: pr.standY });
-      rects.push({ x: pr.bodyRect.x, y: pr.bodyRect.y, w: pr.bodyRect.w, h: pr.bodyRect.h, type: 'pipe_body' });
+      const topY = groundY - pipe.h;
+      _pushCollRect(pipe.x, topY, LIP_W, LIP_H, 'pipe_lip', topY, null);
+      _pushCollRect(pipe.x + lipOffset, topY + LIP_H, PIPE_W, pipe.h - LIP_H, 'pipe_body', null, null);
     } else {
-      rects.push({ x: pr.lipRect.x, y: pr.lipRect.y, w: pr.lipRect.w, h: pr.lipRect.h, type: 'ceiling_pipe_lip' });
-      rects.push({ x: pr.bodyRect.x, y: pr.bodyRect.y, w: pr.bodyRect.w, h: pr.bodyRect.h, type: 'ceiling_pipe_body' });
+      const bottomY = pipe.h;
+      _pushCollRect(pipe.x, bottomY - LIP_H, LIP_W, LIP_H, 'ceiling_pipe_lip', null, null);
+      _pushCollRect(pipe.x + lipOffset, 0, PIPE_W, pipe.h - LIP_H, 'ceiling_pipe_body', null, null);
     }
   }
 
@@ -3887,10 +3943,12 @@ function gatherCollisionRects() {
   for (const brick of bricks) {
     if (brick.broken) continue;
     if (brick.hidden && !brick.revealed) continue;
-    rects.push({ x: brick.x, y: brick.y, w: brick.w, h: brick.h, type: 'brick', brickRef: brick });
+    _pushCollRect(brick.x, brick.y, brick.w, brick.h, 'brick', null, brick);
   }
 
-  return rects;
+  // Return a view of the reused array (length = _collRectsLen)
+  _collRects.length = _collRectsLen;
+  return _collRects;
 }
 
 // ── Swept AABB ──────────────────────────────────────────
@@ -4781,11 +4839,16 @@ function resetGame() {
   player.wasOnGround = true;
   pipes = [];
   bricks = [];
+  // Release pooled particles back before clearing
+  for (let i = 0; i < fragments.length; i++) fragmentPool.release(fragments[i]);
   fragments = [];
+  for (let i = 0; i < hintSparks.length; i++) hintSparkPool.release(hintSparks[i]);
   hintSparks = [];
   hintSparkTimer = 0;
+  for (let i = 0; i < scorePopups.length; i++) scorePopupPool.release(scorePopups[i]);
   scorePopups = [];
   milestonePipeCount = 0;
+  for (let i = 0; i < timeBonusPopups.length; i++) timeBonusPopupPool.release(timeBonusPopups[i]);
   timeBonusPopups = [];
   mushrooms = [];
   turtles = [];
@@ -4794,7 +4857,15 @@ function resetGame() {
   score = 0;
   coins = 0;
   lives = INITIAL_LIVES;
+  for (let i = 0; i < coinPops.length; i++) coinPopPool.release(coinPops[i]);
   coinPops = [];
+  // Trim pool free-lists to prevent unbounded growth
+  fragmentPool.drainTo(50);
+  scorePopupPool.drainTo(20);
+  coinPopPool.drainTo(10);
+  hintSparkPool.drainTo(20);
+  timeBonusPopupPool.drainTo(10);
+  collisionRectPool.drainTo(80);
   coinComboLevel = 0;
   coinComboTimer = 0;
   frameCount = 0;
@@ -5715,16 +5786,20 @@ function update() {
       milestonePipeCount++;
       if (milestonePipeCount % 10 === 0) {
         score += 5;
-        scorePopups.push({ x: player.x, y: player.y - 30, text: 'MILESTONE +5', life: 60 });
+        { const mp = scorePopupPool.acquire(); mp.x = player.x; mp.y = player.y - 30; mp.text = 'MILESTONE +5'; mp.life = 60; mp.color = null; mp.scale = null; scorePopups.push(mp); }
       }
     }
   }
 
-  // Remove off-screen pipes (far behind camera)
-  pipes = pipes.filter(p => p.x > cameraX - LIP_W - 100);
+  // Remove off-screen pipes — in-place compaction (avoids filter() allocation)
+  { let w = 0; const cutoff = cameraX - LIP_W - 100;
+    for (let i = 0; i < pipes.length; i++) { if (pipes[i].x > cutoff) pipes[w++] = pipes[i]; }
+    pipes.length = w; }
 
-  // Remove off-screen or broken bricks (far behind camera)
-  bricks = bricks.filter(b => !b.broken && b.x > cameraX - BRICK_W - 100);
+  // Remove off-screen or broken bricks — in-place compaction
+  { let w = 0; const cutoff = cameraX - BRICK_W - 100;
+    for (let i = 0; i < bricks.length; i++) { const b = bricks[i]; if (!b.broken && b.x > cutoff) bricks[w++] = b; }
+    bricks.length = w; }
 
   // Remove off-screen turtles handled inside updateTurtles()
 
@@ -6544,6 +6619,9 @@ function draw() {
     ctx.fillText(`CHUNK:${cdi ? '#' + cdi.id + ' ' + cdi.type : '-'} PHASE:${cdi ? chunkPhaseNames[cdi.diffPhase] || cdi.diffPhase : '-'} REROLLS:${cdi ? cdi.rerolls : 0} NEXT_X:${Math.round(nextChunkX)} TOTAL:${chunkIdCounter} CONSEC_DANGER:${consecutiveDangerChunks}`, 4, DESIGN_H - 74);
     ctx.fillText(`THEME:${currentTheme} REMAIN:${themeChunksRemaining} NEXT:${nextTheme || '-'} TRANSITION:${themeTransitionActive ? 'YES' : 'NO'} COLOR_LERP:${themeColorLerp.toFixed(2)}`, 4, DESIGN_H - 84);
     ctx.fillText(`SECTION:${currentSection} REMAIN:${sectionChunksRemaining} TRANSITION:${sectionTransitionActive ? 'YES' : 'NO'} RAMP:${sectionTransitionCountdown} FLASH:${sectionFlashTimer}`, 4, DESIGN_H - 94);
+    // Pool stats — active counts + pool free-list sizes
+    const _ps = scorePopupPool.stats(), _pf = fragmentPool.stats(), _pc = collisionRectPool.stats(), _ph = hintSparkPool.stats();
+    ctx.fillText(`POOL act:pop${scorePopups.length} frag${fragments.length} spark${hintSparks.length} coll${_collRectsLen} | free:pop${_ps.free} frag${_pf.free} spark${_ph.free} coll${_pc.free}`, 4, DESIGN_H - 104);
     ctx.restore();
   }
 
