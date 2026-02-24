@@ -227,6 +227,17 @@ canvas {
   text-align: center;
   line-height: 1.6;
 }
+#hud-terrain-announce {
+  position: absolute; top: 18%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 22px; font-weight: bold;
+  color: #7fff7f; text-shadow: 2px 2px 0 #000, 0 0 12px rgba(127,255,127,0.6);
+  pointer-events: none;
+  display: none;
+  z-index: 13;
+  letter-spacing: 3px;
+  text-align: center;
+}
 </style>
 </head>
 <body>
@@ -271,6 +282,7 @@ canvas {
 <div id="hud-theme-announce"></div>
 <div id="hud-section-announce"></div>
 <div id="hud-setpiece-announce"></div>
+<div id="hud-terrain-announce"></div>
 <div id="hud-settings">
   <div class="toggle-btn" id="btn-sfx">SFX ON</div>
   <div class="toggle-btn" id="btn-vib">VIB ON</div>
@@ -297,7 +309,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.9.0';
+const GAME_VERSION = 'v0.9.1';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -1397,6 +1409,24 @@ let chunksSinceLastSafe = 0;      // tracks chunks since last safe/reward chunk
 let nextChunkX = 0;               // world X where next chunk starts
 let chunkDebugInfo = null;        // latest chunk debug info for overlay
 
+// v0.9.1: Early terrain visibility guarantee — force all 3 new types in first ~1800 world x
+// Schedule uses setPieceChunkCounter indices (1st spawnChunk=1, 2nd=2, etc.)
+// Chunk widths ~600-900px, starting x ~240, so chunk 2 starts around x≈840-1140
+// Each terrain chunk itself provides ~600-900px of spacing → recognizable interval
+const EARLY_TERRAIN_SCHEDULE = [
+  { chunkIdx: 2, type: 'rolling_hills', label: 'ROLLING HILLS', color: '#7fff7f' },
+  { chunkIdx: 3, type: 'bridge',        label: 'BRIDGE',        color: '#7fc4ff' },
+  { chunkIdx: 4, type: 'island_hop',    label: 'ISLAND HOP',    color: '#ffcf7f' },
+];
+let earlyTerrainIdx = 0;          // next index in EARLY_TERRAIN_SCHEDULE to use
+let earlyTerrainSeen = {};        // { rolling_hills: {id, x}, bridge: {id, x}, island_hop: {id, x} }
+
+// v0.9.1: Terrain type announce HUD (big text for first appearance)
+const TERRAIN_ANNOUNCE_FRAMES = 100; // ~1.67s at 60fps
+let terrainAnnounceTimer = 0;
+let terrainAnnounceName = '';
+let terrainAnnounceColor = '';
+
 // Get interpolated chunk difficulty parameters at current survival time
 function getChunkDiffPhase() {
   const t = survivalTime;
@@ -1828,14 +1858,15 @@ function generateChunk(chunkX, type, diffParams) {
       const startX = chunkX + 80 + rng() * 40;
 
       // Section-biased shape: UNDERWORLD = low+dense, TOWER = tall+vertical, default = medium
+      // v0.9.1: amplitudes boosted for clearer silhouette contrast
       const sectionBias = (typeof currentSection !== 'undefined') ? currentSection : '';
       let baseH, amplitude;
       if (sectionBias === 'UNDERWORLD') {
-        baseH = 45; amplitude = 25; // low dense undulation
+        baseH = 50; amplitude = 35; // low dense undulation (was 45/25)
       } else if (sectionBias === 'TOWER') {
-        baseH = 70; amplitude = 45; // tall vertical steps
+        baseH = 75; amplitude = 55; // tall vertical steps (was 70/45)
       } else {
-        baseH = 55; amplitude = 35; // default medium wave
+        baseH = 60; amplitude = 45; // default medium wave (was 55/35)
       }
       const capH = Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H);
 
@@ -1884,17 +1915,18 @@ function generateChunk(chunkX, type, diffParams) {
       // Main route is always ground-level (safe), optional upper route for reward
 
       // Section-biased shape
+      // v0.9.1: taller pillars + deeper ceiling for stronger silhouette contrast
       const sectionBias2 = (typeof currentSection !== 'undefined') ? currentSection : '';
       let bridgeCeilH, floorPipeH;
       if (sectionBias2 === 'UNDERWORLD') {
-        bridgeCeilH = 90 + Math.floor(rng() * 40);  // lower ceiling = more cramped
-        floorPipeH = 30 + Math.floor(rng() * 20);   // very low floor bumps
+        bridgeCeilH = 100 + Math.floor(rng() * 40);  // lower ceiling = more cramped (was 90)
+        floorPipeH = 40 + Math.floor(rng() * 25);    // taller floor bumps (was 30/20)
       } else if (sectionBias2 === 'TOWER') {
-        bridgeCeilH = 60 + Math.floor(rng() * 30);  // higher ceiling
-        floorPipeH = 50 + Math.floor(rng() * 30);   // taller entry/exit pillars
+        bridgeCeilH = 70 + Math.floor(rng() * 30);   // higher ceiling (was 60)
+        floorPipeH = 60 + Math.floor(rng() * 30);    // taller entry/exit pillars (was 50)
       } else {
-        bridgeCeilH = 75 + Math.floor(rng() * 35);
-        floorPipeH = 40 + Math.floor(rng() * 25);
+        bridgeCeilH = 85 + Math.floor(rng() * 35);   // (was 75)
+        floorPipeH = 50 + Math.floor(rng() * 25);    // (was 40)
       }
 
       // Ensure clearance is safe: ceiling bottom must leave enough room
@@ -1957,20 +1989,21 @@ function generateChunk(chunkX, type, diffParams) {
       // Each island is a short pipe (low-medium height) with narrow landing zones
       // Tests precise lateral movement and jump timing
 
+      // v0.9.1: wider height range + gaps for clearer island silhouette
       const sectionBias3 = (typeof currentSection !== 'undefined') ? currentSection : '';
       let islandCount, heightRange, gapRange;
       if (sectionBias3 === 'UNDERWORLD') {
         islandCount = 4 + (rng() < 0.3 ? 1 : 0);  // 4-5 dense islands
-        heightRange = { min: 35, max: 70 };
-        gapRange = { min: 80, max: 120 };           // tight spacing
+        heightRange = { min: 35, max: 80 };         // (was max 70)
+        gapRange = { min: 90, max: 130 };           // slightly wider (was 80/120)
       } else if (sectionBias3 === 'TOWER') {
         islandCount = 3 + (rng() < 0.4 ? 1 : 0);  // 3-4 islands
-        heightRange = { min: 50, max: 110 };
-        gapRange = { min: 100, max: 160 };          // wider with height variance
+        heightRange = { min: 45, max: 120 };        // bigger range (was 50/110)
+        gapRange = { min: 110, max: 170 };          // wider gaps (was 100/160)
       } else {
         islandCount = 3 + (rng() < 0.5 ? 1 : 0);  // 3-4 islands
-        heightRange = { min: 40, max: 90 };
-        gapRange = { min: 90, max: 140 };           // moderate
+        heightRange = { min: 35, max: 100 };        // bigger range (was 40/90)
+        gapRange = { min: 100, max: 150 };          // wider gaps (was 90/140)
       }
 
       const capH2 = Math.min(maxPipeH, CHUNK_PLAYER_MAX_JUMP_H);
@@ -2133,6 +2166,68 @@ function spawnChunk() {
     setPieceNextIdx++;
   }
 
+  // v0.9.1: Early terrain visibility guarantee — force scheduled types in first few chunks
+  if (earlyTerrainIdx < EARLY_TERRAIN_SCHEDULE.length) {
+    const etEntry = EARLY_TERRAIN_SCHEDULE[earlyTerrainIdx];
+    if (setPieceChunkCounter >= etEntry.chunkIdx) {
+      earlyTerrainIdx++;
+      const diffParams = getChunkDiffPhase();
+      const sectionedParams = applySectionParams(
+        applyThemeParams(diffParams, currentTheme, themeTransitionActive),
+        currentSection, sectionTransitionActive
+      );
+      const chunk = generateChunk(nextChunkX, etEntry.type, sectionedParams);
+      // Commit chunk (same pattern as normal path)
+      for (const p of chunk.pipes) pipes.push(p);
+      for (const b of chunk.bricks) {
+        if (b.hidden) { bricks.push(b); continue; }
+        let overlaps = false;
+        for (const existing of bricks) {
+          if (existing.broken) continue;
+          if (existing.hidden && !existing.revealed) continue;
+          if (rectsOverlap(b.x, b.y, b.w, b.h, existing.x - 8, existing.y - 8, existing.w + 16, existing.h + 16)) {
+            overlaps = true; break;
+          }
+        }
+        if (!overlaps) bricks.push(b);
+      }
+      const turtleMult = THEME_PARAM_OFFSETS[currentTheme].turtleChanceMult;
+      for (const tx of chunk.turtleSpawns) {
+        if (tx - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP) {
+          if (turtleMult >= 1 || rng() < turtleMult) spawnTurtle(tx);
+        }
+      }
+      if (chunk.pipes.length === 0) {
+        pipes.push({ x: nextChunkX + chunk.width / 2, h: 0, fromTop: false, scored: false });
+      }
+      const chunkId = ++chunkIdCounter;
+      const chunkRecord = {
+        id: chunkId, type: etEntry.type, x: nextChunkX, width: chunk.width,
+        diffPhase: diffParams.phase, rerolls: 0, reachable: true, theme: currentTheme,
+      };
+      chunkHistory.push(chunkRecord);
+      if (chunkHistory.length > 20) chunkHistory.shift();
+      if (isChunkDangerous(etEntry.type)) { consecutiveDangerChunks++; } else { consecutiveDangerChunks = 0; }
+      if (isChunkSafe(etEntry.type)) { chunksSinceLastSafe = 0; } else { chunksSinceLastSafe++; }
+      chunkDebugInfo = chunkRecord;
+      // Terrain announce + debug log for non-spacer types
+      if (etEntry.label) {
+        terrainAnnounceTimer = TERRAIN_ANNOUNCE_FRAMES;
+        terrainAnnounceName = etEntry.label;
+        terrainAnnounceColor = etEntry.color;
+        earlyTerrainSeen[etEntry.type] = { id: chunkId, x: Math.round(nextChunkX) };
+        console.log(`%c[v0.9.1 EarlyTerrain] ${etEntry.type} first at chunk #${chunkId} x=${Math.round(nextChunkX)}`, 'color: ' + etEntry.color + '; font-weight: bold');
+      }
+      if (DEBUG_MODE) {
+        console.log(`%c[Chunk] #${chunkId} type=${etEntry.type} theme=${currentTheme} section=${currentSection} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} [EARLY_TERRAIN]`, 'color: #42d4f4');
+      }
+      nextChunkX += chunk.width;
+      advanceThemeState();
+      advanceSectionState();
+      return;
+    }
+  }
+
   const diffParams = getChunkDiffPhase();
   // Apply theme parameter offsets (pipe heights etc.)
   const themedParams = applyThemeParams(diffParams, currentTheme, themeTransitionActive);
@@ -2290,6 +2385,13 @@ function spawnInitialChunks() {
   chunksSinceLastSafe = 0;
   nextChunkX = cameraX + DESIGN_W * 0.3; // start generating a bit ahead of player
   chunkDebugInfo = null;
+
+  // v0.9.1: Reset early terrain guarantee state
+  earlyTerrainIdx = 0;
+  earlyTerrainSeen = {};
+  terrainAnnounceTimer = 0;
+  terrainAnnounceName = '';
+  terrainAnnounceColor = '';
 
   // Initialize theme state machine
   initThemeState();
@@ -2676,6 +2778,7 @@ const hudTheme = document.getElementById('hud-theme');
 const hudThemeAnnounce = document.getElementById('hud-theme-announce');
 const hudSectionAnnounce = document.getElementById('hud-section-announce');
 const hudSetpieceAnnounce = document.getElementById('hud-setpiece-announce');
+const hudTerrainAnnounce = document.getElementById('hud-terrain-announce');
 const hudSectionLabel = document.getElementById('hud-section-label');
 const btnSfx = document.getElementById('btn-sfx');
 const btnVib = document.getElementById('btn-vib');
@@ -6219,6 +6322,8 @@ function update() {
   if (sectionFlashTimer > 0) sectionFlashTimer--;
   // Set-piece announce timer countdown
   if (setPieceAnnounceTimer > 0) setPieceAnnounceTimer--;
+  // v0.9.1: Terrain announce timer countdown
+  if (terrainAnnounceTimer > 0) terrainAnnounceTimer--;
   // Smooth theme color transition (lerp toward 1 over ~2 seconds)
   if (themeColorLerp < 1) {
     themeColorLerp = Math.min(1, themeColorLerp + 0.008); // ~125 frames ≈ 2s
@@ -6891,6 +6996,16 @@ function update() {
     hudSetpieceAnnounce.style.opacity = Math.min(1, setPieceAnnounceTimer / 30);
   } else {
     hudSetpieceAnnounce.style.display = 'none';
+  }
+
+  // v0.9.1: Terrain type announce (big text, top area — doesn't block gameplay)
+  if (terrainAnnounceTimer > 0 && terrainAnnounceName) {
+    hudTerrainAnnounce.textContent = '\u25b6 ' + terrainAnnounceName + ' \u25c0';
+    hudTerrainAnnounce.style.color = terrainAnnounceColor || '#7fff7f';
+    hudTerrainAnnounce.style.display = 'block';
+    hudTerrainAnnounce.style.opacity = Math.min(1, terrainAnnounceTimer / 30);
+  } else {
+    hudTerrainAnnounce.style.display = 'none';
   }
 
   // Persistent section label with highlight glow on transition
@@ -7690,6 +7805,7 @@ function showOverlay(title, msg, sc) {
   hudBossClear.style.display = 'none';
   hudThemeAnnounce.style.display = 'none';
   hudSectionAnnounce.style.display = 'none';
+  hudTerrainAnnounce.style.display = 'none';
   hudSectionLabel.classList.remove('highlight');
   hudSectionLabel.style.color = '#aaa';
 }

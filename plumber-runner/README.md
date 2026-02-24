@@ -2066,6 +2066,61 @@ Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
 
 ---
 
+## v0.9.1 — Visible Change Guarantee (Early Terrain Showcase)
+
+### Design Intent
+Ensures every player sees all three new terrain types (`rolling_hills`, `bridge`, `island_hop`) within the first ~60 seconds of gameplay. Previously these types appeared via weighted random selection and could be delayed or skipped entirely in early runs — undermining the v0.9.0 map richness investment.
+
+### Early Terrain Schedule (Forced)
+`spawnChunk()` calls 2-4 (after initial rest + one normal chunk) follow a fixed sequence:
+
+| spawnChunk # | Type | Approx. World X |
+|--------------|------|-----------------|
+| 2 | `rolling_hills` | ~840-1140 |
+| 3 | `bridge` | ~1500-1900 |
+| 4 | `island_hop` | ~2100-2700 |
+
+Each terrain chunk is ~600-900px wide, providing natural visual spacing between types. After chunk 4, normal weighted random selection resumes.
+
+### Terrain Announce HUD
+Each new terrain type triggers a large text announcement at the top of the screen (18% from top, `font-size: 22px`):
+- **ROLLING HILLS** (green `#7fff7f`)
+- **BRIDGE** (blue `#7fc4ff`)
+- **ISLAND HOP** (orange `#ffcf7f`)
+
+Announcements display for ~1.67 seconds with fade-out, positioned above gameplay area to avoid blocking player vision.
+
+### Silhouette Contrast Boost
+All three terrain types received parameter increases for stronger visual differentiation:
+
+| Type | Change | Before → After |
+|------|--------|----------------|
+| `rolling_hills` | Default amplitude | 35 → 45, base 55 → 60 |
+| `bridge` | Default ceiling/pillar height | ceil 75 → 85, floor 40 → 50 |
+| `island_hop` | Default height range/gaps | max 90 → 100, gaps 90-140 → 100-150 |
+
+No collision rules or enemy behavior changed.
+
+### Debug / QA Verification
+On every game start, the console logs each forced terrain's first appearance:
+```
+[v0.9.1 EarlyTerrain] rolling_hills first at chunk #2 x=840
+[v0.9.1 EarlyTerrain] bridge first at chunk #4 x=1680
+[v0.9.1 EarlyTerrain] island_hop first at chunk #6 x=2520
+```
+These logs appear unconditionally (not gated by `DEBUG_MODE`) for easy QA verification.
+
+### Acceptance Criteria
+1. Start a new game → all 3 terrain types appear before world x ≈ 3000
+2. Each terrain triggers a visible HUD announcement
+3. Console shows `[v0.9.1 EarlyTerrain]` logs with chunk IDs and x coordinates
+4. Terrain shapes are visually distinct from each other and from standard chunks
+
+### Version
+Updated `GAME_VERSION` from `v0.9.0` → **`v0.9.1`**.
+
+---
+
 ## v0.9.0 Step 1 — Map Richness: Terrain Variety & Route Layering
 
 ### Design Intent
@@ -2097,9 +2152,9 @@ New terrain types respond to the active **rhythm section** (`UNDERWORLD` / `TOWE
 
 | Section | `rolling_hills` | `bridge` | `island_hop` |
 |---------|-----------------|----------|-------------|
-| **UNDERWORLD** | Low dense undulation (base 45, amp 25) | Lower ceiling, very low floor bumps | 4-5 dense islands, tight 80-120px gaps |
-| **TOWER** | Tall vertical steps (base 70, amp 45) | Higher ceiling, taller pillars | 3-4 islands, wider 100-160px gaps, more height variance |
-| **Default** | Medium wave (base 55, amp 35) | Standard clearance | 3-4 islands, moderate spacing |
+| **UNDERWORLD** | Low dense undulation (base 50, amp 35) | Lower ceiling (100+), taller floor bumps | 4-5 dense islands, tight 90-130px gaps |
+| **TOWER** | Tall vertical steps (base 75, amp 55) | Higher ceiling (70+), taller pillars (60+) | 3-4 islands, wider 110-170px gaps, more height variance |
+| **Default** | Medium wave (base 60, amp 45) | Standard clearance (ceil 85+, floor 50+) | 3-4 islands, 100-150px gaps |
 
 ### Weight Integration
 New chunk types are integrated into all existing weight systems:
