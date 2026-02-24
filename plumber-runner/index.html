@@ -214,6 +214,17 @@ canvas {
   z-index: 12;
   transition: opacity 0.5s ease;
 }
+#hud-setpiece-announce {
+  position: absolute; top: 35%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: monospace; font-size: 14px; font-weight: bold;
+  color: #ffd700; text-shadow: 1px 1px 0 #000, 0 0 8px rgba(255,215,0,0.5);
+  pointer-events: none;
+  display: none;
+  z-index: 12;
+  transition: opacity 0.4s ease;
+  letter-spacing: 1px;
+}
 </style>
 </head>
 <body>
@@ -257,6 +268,7 @@ canvas {
 <div id="hud-theme"></div>
 <div id="hud-theme-announce"></div>
 <div id="hud-section-announce"></div>
+<div id="hud-setpiece-announce"></div>
 <div id="hud-settings">
   <div class="toggle-btn" id="btn-sfx">SFX ON</div>
   <div class="toggle-btn" id="btn-vib">VIB ON</div>
@@ -283,7 +295,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.7.2';
+const GAME_VERSION = 'v0.8.0';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -902,6 +914,240 @@ function applySectionParams(diffParams, section, isTransition) {
   return result;
 }
 
+// ── Set-Piece Chunk System ───────────────────────────
+// Hand-crafted chunk sequences injected periodically for intentional level design.
+// Each set-piece is a function that generates obstacles given (chunkX, diffParams).
+// Set-pieces follow the teach→remix→exam philosophy of Mario-style level design.
+const SETPIECE_ANNOUNCE_DURATION = 75; // frames to show set-piece cue (~1.25s)
+const SETPIECE_MIN_PER_RUN = 3;
+const SETPIECE_MAX_PER_RUN = 5;
+const SETPIECE_MIN_INTERVAL = 4;     // min chunks between set-pieces
+const SETPIECE_EARLY_GRACE = 5;      // no set-pieces in first N chunks
+
+// Set-piece definitions
+const SETPIECE_LIBRARY = [
+  {
+    id: 'staircase_jump',
+    name: 'STAIRCASE',
+    color: '#ffd700',
+    // High-low alternating jumps — teach: reading height differences
+    minPhase: 0, // available from start
+    generate(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 850;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_staircase_jump', obstacles: [] };
+      // 3 pipes at ascending heights with stepping bricks
+      const steps = 3;
+      const spacing = 200;
+      const startX = chunkX + 120;
+      for (let i = 0; i < steps; i++) {
+        const px = startX + i * spacing;
+        const h = 50 + i * 35; // 50, 85, 120
+        result.pipes.push({ x: px, h, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: px, h });
+        // Stepping brick between pipes (except before first)
+        if (i > 0) {
+          const bx = px - spacing / 2;
+          const prevH = 50 + (i - 1) * 35;
+          const by = groundY - (prevH + h) / 2 - 10;
+          result.bricks.push(makeBrick(bx, by, 0.35));
+          result.obstacles.push({ type: 'brick', x: bx, y: by });
+        }
+      }
+      // Reward brick at the top
+      const topX = startX + (steps - 1) * spacing + 30;
+      const topY = groundY - (50 + (steps - 1) * 35) - 50;
+      result.bricks.push(makeBrick(topX, topY, 0.6));
+      result.obstacles.push({ type: 'brick', x: topX, y: topY });
+      return result;
+    }
+  },
+  {
+    id: 'risk_shortcut',
+    name: 'SHORTCUT',
+    color: '#ff6644',
+    // Optional high path with extra rewards vs safe ground path — reward risk-takers
+    minPhase: 0,
+    generate(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 900;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_risk_shortcut', obstacles: [] };
+      // Ground path: safe, 1 low pipe
+      const safePipeX = chunkX + 400;
+      result.pipes.push({ x: safePipeX, h: 50, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: safePipeX, h: 50 });
+      // High path: tall pipe as launch point + elevated brick chain
+      const launchX = chunkX + 120;
+      const launchH = 110;
+      result.pipes.push({ x: launchX, h: launchH, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: launchX, h: launchH });
+      // Elevated reward bricks (risky but rewarding)
+      const brickY = groundY - 130;
+      for (let i = 0; i < 3; i++) {
+        const bx = launchX + 80 + i * 90;
+        result.bricks.push(makeBrick(bx, brickY, 0.55));
+        result.obstacles.push({ type: 'brick', x: bx, y: brickY });
+      }
+      return result;
+    }
+  },
+  {
+    id: 'pressure_corridor',
+    name: 'CORRIDOR',
+    color: '#ff4488',
+    // Short tight section with ceiling+floor pipes — pressure reading
+    minPhase: 1,
+    generate(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const maxTopH = Math.min(diffParams.maxTopH, groundY - 80);
+      const width = 750;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_pressure_corridor', obstacles: [] };
+      // 2 bottom pipes with ceiling pipes creating corridors
+      const positions = [chunkX + 180, chunkX + 450];
+      for (let i = 0; i < positions.length; i++) {
+        const px = positions[i];
+        const bh = 60 + i * 20; // 60, 80
+        result.pipes.push({ x: px, h: bh, fromTop: false, scored: false });
+        result.obstacles.push({ type: 'pipe_bottom', x: px, h: bh });
+        // Ceiling pipe offset to create a passage
+        const topX = px + (i === 0 ? 90 : -90);
+        const topH = Math.min(maxTopH, groundY - bh - 60);
+        if (topH >= 50 && topX > chunkX + 40 && topX < chunkX + width - 40) {
+          result.pipes.push({ x: topX, h: topH, fromTop: true, scored: false });
+          result.obstacles.push({ type: 'pipe_top', x: topX, h: topH });
+        }
+      }
+      // Small reward for surviving
+      const bx = chunkX + width - 150;
+      const by = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 10;
+      result.bricks.push(makeBrick(bx, by, 0.5));
+      result.obstacles.push({ type: 'brick', x: bx, y: by });
+      return result;
+    }
+  },
+  {
+    id: 'fake_safe',
+    name: 'FAKE SAFE',
+    color: '#aa66ff',
+    // Looks like a rest area but has a hidden challenge — teaches attention
+    minPhase: 1,
+    generate(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 800;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_fake_safe', obstacles: [] };
+      // Looks calm: low bricks, inviting spacing
+      const b1x = chunkX + 200;
+      const b1y = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
+      result.bricks.push(makeBrick(b1x, b1y, 0.4));
+      result.obstacles.push({ type: 'brick', x: b1x, y: b1y });
+      const b2x = chunkX + 350;
+      result.bricks.push(makeBrick(b2x, b1y, 0.4));
+      result.obstacles.push({ type: 'brick', x: b2x, y: b1y });
+      // The catch: a mid-height pipe placed right after the "easy" bricks
+      const trickX = chunkX + 500;
+      const trickH = 100;
+      result.pipes.push({ x: trickX, h: trickH, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: trickX, h: trickH });
+      // A turtle patrolling behind the trick pipe
+      result.turtleSpawns.push(trickX + 100);
+      // Another reward brick past the challenge
+      const b3x = chunkX + 650;
+      const b3y = groundY - 100;
+      result.bricks.push(makeBrick(b3x, b3y, 0.5));
+      result.obstacles.push({ type: 'brick', x: b3x, y: b3y });
+      return result;
+    }
+  },
+  {
+    id: 'vertical_ladder',
+    name: 'LADDER',
+    color: '#44ccff',
+    // Vertical climbing via stacked bricks and pipes — vertical skill check
+    minPhase: 0,
+    generate(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 700;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_vertical_ladder', obstacles: [] };
+      // Tall pipe as the target
+      const mainX = chunkX + 350;
+      const mainH = 130;
+      result.pipes.push({ x: mainX, h: mainH, fromTop: false, scored: false });
+      result.obstacles.push({ type: 'pipe_bottom', x: mainX, h: mainH });
+      // Stepping bricks forming a ladder approach
+      const ladderSteps = [
+        { x: chunkX + 150, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 10 },
+        { x: chunkX + 230, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 45 },
+        { x: chunkX + 310, h: BRICK_MIN_HEIGHT_ABOVE_GROUND + 80 },
+      ];
+      for (const step of ladderSteps) {
+        const by = groundY - step.h;
+        result.bricks.push(makeBrick(step.x, by, 0.3));
+        result.obstacles.push({ type: 'brick', x: step.x, y: by });
+      }
+      // Reward at the summit
+      const rewardX = mainX + 10;
+      const rewardY = groundY - mainH - 45;
+      result.bricks.push(makeBrick(rewardX, rewardY, 0.6));
+      result.obstacles.push({ type: 'brick', x: rewardX, y: rewardY });
+      return result;
+    }
+  },
+  {
+    id: 'breather',
+    name: 'BREATHER',
+    color: '#88ee44',
+    // Pure recovery zone with generous rewards — pace reset
+    minPhase: 0,
+    generate(chunkX, diffParams) {
+      const groundY = DESIGN_H - GROUND_H;
+      const width = 700;
+      const result = { pipes: [], bricks: [], turtleSpawns: [], width, type: 'setpiece_breather', obstacles: [] };
+      // No pipes — pure flat ground
+      // Generous brick row at comfortable height
+      const brickY = groundY - BRICK_MIN_HEIGHT_ABOVE_GROUND - 5;
+      for (let i = 0; i < 4; i++) {
+        const bx = chunkX + 120 + i * 130;
+        result.bricks.push(makeBrick(bx, brickY, 0.5));
+        result.obstacles.push({ type: 'brick', x: bx, y: brickY });
+      }
+      return result;
+    }
+  },
+];
+
+// Set-piece state
+let setPieceSchedule = [];    // array of chunk indices at which to insert set-pieces
+let setPieceNextIdx = 0;      // pointer into schedule
+let setPieceChunkCounter = 0; // counts chunks since game start (for scheduling)
+let setPieceAnnounceTimer = 0;
+let setPieceAnnounceName = '';
+let setPieceAnnounceColor = '';
+
+// Build a schedule of chunk indices for set-piece insertion at game start
+function initSetPieceState() {
+  setPieceSchedule = [];
+  setPieceNextIdx = 0;
+  setPieceChunkCounter = 0;
+  setPieceAnnounceTimer = 0;
+  setPieceAnnounceName = '';
+  setPieceAnnounceColor = '';
+
+  const count = SETPIECE_MIN_PER_RUN + Math.floor(rng() * (SETPIECE_MAX_PER_RUN - SETPIECE_MIN_PER_RUN + 1));
+  // Distribute set-pieces across the run: after grace period, spaced by min interval
+  // Use a simple spread: divide remaining space into count slots
+  let cursor = SETPIECE_EARLY_GRACE + 1 + Math.floor(rng() * 3); // first one at chunk 6-8
+  for (let i = 0; i < count; i++) {
+    setPieceSchedule.push(cursor);
+    cursor += SETPIECE_MIN_INTERVAL + Math.floor(rng() * 4); // 4-7 chunk spacing
+  }
+}
+
+// Pick an appropriate set-piece for the current difficulty phase
+function pickSetPiece(phase) {
+  const eligible = SETPIECE_LIBRARY.filter(sp => sp.minPhase <= phase);
+  return eligible[Math.floor(rng() * eligible.length)];
+}
+
 // Chunk types:
 // 'rest'            – flat ground, no obstacles (breathing room)
 // 'single_platform' – 1 bottom pipe as platform + optional bricks
@@ -1321,6 +1567,73 @@ function generateChunk(chunkX, type, diffParams) {
 
 // Spawn a complete chunk into the game world
 function spawnChunk() {
+  setPieceChunkCounter++;
+
+  // ── Set-piece insertion check ──
+  if (setPieceNextIdx < setPieceSchedule.length &&
+      setPieceChunkCounter >= setPieceSchedule[setPieceNextIdx]) {
+    const diffParams = getChunkDiffPhase();
+    const sectionedParams = applySectionParams(
+      applyThemeParams(diffParams, currentTheme, themeTransitionActive),
+      currentSection, sectionTransitionActive
+    );
+    const sp = pickSetPiece(diffParams.phase);
+    if (sp) {
+      const chunk = sp.generate(nextChunkX, sectionedParams);
+      // Validate reachability — fall through to normal spawn if set-piece fails
+      if (validateChunkReachability(chunk.obstacles, nextChunkX, chunk.width)) {
+        // Commit set-piece chunk
+        for (const p of chunk.pipes) pipes.push(p);
+        for (const b of chunk.bricks) {
+          if (b.hidden) { bricks.push(b); continue; }
+          let overlaps = false;
+          for (const existing of bricks) {
+            if (existing.broken) continue;
+            if (existing.hidden && !existing.revealed) continue;
+            if (rectsOverlap(b.x, b.y, b.w, b.h, existing.x - 8, existing.y - 8, existing.w + 16, existing.h + 16)) {
+              overlaps = true; break;
+            }
+          }
+          if (!overlaps) bricks.push(b);
+        }
+        const turtleMult = THEME_PARAM_OFFSETS[currentTheme].turtleChanceMult;
+        for (const tx of chunk.turtleSpawns) {
+          if (tx - lastTurtleSpawnX >= TURTLE_MIN_SPAWN_GAP) {
+            if (turtleMult >= 1 || rng() < turtleMult) spawnTurtle(tx);
+          }
+        }
+        if (chunk.pipes.length === 0) {
+          pipes.push({ x: nextChunkX + chunk.width / 2, h: 0, fromTop: false, scored: false });
+        }
+        const chunkId = ++chunkIdCounter;
+        const chunkRecord = {
+          id: chunkId, type: chunk.type, x: nextChunkX, width: chunk.width,
+          diffPhase: diffParams.phase, rerolls: 0, reachable: true,
+          theme: currentTheme, setpiece: sp.id,
+        };
+        chunkHistory.push(chunkRecord);
+        if (chunkHistory.length > 20) chunkHistory.shift();
+        consecutiveDangerChunks = 0;
+        chunksSinceLastSafe = 0;
+        chunkDebugInfo = chunkRecord;
+        // Trigger set-piece announcement
+        setPieceAnnounceTimer = SETPIECE_ANNOUNCE_DURATION;
+        setPieceAnnounceName = sp.name;
+        setPieceAnnounceColor = sp.color;
+        if (DEBUG_MODE) {
+          console.log(`%c[SetPiece] #${chunkId} ${sp.id} (${sp.name}) x=${Math.round(nextChunkX)} w=${chunk.width}`, 'color: #ffd700');
+        }
+        nextChunkX += chunk.width;
+        setPieceNextIdx++;
+        advanceThemeState();
+        advanceSectionState();
+        return;
+      }
+    }
+    // If set-piece failed validation, skip it and fall through to normal chunk
+    setPieceNextIdx++;
+  }
+
   const diffParams = getChunkDiffPhase();
   // Apply theme parameter offsets (pipe heights etc.)
   const themedParams = applyThemeParams(diffParams, currentTheme, themeTransitionActive);
@@ -1473,6 +1786,8 @@ function spawnInitialChunks() {
   initThemeState();
   // Initialize rhythm section state machine
   initSectionState();
+  // Initialize set-piece schedule
+  initSetPieceState();
 
   // Generate first rest chunk (safe start)
   const firstChunk = generateChunk(nextChunkX, 'rest', getChunkDiffPhase());
@@ -1851,6 +2166,7 @@ const hudBossClear = document.getElementById('hud-boss-clear');
 const hudTheme = document.getElementById('hud-theme');
 const hudThemeAnnounce = document.getElementById('hud-theme-announce');
 const hudSectionAnnounce = document.getElementById('hud-section-announce');
+const hudSetpieceAnnounce = document.getElementById('hud-setpiece-announce');
 const hudSectionLabel = document.getElementById('hud-section-label');
 const btnSfx = document.getElementById('btn-sfx');
 const btnVib = document.getElementById('btn-vib');
@@ -5392,6 +5708,8 @@ function update() {
   if (sectionAnnounceTimer > 0) sectionAnnounceTimer--;
   // Section flash overlay countdown
   if (sectionFlashTimer > 0) sectionFlashTimer--;
+  // Set-piece announce timer countdown
+  if (setPieceAnnounceTimer > 0) setPieceAnnounceTimer--;
   // Smooth theme color transition (lerp toward 1 over ~2 seconds)
   if (themeColorLerp < 1) {
     themeColorLerp = Math.min(1, themeColorLerp + 0.008); // ~125 frames ≈ 2s
@@ -6051,6 +6369,16 @@ function update() {
     hudSectionAnnounce.style.opacity = Math.min(1, sectionAnnounceTimer / 30);
   } else {
     hudSectionAnnounce.style.display = 'none';
+  }
+
+  // Set-piece announcement
+  if (setPieceAnnounceTimer > 0 && setPieceAnnounceName) {
+    hudSetpieceAnnounce.textContent = '\u2605 ' + setPieceAnnounceName + ' \u2605';
+    hudSetpieceAnnounce.style.color = setPieceAnnounceColor || '#ffd700';
+    hudSetpieceAnnounce.style.display = 'block';
+    hudSetpieceAnnounce.style.opacity = Math.min(1, setPieceAnnounceTimer / 20);
+  } else {
+    hudSetpieceAnnounce.style.display = 'none';
   }
 
   // Persistent section label with highlight glow on transition

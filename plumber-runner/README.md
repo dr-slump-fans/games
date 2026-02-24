@@ -2063,6 +2063,40 @@ Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
 
 ---
 
+## v0.8.0 Step 1 — Set-Piece Chunk System (Level Language Upgrade)
+
+### Design Intent
+Upgrades the level generation from pure random template sampling to **intentional chunk sequences**. Inspired by Mario-style level design philosophy (teach → remix → exam), hand-crafted "set-piece" chunks are injected periodically into the procedural flow, giving each run recognizable moments and rhythm.
+
+### Set-Piece Types (6 types)
+
+| ID | Name | Description | Unlock Phase |
+|----|------|-------------|-------------|
+| `staircase_jump` | STAIRCASE | 3 pipes at ascending heights with stepping bricks — teaches reading height differences | Phase 0 (0s) |
+| `risk_shortcut` | SHORTCUT | Safe ground path vs optional high path with extra rewards — rewards risk-takers | Phase 0 (0s) |
+| `pressure_corridor` | CORRIDOR | Tight section with ceiling + floor pipes creating passages — pressure reading | Phase 1 (60s) |
+| `fake_safe` | FAKE SAFE | Looks calm (low bricks, inviting spacing) but hides a mid-height pipe + turtle — teaches attention | Phase 1 (60s) |
+| `vertical_ladder` | LADDER | Stepping bricks forming a vertical climb to a tall pipe summit — vertical skill check | Phase 0 (0s) |
+| `breather` | BREATHER | Pure flat ground with generous brick row — deliberate pace reset / recovery zone | Phase 0 (0s) |
+
+### Insertion Rules
+- **3–5 set-pieces per run** (randomized count at game start)
+- **Schedule built at init**: chunk indices are pre-computed with minimum 4-chunk spacing
+- **Grace period**: no set-pieces in the first 5 chunks (safe ramp-up)
+- **Phase-gated**: each set-piece has a `minPhase` — harder types only appear after the player has survived long enough
+- **Reachability validated**: every set-piece passes the same `validateChunkReachability()` check as normal chunks; if it fails, falls through to normal generation
+- **Integrates with existing systems**: set-pieces receive theme/section parameter offsets (pipe heights etc.) and respect the theme turtle chance multiplier
+
+### Visual Cue
+- Set-piece start triggers a brief HUD announcement: `★ NAME ★` in the set-piece's signature color
+- Uses the same fade-out pattern as theme/section announcements (75 frames ≈ 1.25s)
+- No new art assets — text-only overlay
+
+### Version
+Updated `GAME_VERSION` from `v0.7.2` → **`v0.8.0`**.
+
+---
+
 ## Asset & License Information
 
 **The game supports both procedural rendering (code-drawn) and sprite sheet rendering.** The bundled sprite sheet is an original creation matching the procedural character.
