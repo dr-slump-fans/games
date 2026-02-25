@@ -110,7 +110,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.1.9</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.0</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -164,20 +164,9 @@ button.sell-all:hover{background:#b91c1c}
 
   <div id="loadNotice" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.82rem;text-align:center"></div>
 
-  <!-- status -->
-  <div class="panel">
-    <h2>即時狀態</h2>
-    <div class="grid">
-      <div><div class="lbl">股票</div><div class="val" id="dStock">—</div></div>
-      <div><div class="lbl">現價</div><div class="val" id="dPrice">—</div></div>
-      <div><div class="lbl">買入價</div><div class="val" id="dBuy">—</div></div>
-      <div><div class="lbl">最高價</div><div class="val" id="dHigh">—</div></div>
-      <div><div class="lbl">股數</div><div class="val" id="dShares">—</div></div>
-      <div><div class="lbl">買入來源</div><div class="val" id="dBuySource">—</div></div>
-      <div><div class="lbl">狀態</div><div class="val neutral" id="dState">等待中</div></div>
-      <div><div class="lbl">報酬率</div><div class="val neutral" id="dReturn">—</div></div>
-      <div><div class="lbl">監控時窗</div><div class="val" id="dTimeWindow" style="font-size:.85rem">—</div></div>
-    </div>
+  <!-- global summary bar -->
+  <div class="panel" id="globalSummary" style="padding:8px 12px">
+    <div id="summaryContent" style="font-size:.85rem;line-height:1.6;color:#94a3b8">等待中 — 無持倉</div>
   </div>
 
   <!-- cumulative stats -->
@@ -770,61 +759,14 @@ function doClearSave() {
 
 /* ── Render ── */
 function renderPrice() {
-  $('dStock').textContent = state.stock;
-  $('dPrice').textContent = state.currentPrice ? `$${state.currentPrice.toFixed(2)}` : '—';
+  renderGlobalSummary();
 }
 
 function renderAll() {
   renderPrice();
   updateManualSellBtn();
 
-  const active = activeLots();
-  const hasPos = active.length > 0;
-  $('dTimeWindow').textContent = `${MONITOR_START} ~ ${MONITOR_END}`;
-
-  // Summary of active lots in the status panel
-  if (hasPos) {
-    const totalShares = active.reduce((s, l) => s + l.shares, 0);
-    const avgBuy = active.reduce((s, l) => s + l.buyPrice * l.shares, 0) / totalShares;
-    const hasTrailing = active.some(l => l.phase === 'trailing');
-    const maxHigh = Math.max(...active.map(l => l.highestPrice));
-
-    $('dBuy').textContent = active.length === 1 ? `$${active[0].buyPrice.toFixed(2)}` : `avg $${avgBuy.toFixed(2)}`;
-    $('dHigh').textContent = hasTrailing ? `$${maxHigh.toFixed(2)}` : '—';
-    $('dShares').textContent = `${totalShares}（${active.length}筆）`;
-    $('dBuySource').textContent = active.length === 1 ? (active[0].buySource === 'manual' ? '手動買入' : '自動買入') : `${active.length} 筆`;
-
-    const stoppedSuffix = !timer ? '（未監控）' : '';
-    const phaseLabel = hasTrailing ? '停利模式' : '持有';
-    $('dState').textContent = phaseLabel + stoppedSuffix;
-    $('dState').className = 'val ' + (hasTrailing ? 'up' : 'neutral');
-
-    const totalPnl = active.reduce((s, l) => {
-      const e = priceMap[l.stock];
-      return s + ((e ? e.price : state.currentPrice) - l.buyPrice) * l.shares;
-    }, 0);
-    const totalCost = active.reduce((s, l) => s + l.buyPrice * l.shares, 0);
-    const pctReturn = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
-    const retEl = $('dReturn');
-    retEl.textContent = (pctReturn >= 0 ? '+' : '') + pctReturn.toFixed(2) + '%';
-    retEl.className = 'val ' + (pctReturn >= 0 ? 'up' : 'down');
-  } else {
-    $('dBuy').textContent = '—';
-    $('dHigh').textContent = '—';
-    $('dShares').textContent = '—';
-    $('dBuySource').textContent = '—';
-    $('dState').textContent = state.trades.length > 0 ? '已賣出' : '等待中';
-    $('dState').className = 'val neutral';
-    const retEl = $('dReturn');
-    if (state.trades.length > 0) {
-      const last = state.trades[state.trades.length - 1];
-      retEl.textContent = (last.returnPct >= 0 ? '+' : '') + last.returnPct.toFixed(2) + '%';
-      retEl.className = 'val ' + (last.returnPct >= 0 ? 'up' : 'down');
-    } else {
-      retEl.textContent = '—';
-      retEl.className = 'val neutral';
-    }
-  }
+  renderGlobalSummary();
 
   // cumulative stats
   const t = state.trades;
@@ -850,6 +792,43 @@ function renderAll() {
 
   // Render active lots panel
   renderLotsPanel();
+}
+
+/* ── Global Summary ── */
+function renderGlobalSummary() {
+  const active = activeLots();
+  const el = $('summaryContent');
+  const monitorStatus = timer ? '監控中' : '已停止';
+  const monitorCls = timer ? 'color:#4ade80' : 'color:#fbbf24';
+
+  if (active.length === 0) {
+    const tradeInfo = state.trades.length > 0 ? ` ｜ 歷史 ${state.trades.length} 筆交易` : '';
+    el.innerHTML = `<span style="${monitorCls};font-weight:700">${monitorStatus}</span> ｜ 無持倉${tradeInfo}`;
+    return;
+  }
+
+  const totalShares = active.reduce((s, l) => s + l.shares, 0);
+
+  // Compute total unrealized PnL (only lots with price)
+  let totalPnl = 0, totalCost = 0, lotsWithPrice = 0;
+  for (const lot of active) {
+    const entry = priceMap[lot.stock];
+    if (entry) {
+      totalPnl += (entry.price - lot.buyPrice) * lot.shares;
+      totalCost += lot.buyPrice * lot.shares;
+      lotsWithPrice++;
+    } else {
+      totalCost += lot.buyPrice * lot.shares;
+    }
+  }
+  const pctReturn = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+  const sign = pctReturn >= 0 ? '+' : '';
+  const pnlCls = pctReturn >= 0 ? 'color:#22c55e' : 'color:#ef4444';
+  const partial = lotsWithPrice < active.length ? `（${lotsWithPrice}/${active.length} 有價）` : '';
+
+  el.innerHTML = `<span style="${monitorCls};font-weight:700">${monitorStatus}</span>`
+    + ` ｜ ${active.length} 筆持倉 ｜ ${totalShares} 股`
+    + ` ｜ <span style="${pnlCls};font-weight:700">${sign}${pctReturn.toFixed(2)}%</span>${partial}`;
 }
 
 /* ── Strategy helper: compute thresholds & distance for a lot ── */
@@ -1001,7 +980,7 @@ async function showInventory() {
 
   if (active.length > 0) {
     const totalShares = active.reduce((s, l) => s + l.shares, 0);
-    const monitorLabel = timer ? '' : '（監控已停止）';
+    const monitorLabel = timer ? '（監控中）' : '（已停止）';
 
     // Compute total PnL only for lots with price
     let totalPnl = 0, totalCost = 0, allHavePrice = true;
