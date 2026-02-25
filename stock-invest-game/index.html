@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>股市投資策略模擬器（台股盤中規則版）</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;background:#0f172a;color:#e2e8f0;padding:12px}
+.wrap{max-width:520px;margin:0 auto}
+h1{font-size:1.2rem;margin-bottom:4px}
+.ver{font-size:.7rem;color:#64748b}
+.sim-badge{display:none;background:#f59e0b;color:#000;font-weight:700;padding:2px 8px;border-radius:6px;font-size:.75rem;margin-left:6px}
+.sim-badge.on{display:inline}
+
+/* inputs */
+.row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+.row input,.row select{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 10px;font-size:.95rem}
+.row input{flex:1;min-width:80px}
+.row select{min-width:100px}
+button{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.9rem;cursor:pointer;font-weight:600}
+button:disabled{opacity:.4;cursor:default}
+button.stop{background:#dc2626}
+button.reset{background:#475569}
+
+/* status panel */
+.panel{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:12px;margin:10px 0}
+.panel h2{font-size:.95rem;margin-bottom:8px;color:#94a3b8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+.grid .lbl{font-size:.75rem;color:#64748b}
+.grid .val{font-size:1rem;font-weight:700}
+.val.up{color:#22c55e}
+.val.down{color:#ef4444}
+.val.neutral{color:#94a3b8}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 16px}
+
+/* log */
+.log-box{background:#111827;border:1px solid #334155;border-radius:10px;padding:10px;max-height:200px;overflow-y:auto;font-size:.78rem;line-height:1.5}
+.log-box .entry{border-bottom:1px solid #1e293b;padding:3px 0}
+.log-box .entry:last-child{border:none}
+.log-entry-up{color:#22c55e}
+.log-entry-down{color:#ef4444}
+
+/* market status bar */
+.market-bar{text-align:center;padding:6px;border-radius:8px;font-size:.8rem;font-weight:600;margin:8px 0}
+.market-bar.open{background:#14532d;color:#4ade80}
+.market-bar.closed{background:#422006;color:#fbbf24}
+
+.back{display:inline-block;margin-bottom:8px;color:#38bdf8;text-decoration:none;font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="../index.html">← 回首頁</a>
+  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.0</span></h1>
+  <span id="simBadge" class="sim-badge">模擬模式</span>
+
+  <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
+
+  <!-- stock input -->
+  <div class="row">
+    <input id="stockInput" type="text" placeholder="股票代號" value="2330"/>
+    <select id="stockSelect">
+      <option value="2330">2330 台積電</option>
+      <option value="2317">2317 鴻海</option>
+      <option value="0050">0050 元大台灣50</option>
+      <option value="2454">2454 聯發科</option>
+    </select>
+  </div>
+  <div class="row">
+    <button id="btnStart">開始監控</button>
+    <button id="btnStop" class="stop" disabled>停止</button>
+    <button id="btnReset" class="reset">重置</button>
+  </div>
+
+  <!-- status -->
+  <div class="panel">
+    <h2>即時狀態</h2>
+    <div class="grid">
+      <div><div class="lbl">股票</div><div class="val" id="dStock">—</div></div>
+      <div><div class="lbl">現價</div><div class="val" id="dPrice">—</div></div>
+      <div><div class="lbl">買入價</div><div class="val" id="dBuy">—</div></div>
+      <div><div class="lbl">最高價</div><div class="val" id="dHigh">—</div></div>
+      <div><div class="lbl">狀態</div><div class="val neutral" id="dState">等待中</div></div>
+      <div><div class="lbl">報酬率</div><div class="val neutral" id="dReturn">—</div></div>
+    </div>
+  </div>
+
+  <!-- cumulative stats -->
+  <div class="panel">
+    <h2>累積統計</h2>
+    <div class="stats">
+      <div><div class="lbl">交易次數</div><div class="val" id="sTrades">0</div></div>
+      <div><div class="lbl">勝率</div><div class="val" id="sWinRate">—</div></div>
+      <div><div class="lbl">平均報酬率</div><div class="val" id="sAvgReturn">—</div></div>
+      <div><div class="lbl">累積損益</div><div class="val neutral" id="sTotalPnl">$0</div></div>
+    </div>
+  </div>
+
+  <!-- trade log -->
+  <div class="panel">
+    <h2>交易日誌</h2>
+    <div class="log-box" id="logBox"><div class="entry" style="color:#64748b">尚無交易記錄</div></div>
+  </div>
+</div>
+
+<script>
+/* ── Config ── */
+const SHARES = 1000;
+const STOP_LOSS = 0.9;       // sell if price <= buyPrice * 0.9
+const ENTER_TP = 1.1;        // enter trailing-stop mode at +10%
+const NEAR_HIGH = 0.998;     // treat as new high if >= highest * 0.998
+const TP_EXIT = 0.92;        // sell if price <= highestPrice * 0.92
+const POLL_MS = 5000;        // poll interval
+const MARKET_OPEN_H = 9, MARKET_OPEN_M = 10;
+const MARKET_CLOSE_H = 12, MARKET_CLOSE_M = 0;
+
+/* ── State ── */
+let state = resetState();
+let timer = null;
+let simMode = false;
+let simPrice = 0;
+
+function resetState() {
+  return {
+    stock: '2330',
+    phase: 'idle',       // idle | holding | trailing | sold
+    buyPrice: 0,
+    highestPrice: 0,
+    currentPrice: 0,
+    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason}
+  };
+}
+
+/* ── DOM refs ── */
+const $ = id => document.getElementById(id);
+const btnStart = $('btnStart'), btnStop = $('btnStop'), btnReset = $('btnReset');
+const stockInput = $('stockInput'), stockSelect = $('stockSelect');
+
+stockSelect.addEventListener('change', () => { stockInput.value = stockSelect.value; });
+stockInput.addEventListener('input', () => {
+  const v = stockInput.value.trim();
+  if ([...stockSelect.options].some(o => o.value === v)) stockSelect.value = v;
+});
+
+btnStart.addEventListener('click', startMonitor);
+btnStop.addEventListener('click', stopMonitor);
+btnReset.addEventListener('click', doReset);
+
+/* ── Market hours check (Asia/Taipei) ── */
+function taipeiNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+}
+function isMarketOpen() {
+  const d = taipeiNow();
+  const day = d.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = d.getHours() * 60 + d.getMinutes();
+  return mins >= MARKET_OPEN_H * 60 + MARKET_OPEN_M && mins < MARKET_CLOSE_H * 60 + MARKET_CLOSE_M;
+}
+function updateMarketBar() {
+  const bar = $('marketBar');
+  if (isMarketOpen()) {
+    bar.className = 'market-bar open';
+    bar.textContent = '盤中交易時段 09:10 – 12:00';
+  } else {
+    bar.className = 'market-bar closed';
+    bar.textContent = '非盤中時段 — 等待開盤';
+  }
+}
+
+/* ── Price fetching ── */
+async function fetchPrice(stock) {
+  // Try public TWSE API (mis.twse.com.tw) — returns JSON with CORS headers
+  try {
+    const ts = Date.now();
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${stock}.tw&_=${ts}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    if (!resp.ok) throw new Error('http ' + resp.status);
+    const json = await resp.json();
+    if (json.msgArray && json.msgArray.length > 0) {
+      const info = json.msgArray[0];
+      // z = last trade price, if "–" use y (yesterday close)
+      let price = parseFloat(info.z);
+      if (isNaN(price) || price <= 0) price = parseFloat(info.y);
+      if (isNaN(price) || price <= 0) throw new Error('no price in response');
+      enableSimMode(false);
+      return price;
+    }
+    throw new Error('empty msgArray');
+  } catch (_e1) {
+    // Try OTC market (tpex)
+    try {
+      const ts = Date.now();
+      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_${stock}.tw&_=${ts}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (!resp.ok) throw new Error('http ' + resp.status);
+      const json = await resp.json();
+      if (json.msgArray && json.msgArray.length > 0) {
+        const info = json.msgArray[0];
+        let price = parseFloat(info.z);
+        if (isNaN(price) || price <= 0) price = parseFloat(info.y);
+        if (isNaN(price) || price <= 0) throw new Error('no price');
+        enableSimMode(false);
+        return price;
+      }
+      throw new Error('empty');
+    } catch (_e2) {
+      // fallback: simulation mode
+      return simulatedPrice(stock);
+    }
+  }
+}
+
+function simulatedPrice(stock) {
+  enableSimMode(true);
+  if (simPrice <= 0) {
+    // seed based on stock — rough defaults
+    const seeds = { '2330': 900, '2317': 170, '0050': 160, '2454': 1200 };
+    simPrice = seeds[stock] || 500;
+  }
+  // random walk: ±0.5%
+  const change = simPrice * (Math.random() - 0.5) * 0.01;
+  simPrice = Math.round((simPrice + change) * 100) / 100;
+  if (simPrice < 1) simPrice = 1;
+  return simPrice;
+}
+
+function enableSimMode(on) {
+  if (simMode === on) return;
+  simMode = on;
+  $('simBadge').className = 'sim-badge' + (on ? ' on' : '');
+}
+
+/* ── Core loop ── */
+async function tick() {
+  updateMarketBar();
+
+  // Fetch price regardless (to show current price), but only run strategy during market hours
+  let price;
+  try {
+    price = await fetchPrice(state.stock);
+  } catch { return; }
+
+  state.currentPrice = price;
+  renderPrice();
+
+  if (!isMarketOpen()) return;  // no strategy outside market hours
+
+  if (state.phase === 'idle') {
+    // auto-buy on first tick during market hours
+    state.buyPrice = price;
+    state.highestPrice = price;
+    state.phase = 'holding';
+    addLog(`買入 ${SHARES} 股 @ $${price}`, 'neutral');
+  }
+
+  if (state.phase === 'holding') {
+    if (price <= state.buyPrice * STOP_LOSS) {
+      executeSell(price, '停損');
+    } else if (price >= state.buyPrice * ENTER_TP) {
+      state.phase = 'trailing';
+      state.highestPrice = price;
+      addLog(`進入停利模式 (現價 $${price}, 買入 $${state.buyPrice})`, 'neutral');
+    }
+  }
+
+  if (state.phase === 'trailing') {
+    if (price >= state.highestPrice * NEAR_HIGH) {
+      state.highestPrice = Math.max(state.highestPrice, price);
+    }
+    if (price <= state.highestPrice * TP_EXIT) {
+      executeSell(price, '移動停利');
+    }
+  }
+
+  renderAll();
+}
+
+function executeSell(price, reason) {
+  const pnl = (price - state.buyPrice) * SHARES;
+  const returnPct = ((price - state.buyPrice) / state.buyPrice) * 100;
+  const trade = { buyPrice: state.buyPrice, sellPrice: price, pnl, returnPct, reason };
+  state.trades.push(trade);
+  state.phase = 'sold';
+  const sign = pnl >= 0 ? '+' : '';
+  addLog(
+    `賣出 ${SHARES} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
+    pnl >= 0 ? 'up' : 'down'
+  );
+}
+
+/* ── Start / Stop / Reset ── */
+function startMonitor() {
+  state.stock = stockInput.value.trim() || '2330';
+  state.phase = 'idle';
+  state.buyPrice = 0;
+  state.highestPrice = 0;
+  simPrice = 0;
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+  stockInput.disabled = true;
+  stockSelect.disabled = true;
+  addLog(`開始監控 ${state.stock}`, 'neutral');
+  tick();
+  timer = setInterval(tick, POLL_MS);
+}
+
+function stopMonitor() {
+  clearInterval(timer);
+  timer = null;
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  stockInput.disabled = false;
+  stockSelect.disabled = false;
+  if (state.phase === 'holding' || state.phase === 'trailing') {
+    // force sell at current price
+    executeSell(state.currentPrice, '手動停止');
+    renderAll();
+  }
+  addLog('監控已停止', 'neutral');
+  state.phase = 'idle';
+}
+
+function doReset() {
+  stopMonitor();
+  state = resetState();
+  simPrice = 0;
+  enableSimMode(false);
+  $('logBox').innerHTML = '<div class="entry" style="color:#64748b">尚無交易記錄</div>';
+  renderAll();
+  addLog('已重置', 'neutral');
+}
+
+/* ── Render ── */
+function renderPrice() {
+  $('dStock').textContent = state.stock;
+  $('dPrice').textContent = state.currentPrice ? `$${state.currentPrice.toFixed(2)}` : '—';
+}
+
+function renderAll() {
+  renderPrice();
+  $('dBuy').textContent = state.buyPrice ? `$${state.buyPrice.toFixed(2)}` : '—';
+  $('dHigh').textContent = state.highestPrice ? `$${state.highestPrice.toFixed(2)}` : '—';
+
+  // state label
+  const labels = { idle: '等待中', holding: '持有', trailing: '停利模式', sold: '已賣出' };
+  const el = $('dState');
+  el.textContent = labels[state.phase] || '—';
+  el.className = 'val ' + (state.phase === 'trailing' ? 'up' : state.phase === 'sold' ? 'neutral' : 'neutral');
+
+  // current return
+  const retEl = $('dReturn');
+  if (state.phase === 'holding' || state.phase === 'trailing') {
+    const pct = ((state.currentPrice - state.buyPrice) / state.buyPrice) * 100;
+    retEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+    retEl.className = 'val ' + (pct >= 0 ? 'up' : 'down');
+  } else if (state.phase === 'sold' && state.trades.length > 0) {
+    const last = state.trades[state.trades.length - 1];
+    retEl.textContent = (last.returnPct >= 0 ? '+' : '') + last.returnPct.toFixed(2) + '%';
+    retEl.className = 'val ' + (last.returnPct >= 0 ? 'up' : 'down');
+  } else {
+    retEl.textContent = '—';
+    retEl.className = 'val neutral';
+  }
+
+  // cumulative stats
+  const t = state.trades;
+  $('sTrades').textContent = t.length;
+  if (t.length > 0) {
+    const wins = t.filter(x => x.pnl > 0).length;
+    $('sWinRate').textContent = (wins / t.length * 100).toFixed(1) + '%';
+    const avgRet = t.reduce((s, x) => s + x.returnPct, 0) / t.length;
+    const avgEl = $('sAvgReturn');
+    avgEl.textContent = (avgRet >= 0 ? '+' : '') + avgRet.toFixed(2) + '%';
+    avgEl.className = 'val ' + (avgRet >= 0 ? 'up' : 'down');
+    const totalPnl = t.reduce((s, x) => s + x.pnl, 0);
+    const pnlEl = $('sTotalPnl');
+    pnlEl.textContent = (totalPnl >= 0 ? '+' : '') + '$' + totalPnl.toFixed(0);
+    pnlEl.className = 'val ' + (totalPnl >= 0 ? 'up' : 'down');
+  } else {
+    $('sWinRate').textContent = '—';
+    $('sAvgReturn').textContent = '—';
+    $('sAvgReturn').className = 'val neutral';
+    $('sTotalPnl').textContent = '$0';
+    $('sTotalPnl').className = 'val neutral';
+  }
+}
+
+function addLog(msg, type) {
+  const box = $('logBox');
+  // remove placeholder
+  if (box.querySelector('.entry[style]')) box.innerHTML = '';
+  const now = taipeiNow();
+  const ts = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const cls = type === 'up' ? 'log-entry-up' : type === 'down' ? 'log-entry-down' : '';
+  const div = document.createElement('div');
+  div.className = 'entry ' + cls;
+  div.textContent = `[${ts}] ${msg}`;
+  box.prepend(div);
+}
+
+/* ── Init ── */
+updateMarketBar();
+setInterval(updateMarketBar, 30000);
+renderAll();
+</script>
+</body>
+</html>
