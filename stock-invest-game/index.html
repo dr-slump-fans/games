@@ -3,15 +3,13 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>股市投資策略模擬器（台股盤中規則版）</title>
+<title>股市投資策略工具（台股盤中規則版）</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;background:#0f172a;color:#e2e8f0;padding:12px}
 .wrap{max-width:520px;margin:0 auto}
 h1{font-size:1.2rem;margin-bottom:4px}
 .ver{font-size:.7rem;color:#64748b}
-.sim-badge{display:none;background:#f59e0b;color:#000;font-weight:700;padding:2px 8px;border-radius:6px;font-size:.75rem;margin-left:6px}
-.sim-badge.on{display:inline}
 
 /* inputs */
 .row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
@@ -96,8 +94,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.6</span></h1>
-  <span id="simBadge" class="sim-badge">模擬模式</span>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.1.7</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -215,8 +212,7 @@ let lastUpdateTime = '—';
 let nextLotId = 1;
 let state = resetState();
 let timer = null;
-let simMode = false;
-let simPrice = 0;
+let lastValidPrice = 0;  // last successfully fetched price
 
 function makeLot(opts) {
   return {
@@ -439,19 +435,7 @@ async function fetchStooq(stock) {
   return close;
 }
 
-// Source D: Simulation (fallback)
-function simulatedPrice(stock) {
-  if (simPrice <= 0) {
-    const seeds = { '2330': 900, '2317': 170, '0050': 160, '2454': 1200 };
-    simPrice = seeds[stock] || 500;
-  }
-  const change = simPrice * (Math.random() - 0.5) * 0.01;
-  simPrice = Math.round((simPrice + change) * 100) / 100;
-  if (simPrice < 1) simPrice = 1;
-  return simPrice;
-}
-
-// Main dispatcher — tries sources in priority order
+// Main dispatcher — tries sources in priority order, returns null on failure
 const SOURCES = [
   { name: 'TWSE', fn: fetchTWSE },
   { name: 'Yahoo', fn: fetchYahoo },
@@ -463,14 +447,12 @@ async function fetchPrice(stock) {
     try {
       const price = await src.fn(stock);
       setSource(src.name);
-      enableSimMode(false);
+      lastValidPrice = price;
       return price;
     } catch (_) { /* try next */ }
   }
-  // All real sources failed — fallback to simulation
-  setSource('模擬');
-  enableSimMode(true);
-  return simulatedPrice(stock);
+  // All sources failed — return null (no simulation)
+  return null;
 }
 
 function setSource(name) {
@@ -480,12 +462,6 @@ function setSource(name) {
   $('sourceBar').textContent = `來源：${lastSource} ｜ 更新：${lastUpdateTime}`;
 }
 
-function enableSimMode(on) {
-  if (simMode === on) return;
-  simMode = on;
-  $('simBadge').className = 'sim-badge' + (on ? ' on' : '');
-}
-
 /* ── Helper: get active lots ── */
 function activeLots() { return state.lots.filter(l => l.phase === 'holding' || l.phase === 'trailing'); }
 
@@ -493,11 +469,12 @@ function activeLots() { return state.lots.filter(l => l.phase === 'holding' || l
 async function tick() {
   updateMarketBar();
 
-  // Fetch price regardless (to show current price), but only run strategy during market hours
-  let price;
-  try {
-    price = await fetchPrice(state.stock);
-  } catch { return; }
+  // Fetch price — if all sources fail, skip trade logic
+  const price = await fetchPrice(state.stock);
+  if (price === null) {
+    $('sourceBar').textContent = `來源：查無現價 ｜ 上次：${lastUpdateTime}`;
+    return;  // no valid price — do not trade
+  }
 
   state.currentPrice = price;
   renderPrice();
@@ -551,7 +528,7 @@ function executeSellLot(lot, price, reason) {
 function startMonitor() {
   const inputStock = stockInput.value.trim() || '2330';
   state.stock = inputStock;
-  simPrice = 0;
+  lastValidPrice = 0;
   // Read configurable poll interval
   const pollSec = Math.max(POLL_MIN / 1000, parseInt($('pollInput').value) || 5);
   POLL_MS = pollSec * 1000;
@@ -594,10 +571,9 @@ async function doManualBuy() {
   if (!isNaN(priceVal) && priceVal > 0) {
     buyP = priceVal;
   } else {
-    try {
-      buyP = await fetchPrice(inputStock);
-    } catch (_) {
-      alert('無法取得現價，請手動輸入買入價');
+    buyP = await fetchPrice(inputStock);
+    if (buyP === null) {
+      alert('查無現價，無法買入。請手動輸入買入價或稍後再試。');
       return;
     }
   }
@@ -643,11 +619,12 @@ async function doManualSell() {
     alert('目前無持倉，無法賣出');
     return;
   }
-  let price = state.currentPrice;
-  try {
-    price = await fetchPrice(state.stock);
-    state.currentPrice = price;
-  } catch (_) { /* use last known price */ }
+  const price = await fetchPrice(state.stock);
+  if (price === null) {
+    alert('查無現價，已跳過賣出。請稍後再試。');
+    return;
+  }
+  state.currentPrice = price;
   for (const lot of active) {
     executeSellLot(lot, price, '手動賣出');
   }
@@ -658,11 +635,12 @@ async function doManualSell() {
 async function doManualSellLot(lotId) {
   const lot = state.lots.find(l => l.lotId === lotId);
   if (!lot || (lot.phase !== 'holding' && lot.phase !== 'trailing')) return;
-  let price = state.currentPrice;
-  try {
-    price = await fetchPrice(state.stock);
-    state.currentPrice = price;
-  } catch (_) { /* use last known price */ }
+  const price = await fetchPrice(state.stock);
+  if (price === null) {
+    alert('查無現價，已跳過賣出。請稍後再試。');
+    return;
+  }
+  state.currentPrice = price;
   executeSellLot(lot, price, '手動賣出');
   updateManualSellBtn();
   renderAll();
@@ -675,8 +653,7 @@ function updateManualSellBtn() {
 function doReset() {
   stopMonitor();
   state = resetState();
-  simPrice = 0;
-  enableSimMode(false);
+  lastValidPrice = 0;
   $('logBox').innerHTML = '<div class="entry" style="color:#64748b">尚無交易記錄</div>';
   renderAll();
   addLog('已重置', 'neutral');
@@ -686,8 +663,7 @@ function doReset() {
 function doClearSave() {
   stopMonitor();
   state = resetState();
-  simPrice = 0;
-  enableSimMode(false);
+  lastValidPrice = 0;
   clearSave();
   $('logBox').innerHTML = '<div class="entry" style="color:#64748b">尚無交易記錄</div>';
   $('loadNotice').style.display = 'none';
@@ -837,13 +813,20 @@ function addLog(msg, type) {
 
 /* ── Inventory Query ── */
 async function showInventory() {
+  let priceStale = false;
   if (state.stock) {
-    try { state.currentPrice = await fetchPrice(state.stock); } catch (_) { /* use stale price */ }
+    const p = await fetchPrice(state.stock);
+    if (p !== null) {
+      state.currentPrice = p;
+    } else {
+      priceStale = true;  // could not fetch — use last known price
+    }
   }
 
   const active = activeLots();
   const container = $('invContent');
   let html = '';
+  const priceAvailable = state.currentPrice > 0;
 
   if (active.length > 0) {
     const totalShares = active.reduce((s, l) => s + l.shares, 0);
@@ -859,9 +842,14 @@ async function showInventory() {
     html += `<div><div class="lbl">股票代號</div><div class="val">${state.stock}</div></div>`;
     html += `<div><div class="lbl">持倉筆數</div><div class="val">${active.length} 筆${monitorLabel}</div></div>`;
     html += `<div><div class="lbl">總持有股數</div><div class="val">${totalShares}</div></div>`;
-    html += `<div><div class="lbl">現價</div><div class="val">$${state.currentPrice.toFixed(2)}</div></div>`;
-    html += `<div><div class="lbl">總未實現損益</div><div class="val ${tCls}">${tSign}$${totalPnl.toFixed(0)}</div></div>`;
-    html += `<div><div class="lbl">總報酬率</div><div class="val ${tCls}">${tSign}${totalRetPct.toFixed(2)}%</div></div>`;
+    const priceDisplay = priceAvailable
+      ? `$${state.currentPrice.toFixed(2)}${priceStale ? '（非即時）' : ''}`
+      : '目前無可用現價';
+    html += `<div><div class="lbl">現價</div><div class="val">${priceDisplay}</div></div>`;
+    if (priceAvailable) {
+      html += `<div><div class="lbl">總未實現損益</div><div class="val ${tCls}">${tSign}$${totalPnl.toFixed(0)}</div></div>`;
+      html += `<div><div class="lbl">總報酬率</div><div class="val ${tCls}">${tSign}${totalRetPct.toFixed(2)}%</div></div>`;
+    }
     html += '</div>';
 
     // Per-lot detail
