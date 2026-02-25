@@ -54,10 +54,17 @@ button.reset{background:#475569}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.0</span></h1>
+  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.1</span></h1>
   <span id="simBadge" class="sim-badge">模擬模式</span>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
+  <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
+
+  <!-- poll interval -->
+  <div class="row" style="align-items:center">
+    <label style="font-size:.8rem;color:#94a3b8;white-space:nowrap">輪詢間隔</label>
+    <input id="pollInput" type="number" min="3" max="60" value="5" style="width:60px;flex:none"/> <span style="font-size:.8rem;color:#94a3b8">秒</span>
+  </div>
 
   <!-- stock input -->
   <div class="row">
@@ -113,9 +120,14 @@ const STOP_LOSS = 0.9;       // sell if price <= buyPrice * 0.9
 const ENTER_TP = 1.1;        // enter trailing-stop mode at +10%
 const NEAR_HIGH = 0.998;     // treat as new high if >= highest * 0.998
 const TP_EXIT = 0.92;        // sell if price <= highestPrice * 0.92
-const POLL_MS = 5000;        // poll interval
+let POLL_MS = 5000;          // poll interval (configurable)
+const POLL_MIN = 3000;
 const MARKET_OPEN_H = 9, MARKET_OPEN_M = 10;
 const MARKET_CLOSE_H = 12, MARKET_CLOSE_M = 0;
+
+/* ── Price source tracking ── */
+let lastSource = '—';
+let lastUpdateTime = '—';
 
 /* ── State ── */
 let state = resetState();
@@ -171,61 +183,115 @@ function updateMarketBar() {
   }
 }
 
-/* ── Price fetching ── */
-async function fetchPrice(stock) {
-  // Try public TWSE API (mis.twse.com.tw) — returns JSON with CORS headers
-  try {
-    const ts = Date.now();
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${stock}.tw&_=${ts}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
-    if (!resp.ok) throw new Error('http ' + resp.status);
-    const json = await resp.json();
-    if (json.msgArray && json.msgArray.length > 0) {
-      const info = json.msgArray[0];
-      // z = last trade price, if "–" use y (yesterday close)
-      let price = parseFloat(info.z);
-      if (isNaN(price) || price <= 0) price = parseFloat(info.y);
-      if (isNaN(price) || price <= 0) throw new Error('no price in response');
-      enableSimMode(false);
-      return price;
-    }
-    throw new Error('empty msgArray');
-  } catch (_e1) {
-    // Try OTC market (tpex)
+/* ── Price fetching — multi-source with fallback chain ── */
+
+// CORS proxy helpers — used when direct fetch fails due to CORS
+const PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+];
+
+async function fetchWithTimeout(url, ms = 4000) {
+  const resp = await fetch(url, { signal: AbortSignal.timeout(ms) });
+  if (!resp.ok) throw new Error('http ' + resp.status);
+  return resp;
+}
+
+async function tryDirectOrProxy(url, ms = 4000) {
+  // Try direct first
+  try { return await fetchWithTimeout(url, ms); } catch (_) { /* fall through */ }
+  // Try each proxy
+  for (const mkProxy of PROXIES) {
+    try { return await fetchWithTimeout(mkProxy(url), ms); } catch (_) { /* next */ }
+  }
+  throw new Error('all fetch attempts failed');
+}
+
+// Source A: TWSE JSON (tse + otc)
+async function fetchTWSE(stock) {
+  const ts = Date.now();
+  for (const ex of ['tse', 'otc']) {
     try {
-      const ts = Date.now();
-      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_${stock}.tw&_=${ts}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
-      if (!resp.ok) throw new Error('http ' + resp.status);
+      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${ex}_${stock}.tw&_=${ts}`;
+      const resp = await tryDirectOrProxy(url);
       const json = await resp.json();
       if (json.msgArray && json.msgArray.length > 0) {
         const info = json.msgArray[0];
         let price = parseFloat(info.z);
         if (isNaN(price) || price <= 0) price = parseFloat(info.y);
-        if (isNaN(price) || price <= 0) throw new Error('no price');
-        enableSimMode(false);
+        if (isNaN(price) || price <= 0) continue;
         return price;
       }
-      throw new Error('empty');
-    } catch (_e2) {
-      // fallback: simulation mode
-      return simulatedPrice(stock);
-    }
+    } catch (_) { /* try next exchange */ }
   }
+  throw new Error('TWSE failed');
 }
 
+// Source B: Yahoo Finance quote
+async function fetchYahoo(stock) {
+  const symbol = `${stock}.TW`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1m`;
+  const resp = await tryDirectOrProxy(url);
+  const json = await resp.json();
+  const meta = json?.chart?.result?.[0]?.meta;
+  const price = meta?.regularMarketPrice;
+  if (typeof price !== 'number' || price <= 0) throw new Error('Yahoo no price');
+  return price;
+}
+
+// Source C: Stooq (text/csv endpoint)
+async function fetchStooq(stock) {
+  const url = `https://stooq.com/q/l/?s=${stock}.tw&f=sd2t2ohlcv&h&e=csv`;
+  const resp = await tryDirectOrProxy(url);
+  const text = await resp.text();
+  // CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) throw new Error('Stooq empty');
+  const cols = lines[1].split(',');
+  const close = parseFloat(cols[6]); // Close column
+  if (isNaN(close) || close <= 0) throw new Error('Stooq no price');
+  return close;
+}
+
+// Source D: Simulation (fallback)
 function simulatedPrice(stock) {
-  enableSimMode(true);
   if (simPrice <= 0) {
-    // seed based on stock — rough defaults
     const seeds = { '2330': 900, '2317': 170, '0050': 160, '2454': 1200 };
     simPrice = seeds[stock] || 500;
   }
-  // random walk: ±0.5%
   const change = simPrice * (Math.random() - 0.5) * 0.01;
   simPrice = Math.round((simPrice + change) * 100) / 100;
   if (simPrice < 1) simPrice = 1;
   return simPrice;
+}
+
+// Main dispatcher — tries sources in priority order
+const SOURCES = [
+  { name: 'TWSE', fn: fetchTWSE },
+  { name: 'Yahoo', fn: fetchYahoo },
+  { name: 'Stooq', fn: fetchStooq },
+];
+
+async function fetchPrice(stock) {
+  for (const src of SOURCES) {
+    try {
+      const price = await src.fn(stock);
+      setSource(src.name);
+      enableSimMode(false);
+      return price;
+    } catch (_) { /* try next */ }
+  }
+  // All real sources failed — fallback to simulation
+  setSource('模擬');
+  enableSimMode(true);
+  return simulatedPrice(stock);
+}
+
+function setSource(name) {
+  lastSource = name;
+  const now = taipeiNow();
+  lastUpdateTime = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  $('sourceBar').textContent = `來源：${lastSource} ｜ 更新：${lastUpdateTime}`;
 }
 
 function enableSimMode(on) {
@@ -299,11 +365,16 @@ function startMonitor() {
   state.buyPrice = 0;
   state.highestPrice = 0;
   simPrice = 0;
+  // Read configurable poll interval
+  const pollSec = Math.max(POLL_MIN / 1000, parseInt($('pollInput').value) || 5);
+  POLL_MS = pollSec * 1000;
+  $('pollInput').value = pollSec;
   btnStart.disabled = true;
   btnStop.disabled = false;
   stockInput.disabled = true;
   stockSelect.disabled = true;
-  addLog(`開始監控 ${state.stock}`, 'neutral');
+  $('pollInput').disabled = true;
+  addLog(`開始監控 ${state.stock}（輪詢 ${pollSec}s）`, 'neutral');
   tick();
   timer = setInterval(tick, POLL_MS);
 }
@@ -315,6 +386,7 @@ function stopMonitor() {
   btnStop.disabled = true;
   stockInput.disabled = false;
   stockSelect.disabled = false;
+  $('pollInput').disabled = false;
   if (state.phase === 'holding' || state.phase === 'trailing') {
     // force sell at current price
     executeSell(state.currentPrice, '手動停止');
