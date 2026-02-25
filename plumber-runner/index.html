@@ -309,7 +309,7 @@ canvas {
 
 <script>
 // ── Version ───────────────────────────────────────────
-const GAME_VERSION = 'v0.9.1';
+const GAME_VERSION = 'v0.9.2';
 
 // ── Lightweight Object Pool ──────────────────────────
 // Reduces GC pressure from short-lived particles/popups.
@@ -651,9 +651,9 @@ const THEME_ANNOUNCE_DURATION = 120; // frames to show theme transition announce
 // Theme-specific weight multipliers (applied on top of difficulty phase weights)
 // Values > 1 increase that chunk type's weight, < 1 decrease it
 const THEME_WEIGHT_MULTS = {
-  PLAINS: { rest: 1.8, single_platform: 1.2, double_platform: 0.5, pipe_mix: 0.3, turtle_zone: 0.7, reward: 1.5, rolling_hills: 1.6, bridge: 0.6, island_hop: 0.4 },
-  CAVE:   { rest: 0.5, single_platform: 1.0, double_platform: 1.5, pipe_mix: 1.8, turtle_zone: 0.8, reward: 0.8, rolling_hills: 0.6, bridge: 1.5, island_hop: 1.3 },
-  TOWER:  { rest: 0.4, single_platform: 1.3, double_platform: 1.8, pipe_mix: 1.0, turtle_zone: 0.5, reward: 1.2, rolling_hills: 0.8, bridge: 0.4, island_hop: 1.6 },
+  PLAINS: { rest: 1.8, single_platform: 1.2, double_platform: 0.5, pipe_mix: 0.3, turtle_zone: 0.7, reward: 1.5, rolling_hills: 1.6, bridge: 0.6, island_hop: 0.4, platform_gauntlet: 1.4, pit_run: 1.2, stairbridge: 1.0 },
+  CAVE:   { rest: 0.5, single_platform: 1.0, double_platform: 1.5, pipe_mix: 1.8, turtle_zone: 0.8, reward: 0.8, rolling_hills: 0.6, bridge: 1.5, island_hop: 1.3, platform_gauntlet: 1.0, pit_run: 1.3, stairbridge: 1.2 },
+  TOWER:  { rest: 0.4, single_platform: 1.3, double_platform: 1.8, pipe_mix: 1.0, turtle_zone: 0.5, reward: 1.2, rolling_hills: 0.8, bridge: 0.4, island_hop: 1.6, platform_gauntlet: 1.5, pit_run: 0.8, stairbridge: 1.6 },
 };
 
 // Theme-specific parameter offsets (added to difficulty phase params)
@@ -832,8 +832,8 @@ const SECTION_ANNOUNCE_DURATION = 120; // frames
 
 // Section-specific weight multipliers (stacked on top of theme mults)
 const SECTION_WEIGHT_MULTS = {
-  UNDERWORLD: { rest: 0.6, single_platform: 1.4, double_platform: 0.5, pipe_mix: 1.6, turtle_zone: 1.3, reward: 1.0, rolling_hills: 0.5, bridge: 1.8, island_hop: 0.7 },
-  TOWER:      { rest: 0.5, single_platform: 0.8, double_platform: 1.8, pipe_mix: 0.7, turtle_zone: 0.4, reward: 1.3, rolling_hills: 1.0, bridge: 0.3, island_hop: 1.8 },
+  UNDERWORLD: { rest: 0.6, single_platform: 1.4, double_platform: 0.5, pipe_mix: 1.6, turtle_zone: 1.3, reward: 1.0, rolling_hills: 0.5, bridge: 1.8, island_hop: 0.7, platform_gauntlet: 1.0, pit_run: 1.5, stairbridge: 1.2 },
+  TOWER:      { rest: 0.5, single_platform: 0.8, double_platform: 1.8, pipe_mix: 0.7, turtle_zone: 0.4, reward: 1.3, rolling_hills: 1.0, bridge: 0.3, island_hop: 1.8, platform_gauntlet: 1.5, pit_run: 0.8, stairbridge: 1.6 },
 };
 
 // Section-specific parameter offsets (stacked on top of theme offsets)
@@ -1388,17 +1388,23 @@ function pickAndGenerateSetPiece(entry, chunkX, diffParams) {
 // 'rolling_hills'   – v0.9.0: continuous elevation undulation (3-4 pipes ascending then descending)
 // 'bridge'          – v0.9.0: low-pressure connector with ceiling overhang + ground gap
 // 'island_hop'      – v0.9.0: short-distance multi-point landing (3-5 small pipe islands)
-const CHUNK_TYPES = ['rest', 'single_platform', 'double_platform', 'pipe_mix', 'turtle_zone', 'reward', 'rolling_hills', 'bridge', 'island_hop'];
+// 'platform_gauntlet' – v0.9.2: NON_PIPE_ZONE – multi-layer suspended brick platforms (pipes = decoration only)
+// 'pit_run'           – v0.9.2: NON_PIPE_ZONE – ground gaps with brick bridges over shallow/deep pits
+// 'stairbridge'       – v0.9.2: NON_PIPE_ZONE – stair-wall bricks + horizontal bridge plates
+const CHUNK_TYPES = ['rest', 'single_platform', 'double_platform', 'pipe_mix', 'turtle_zone', 'reward', 'rolling_hills', 'bridge', 'island_hop', 'platform_gauntlet', 'pit_run', 'stairbridge'];
+
+// v0.9.2: NON_PIPE_ZONE types — pipes are decoration only, bricks are primary traversal
+const NON_PIPE_ZONE_TYPES = ['platform_gauntlet', 'pit_run', 'stairbridge'];
 
 // Difficulty phase definitions for chunk system
 // Phase 0: Tutorial (0-60s) – mostly rest + single_platform
 // Phase 1: Medium (60-180s) – add double_platform, pipe_mix, turtle_zone
 // Phase 2: Hard (180s+) – all types, higher complexity, still reachable
 const CHUNK_DIFFICULTY_PHASES = [
-  { time: 0,   maxPipeH: 100, maxTopH: 80,  weights: { rest: 30, single_platform: 33, double_platform: 5, pipe_mix: 0,  turtle_zone: 12, reward: 5, rolling_hills: 10, bridge: 5, island_hop: 0 } },
-  { time: 60,  maxPipeH: 140, maxTopH: 120, weights: { rest: 12, single_platform: 20, double_platform: 12, pipe_mix: 12, turtle_zone: 12, reward: 12, rolling_hills: 10, bridge: 5, island_hop: 5 } },
-  { time: 180, maxPipeH: 200, maxTopH: 170, weights: { rest: 8,  single_platform: 16, double_platform: 16, pipe_mix: 20, turtle_zone: 8,  reward: 12, rolling_hills: 8,  bridge: 5, island_hop: 7 } },
-  { time: 300, maxPipeH: 240, maxTopH: 200, weights: { rest: 6,  single_platform: 14, double_platform: 18, pipe_mix: 24, turtle_zone: 8,  reward: 10, rolling_hills: 8,  bridge: 4, island_hop: 8 } },
+  { time: 0,   maxPipeH: 100, maxTopH: 80,  weights: { rest: 25, single_platform: 28, double_platform: 5, pipe_mix: 0,  turtle_zone: 10, reward: 5, rolling_hills: 8, bridge: 4, island_hop: 0, platform_gauntlet: 8, pit_run: 5, stairbridge: 2 } },
+  { time: 60,  maxPipeH: 140, maxTopH: 120, weights: { rest: 10, single_platform: 16, double_platform: 10, pipe_mix: 10, turtle_zone: 10, reward: 10, rolling_hills: 8, bridge: 4, island_hop: 4, platform_gauntlet: 8, pit_run: 6, stairbridge: 4 } },
+  { time: 180, maxPipeH: 200, maxTopH: 170, weights: { rest: 7,  single_platform: 13, double_platform: 14, pipe_mix: 17, turtle_zone: 7,  reward: 10, rolling_hills: 7, bridge: 4, island_hop: 6, platform_gauntlet: 6, pit_run: 5, stairbridge: 4 } },
+  { time: 300, maxPipeH: 240, maxTopH: 200, weights: { rest: 5,  single_platform: 11, double_platform: 16, pipe_mix: 21, turtle_zone: 7,  reward: 8,  rolling_hills: 7, bridge: 3, island_hop: 7, platform_gauntlet: 6, pit_run: 5, stairbridge: 4 } },
 ];
 
 // Chunk state tracking
@@ -1409,14 +1415,16 @@ let chunksSinceLastSafe = 0;      // tracks chunks since last safe/reward chunk
 let nextChunkX = 0;               // world X where next chunk starts
 let chunkDebugInfo = null;        // latest chunk debug info for overlay
 
-// v0.9.1: Early terrain visibility guarantee — force all 3 new types in first ~1800 world x
+// v0.9.2: Early terrain schedule — force NON_PIPE_ZONE types first, then v0.9.0 types
 // Schedule uses setPieceChunkCounter indices (1st spawnChunk=1, 2nd=2, etc.)
 // Chunk widths ~600-900px, starting x ~240, so chunk 2 starts around x≈840-1140
-// Each terrain chunk itself provides ~600-900px of spacing → recognizable interval
+// NON_PIPE_ZONE types come first to establish non-pipe identity within first 2000 world x
 const EARLY_TERRAIN_SCHEDULE = [
-  { chunkIdx: 2, type: 'rolling_hills', label: 'ROLLING HILLS', color: '#7fff7f' },
-  { chunkIdx: 3, type: 'bridge',        label: 'BRIDGE',        color: '#7fc4ff' },
-  { chunkIdx: 4, type: 'island_hop',    label: 'ISLAND HOP',    color: '#ffcf7f' },
+  { chunkIdx: 2, type: 'platform_gauntlet', label: 'NON-PIPE ZONE', color: '#ff7fea', nonPipeZone: true },
+  { chunkIdx: 3, type: 'pit_run',           label: 'NON-PIPE ZONE', color: '#ff7fea', nonPipeZone: true },
+  { chunkIdx: 4, type: 'rolling_hills',     label: 'ROLLING HILLS', color: '#7fff7f' },
+  { chunkIdx: 5, type: 'stairbridge',       label: 'NON-PIPE ZONE', color: '#ff7fea', nonPipeZone: true },
+  { chunkIdx: 6, type: 'island_hop',        label: 'ISLAND HOP',    color: '#ffcf7f' },
 ];
 let earlyTerrainIdx = 0;          // next index in EARLY_TERRAIN_SCHEDULE to use
 let earlyTerrainSeen = {};        // { rolling_hills: {id, x}, bridge: {id, x}, island_hop: {id, x} }
@@ -1465,7 +1473,7 @@ function selectChunkType(weights) {
 
 // Check if a chunk type is "dangerous" (can potentially kill the player)
 function isChunkDangerous(type) {
-  return type === 'double_platform' || type === 'pipe_mix' || type === 'island_hop';
+  return type === 'double_platform' || type === 'pipe_mix' || type === 'island_hop' || type === 'pit_run';
 }
 
 // Check if a chunk type is "safe" (breathing room)
@@ -2062,6 +2070,180 @@ function generateChunk(chunkX, type, diffParams) {
       }
       break;
     }
+
+    // ── v0.9.2 NON_PIPE_ZONE terrain types ──────────────────
+
+    case 'platform_gauntlet': {
+      // Multi-layer suspended brick platforms — pipes are decoration only
+      // Player traverses 2-3 tiers of brick platforms at different heights
+      // Primary traversal: bricks. Pipes: max 1 low decorative pipe.
+      const tierCount = 2 + (rng() < 0.4 ? 1 : 0); // 2-3 tiers
+      const segmentWidth = Math.floor((width - 160) / tierCount);
+      const startX = chunkX + 80;
+
+      // Tier heights: low (72-95), mid (100-130), upper (135-150) — all within jump reach
+      const tierHeights = [
+        BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.floor(rng() * 23),                  // 72-95
+        100 + Math.floor(rng() * 30),                                             // 100-130
+        Math.min(CHUNK_PLAYER_MAX_JUMP_H, 135 + Math.floor(rng() * 15)),         // 135-150
+      ];
+
+      for (let t = 0; t < tierCount; t++) {
+        const tierX = startX + t * segmentWidth;
+        const tierH = tierHeights[t % tierHeights.length];
+        const tierY = groundY - tierH;
+
+        // Main platform: 2-3 bricks in a row (continuous walkable surface)
+        const platLen = 2 + (rng() < 0.5 ? 1 : 0); // 2-3 bricks
+        for (let b = 0; b < platLen; b++) {
+          const bx = tierX + b * (BRICK_W + 4); // 4px gap between bricks
+          if (bx < chunkX + width - 50) {
+            result.bricks.push(makeBrick(bx, tierY, SPECIAL_BRICK_CHANCE));
+            result.obstacles.push({ type: 'brick', x: bx, y: tierY });
+          }
+        }
+
+        // v0.9.2: Side-route upper platform line (2-3 bricks above tier)
+        if (t >= 1 && rng() < 0.6) {
+          const upperH = Math.min(CHUNK_PLAYER_MAX_JUMP_H, tierH + 35 + Math.floor(rng() * 15));
+          const upperY = groundY - upperH;
+          const upperCount = 2 + (rng() < 0.4 ? 1 : 0);
+          for (let u = 0; u < upperCount; u++) {
+            const ux = tierX + 10 + u * (BRICK_W + 6);
+            if (ux < chunkX + width - 40 && upperY > 20) {
+              result.bricks.push(makeBrick(ux, upperY, 0.45));
+            }
+          }
+        }
+      }
+
+      // Decorative low pipe (not a primary landing surface) — max 1, very low
+      if (rng() < 0.35) {
+        const decoX = chunkX + width * 0.5 + rng() * (width * 0.3);
+        const decoH = 30 + Math.floor(rng() * 20); // 30-50px, clearly below platforms
+        if (decoX + LIP_W < chunkX + width - 40) {
+          result.pipes.push({ x: decoX, h: decoH, fromTop: false, scored: false });
+          result.obstacles.push({ type: 'pipe_bottom', x: decoX, h: decoH });
+        }
+      }
+      break;
+    }
+
+    case 'pit_run': {
+      // Ground gaps with brick bridges — player must cross "pits" using brick platforms
+      // 2-3 pit gaps with brick bridges spanning each gap
+      // Pipes: decorative only (max 1 low accent pipe at edge)
+      const pitCount = 2 + (rng() < 0.35 ? 1 : 0); // 2-3 pits
+      const pitSection = Math.floor((width - 120) / pitCount);
+      const pitStartX = chunkX + 60;
+
+      for (let p = 0; p < pitCount; p++) {
+        const sectionX = pitStartX + p * pitSection;
+        // Each pit section: solid ground → gap → brick bridge → solid ground
+        // The "pit" is visual: no actual gap in collision, but the brick bridge is the intended path
+        // Place 2-3 bricks spanning the gap at a reachable height
+        const bridgeH = BRICK_MIN_HEIGHT_ABOVE_GROUND + Math.floor(rng() * 25); // 72-97px
+        const bridgeY = groundY - bridgeH;
+        const bridgeLen = 2 + (rng() < 0.5 ? 1 : 0); // 2-3 bricks wide
+
+        for (let b = 0; b < bridgeLen; b++) {
+          const bx = sectionX + 40 + b * (BRICK_W + 5);
+          if (bx < chunkX + width - 50) {
+            result.bricks.push(makeBrick(bx, bridgeY, SPECIAL_BRICK_CHANCE));
+            result.obstacles.push({ type: 'brick', x: bx, y: bridgeY });
+          }
+        }
+
+        // Higher reward brick above the pit bridge (side route: upper platform line)
+        if (rng() < 0.55) {
+          const upperH = Math.min(CHUNK_PLAYER_MAX_JUMP_H, bridgeH + 40 + Math.floor(rng() * 20));
+          const upperY = groundY - upperH;
+          const upperLen = 2 + (rng() < 0.4 ? 1 : 0);
+          for (let u = 0; u < upperLen; u++) {
+            const ux = sectionX + 50 + u * (BRICK_W + 6);
+            if (ux < chunkX + width - 40 && upperY > 20) {
+              result.bricks.push(makeBrick(ux, upperY, 0.5));
+            }
+          }
+        }
+      }
+
+      // Decorative accent pipe at chunk edge (small, clearly not for traversal)
+      if (rng() < 0.3) {
+        const decoX = chunkX + width - 100 + rng() * 40;
+        const decoH = 25 + Math.floor(rng() * 20); // 25-45px tiny pipe
+        if (decoX + LIP_W < chunkX + width - 20) {
+          result.pipes.push({ x: decoX, h: decoH, fromTop: false, scored: false });
+          result.obstacles.push({ type: 'pipe_bottom', x: decoX, h: decoH });
+        }
+      }
+      break;
+    }
+
+    case 'stairbridge': {
+      // Stair-wall + horizontal bridge plates — ascending brick staircase leading to a bridge run
+      // Primary traversal: bricks forming stairs and a flat bridge. Pipes: decorative only.
+      const stairCount = 3 + (rng() < 0.5 ? 1 : 0); // 3-4 stair steps
+      const stairStartX = chunkX + 80 + rng() * 40;
+      const stepSpacing = 45 + Math.floor(rng() * 15); // horizontal step spacing
+      const stepHeightInc = 22 + Math.floor(rng() * 10); // vertical step increment
+
+      // Build ascending staircase
+      let lastStairY = groundY;
+      for (let s = 0; s < stairCount; s++) {
+        const sx = stairStartX + s * stepSpacing;
+        const sh = BRICK_MIN_HEIGHT_ABOVE_GROUND + s * stepHeightInc;
+        const clampedH = Math.min(sh, CHUNK_PLAYER_MAX_JUMP_H);
+        const sy = groundY - clampedH;
+        if (sx < chunkX + width - 100) {
+          result.bricks.push(makeBrick(sx, sy, SPECIAL_BRICK_CHANCE));
+          result.obstacles.push({ type: 'brick', x: sx, y: sy });
+          lastStairY = sy;
+        }
+      }
+
+      // Horizontal bridge at the top of the staircase: 3-4 bricks in a row
+      const bridgeStartX = stairStartX + stairCount * stepSpacing + 10;
+      const bridgeY = lastStairY; // same height as top stair
+      const bridgeLen = 3 + (rng() < 0.4 ? 1 : 0); // 3-4 bricks
+      for (let b = 0; b < bridgeLen; b++) {
+        const bx = bridgeStartX + b * (BRICK_W + 4);
+        if (bx < chunkX + width - 40) {
+          result.bricks.push(makeBrick(bx, bridgeY, SPECIAL_BRICK_CHANCE));
+          result.obstacles.push({ type: 'brick', x: bx, y: bridgeY });
+        }
+      }
+
+      // Upper side-route above the bridge (2-3 reward bricks)
+      if (rng() < 0.5) {
+        const sideH = Math.min(CHUNK_PLAYER_MAX_JUMP_H, (groundY - bridgeY) + 35 + Math.floor(rng() * 15));
+        const sideY = groundY - sideH;
+        const sideLen = 2 + (rng() < 0.4 ? 1 : 0);
+        for (let u = 0; u < sideLen; u++) {
+          const ux = bridgeStartX + 20 + u * (BRICK_W + 6);
+          if (ux < chunkX + width - 40 && sideY > 20) {
+            result.bricks.push(makeBrick(ux, sideY, 0.5));
+          }
+        }
+      }
+
+      // Decorative pipe at the base (not for traversal)
+      if (rng() < 0.3) {
+        const decoX = stairStartX - 40 + rng() * 30;
+        const decoH = 30 + Math.floor(rng() * 15);
+        if (decoX > chunkX + 20 && decoX + LIP_W < chunkX + width - 40) {
+          result.pipes.push({ x: decoX, h: decoH, fromTop: false, scored: false });
+          result.obstacles.push({ type: 'pipe_bottom', x: decoX, h: decoH });
+        }
+      }
+
+      // Extend width if bridge goes beyond
+      const lastBridgeX = bridgeStartX + (bridgeLen - 1) * (BRICK_W + 4);
+      if (lastBridgeX + BRICK_W + 60 > chunkX + width) {
+        result.width = lastBridgeX + BRICK_W + 80 - chunkX;
+      }
+      break;
+    }
   }
 
   return result;
@@ -2218,6 +2400,10 @@ function spawnChunk() {
         earlyTerrainSeen[etEntry.type] = { id: chunkId, x: Math.round(nextChunkX) };
         console.log(`%c[v0.9.1 EarlyTerrain] ${etEntry.type} first at chunk #${chunkId} x=${Math.round(nextChunkX)}`, 'color: ' + etEntry.color + '; font-weight: bold');
       }
+      // v0.9.2: NON_PIPE_ZONE debug log
+      if (etEntry.nonPipeZone) {
+        console.log(`%c[v0.9.2 NON_PIPE_ZONE] chunk #${chunkId} x=${Math.round(nextChunkX)} type=${etEntry.type}`, 'color: #ff7fea; font-weight: bold');
+      }
       if (DEBUG_MODE) {
         console.log(`%c[Chunk] #${chunkId} type=${etEntry.type} theme=${currentTheme} section=${currentSection} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} [EARLY_TERRAIN]`, 'color: #42d4f4');
       }
@@ -2242,12 +2428,12 @@ function spawnChunk() {
 
   // Force rest chunk after too many consecutive danger chunks
   if (consecutiveDangerChunks >= CHUNK_MAX_CONSEC_DANGER) {
-    weights = { rest: 70, single_platform: 15, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 5, rolling_hills: 0, bridge: 0, island_hop: 0 };
+    weights = { rest: 70, single_platform: 15, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 5, rolling_hills: 0, bridge: 0, island_hop: 0, platform_gauntlet: 0, pit_run: 0, stairbridge: 0 };
   }
 
   // Force safe/reward chunk periodically
   if (chunksSinceLastSafe >= CHUNK_SAFE_INTERVAL) {
-    weights = { rest: 30, single_platform: 10, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 50, rolling_hills: 0, bridge: 0, island_hop: 0 };
+    weights = { rest: 30, single_platform: 10, double_platform: 0, pipe_mix: 0, turtle_zone: 10, reward: 50, rolling_hills: 0, bridge: 0, island_hop: 0, platform_gauntlet: 0, pit_run: 0, stairbridge: 0 };
   }
 
   // During theme transition, bias toward safe chunk types
@@ -2364,6 +2550,13 @@ function spawnChunk() {
 
   // Debug info
   chunkDebugInfo = chunkRecord;
+  // v0.9.2: NON_PIPE_ZONE announce + debug log for normal spawn path
+  if (NON_PIPE_ZONE_TYPES.includes(type)) {
+    terrainAnnounceTimer = TERRAIN_ANNOUNCE_FRAMES;
+    terrainAnnounceName = 'NON-PIPE ZONE';
+    terrainAnnounceColor = '#ff7fea';
+    console.log(`%c[v0.9.2 NON_PIPE_ZONE] chunk #${chunkId} x=${Math.round(nextChunkX)} type=${type}`, 'color: #ff7fea; font-weight: bold');
+  }
   if (DEBUG_MODE) {
     console.log(`%c[Chunk] #${chunkId} type=${type} theme=${currentTheme} section=${currentSection} x=${Math.round(nextChunkX)} w=${Math.round(chunk.width)} phase=${diffParams.phase} rerolls=${rerolls} themeRemain=${themeChunksRemaining} sectionRemain=${sectionChunksRemaining}`, 'color: #42d4f4');
   }

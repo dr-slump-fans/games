@@ -2066,6 +2066,68 @@ Updated `GAME_VERSION` from `v0.6.2` → **`v0.6.3`**.
 
 ---
 
+## v0.9.2 — Non-Pipe Terrain Identity (NON_PIPE_ZONE)
+
+### Design Intent
+The first minute of gameplay should clearly demonstrate that the map is **not just pipes**. Pipes become supporting actors; bricks and platforms take center stage as the primary traversal elements in dedicated NON_PIPE_ZONE sections.
+
+### New Chunk Types (NON_PIPE_ZONE family)
+Three new chunk types where **bricks are the primary traversal surface** and pipes are decorative only (max 1 low accent pipe per chunk):
+
+| Type | Description | Primary Elements |
+|------|-------------|-----------------|
+| `platform_gauntlet` | Multi-layer suspended brick platforms (2-3 tiers at different heights) | 2-3 tiers of 2-3 brick rows each |
+| `pit_run` | Ground gaps with brick bridges over shallow/deep pits | 2-3 pit sections, each bridged by 2-3 bricks |
+| `stairbridge` | Ascending brick staircase (3-4 steps) leading to a horizontal brick bridge (3-4 bricks) | Stair-wall + bridge plate |
+
+### Early Terrain Schedule (Forced in First 2000 World X)
+The early terrain schedule guarantees at least 2 NON_PIPE_ZONE chunks appear before world x ≈ 2000:
+
+| spawnChunk # | Type | Label | Approx. World X |
+|--------------|------|-------|-----------------|
+| 2 | `platform_gauntlet` | NON-PIPE ZONE | ~840-1140 |
+| 3 | `pit_run` | NON-PIPE ZONE | ~1500-1900 |
+| 4 | `rolling_hills` | ROLLING HILLS | ~2100-2700 |
+| 5 | `stairbridge` | NON-PIPE ZONE | ~2700-3300 |
+| 6 | `island_hop` | ISLAND HOP | ~3300-3900 |
+
+### Side Route Upgrade
+Each NON_PIPE_ZONE chunk includes an **upper platform line** (2-3 continuous bricks at a higher tier) as an optional reward route. These are clearly above the main path and don't obscure it.
+
+### NON-PIPE ZONE Announce HUD
+Entering any NON_PIPE_ZONE chunk triggers a pink (`#ff7fea`) **NON-PIPE ZONE** text announcement at screen top, using the same announce system as terrain types.
+
+### Debug / QA Verification
+Console logs for every NON_PIPE_ZONE chunk (early schedule and normal spawn):
+```
+[v0.9.2 NON_PIPE_ZONE] chunk #2 x=840 type=platform_gauntlet
+[v0.9.2 NON_PIPE_ZONE] chunk #3 x=1500 type=pit_run
+```
+
+### Front-Segment NON_PIPE_ZONE Coordinate Examples
+- **platform_gauntlet**: chunk #2, x ≈ 840 (first non-rest chunk after initial safe zone)
+- **pit_run**: chunk #3, x ≈ 1500 (second forced NON_PIPE_ZONE)
+- **stairbridge**: chunk #5, x ≈ 2700 (third forced NON_PIPE_ZONE)
+
+### Acceptance Criteria
+1. Start a new game → at least 2 NON_PIPE_ZONE chunks appear before world x ≈ 2000
+2. Each NON_PIPE_ZONE chunk shows **NON-PIPE ZONE** HUD announcement (pink text)
+3. Console shows `[v0.9.2 NON_PIPE_ZONE]` logs with chunk IDs, coordinates, and types
+4. Primary traversal in NON_PIPE_ZONE is bricks/platforms, not pipes
+5. Reachability validation passes for all generated chunks
+6. No changes to core collision or enemy rules
+
+### Fairness & Limits
+- All brick heights ≤ 150px (within `CHUNK_PLAYER_MAX_JUMP_H`)
+- Reachability validation unchanged — applies to all new chunk types
+- No floor gaps that cause unavoidable death
+- Pipes in NON_PIPE_ZONE are decorative only (≤50px height)
+
+### Version
+Updated `GAME_VERSION` from `v0.9.1` → **`v0.9.2`**.
+
+---
+
 ## v0.9.1 — Visible Change Guarantee (Early Terrain Showcase)
 
 ### Design Intent
