@@ -22,6 +22,7 @@ button{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 1
 button:disabled{opacity:.4;cursor:default}
 button.stop{background:#dc2626}
 button.reset{background:#475569}
+button.clear-save{background:#7c2d12}
 
 /* status panel */
 .panel{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:12px;margin:10px 0}
@@ -54,7 +55,7 @@ button.reset{background:#475569}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.1</span></h1>
+  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.2</span></h1>
   <span id="simBadge" class="sim-badge">模擬模式</span>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
@@ -80,7 +81,9 @@ button.reset{background:#475569}
     <button id="btnStart">開始監控</button>
     <button id="btnStop" class="stop" disabled>停止</button>
     <button id="btnReset" class="reset">重置</button>
+    <button id="btnClearSave" class="reset" style="background:#7c2d12">清除存檔</button>
   </div>
+  <div id="loadNotice" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.82rem;text-align:center"></div>
 
   <!-- status -->
   <div class="panel">
@@ -146,9 +149,55 @@ function resetState() {
   };
 }
 
+/* ── localStorage persistence ── */
+const SAVE_KEY = 'stockInvestGame_v1';
+
+function saveState() {
+  try {
+    const data = {
+      stock: state.stock,
+      phase: state.phase,
+      buyPrice: state.buyPrice,
+      highestPrice: state.highestPrice,
+      currentPrice: state.currentPrice,
+      trades: (state.trades || []).slice(-100),
+      source: lastSource,
+      sourceTime: lastUpdateTime,
+      pollSec: POLL_MS / 1000,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (_) { /* localStorage unavailable — silently ignore */ }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object') return null;
+    return {
+      stock:        typeof d.stock === 'string' && d.stock ? d.stock : '2330',
+      phase:        ['idle','holding','trailing','sold'].includes(d.phase) ? d.phase : 'idle',
+      buyPrice:     typeof d.buyPrice === 'number' && d.buyPrice >= 0 ? d.buyPrice : 0,
+      highestPrice: typeof d.highestPrice === 'number' && d.highestPrice >= 0 ? d.highestPrice : 0,
+      currentPrice: typeof d.currentPrice === 'number' && d.currentPrice >= 0 ? d.currentPrice : 0,
+      trades:       Array.isArray(d.trades) ? d.trades.slice(-100) : [],
+      source:       typeof d.source === 'string' ? d.source : '—',
+      sourceTime:   typeof d.sourceTime === 'string' ? d.sourceTime : '—',
+      pollSec:      typeof d.pollSec === 'number' && d.pollSec >= POLL_MIN/1000 ? d.pollSec : 5,
+    };
+  } catch (_) { return null; }
+}
+
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (_) { /* ignore */ }
+}
+
 /* ── DOM refs ── */
 const $ = id => document.getElementById(id);
 const btnStart = $('btnStart'), btnStop = $('btnStop'), btnReset = $('btnReset');
+const btnClearSave = $('btnClearSave');
 const stockInput = $('stockInput'), stockSelect = $('stockSelect');
 
 stockSelect.addEventListener('change', () => { stockInput.value = stockSelect.value; });
@@ -160,6 +209,7 @@ stockInput.addEventListener('input', () => {
 btnStart.addEventListener('click', startMonitor);
 btnStop.addEventListener('click', stopMonitor);
 btnReset.addEventListener('click', doReset);
+btnClearSave.addEventListener('click', doClearSave);
 
 /* ── Market hours check (Asia/Taipei) ── */
 function taipeiNow() {
@@ -321,6 +371,7 @@ async function tick() {
     state.highestPrice = price;
     state.phase = 'holding';
     addLog(`買入 ${SHARES} 股 @ $${price}`, 'neutral');
+    saveState();
   }
 
   if (state.phase === 'holding') {
@@ -330,6 +381,7 @@ async function tick() {
       state.phase = 'trailing';
       state.highestPrice = price;
       addLog(`進入停利模式 (現價 $${price}, 買入 $${state.buyPrice})`, 'neutral');
+      saveState();
     }
   }
 
@@ -356,14 +408,19 @@ function executeSell(price, reason) {
     `賣出 ${SHARES} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
     pnl >= 0 ? 'up' : 'down'
   );
+  saveState();
 }
 
 /* ── Start / Stop / Reset ── */
 function startMonitor() {
-  state.stock = stockInput.value.trim() || '2330';
-  state.phase = 'idle';
-  state.buyPrice = 0;
-  state.highestPrice = 0;
+  const inputStock = stockInput.value.trim() || '2330';
+  const resuming = (state.phase === 'holding' || state.phase === 'trailing') && state.stock === inputStock;
+  if (!resuming) {
+    state.stock = inputStock;
+    state.phase = 'idle';
+    state.buyPrice = 0;
+    state.highestPrice = 0;
+  }
   simPrice = 0;
   // Read configurable poll interval
   const pollSec = Math.max(POLL_MIN / 1000, parseInt($('pollInput').value) || 5);
@@ -374,7 +431,10 @@ function startMonitor() {
   stockInput.disabled = true;
   stockSelect.disabled = true;
   $('pollInput').disabled = true;
-  addLog(`開始監控 ${state.stock}（輪詢 ${pollSec}s）`, 'neutral');
+  $('loadNotice').style.display = 'none';
+  const modeLabel = resuming ? '續監' : '開始監控';
+  addLog(`${modeLabel} ${state.stock}（輪詢 ${pollSec}s）`, 'neutral');
+  saveState();
   tick();
   timer = setInterval(tick, POLL_MS);
 }
@@ -394,6 +454,7 @@ function stopMonitor() {
   }
   addLog('監控已停止', 'neutral');
   state.phase = 'idle';
+  saveState();
 }
 
 function doReset() {
@@ -404,6 +465,26 @@ function doReset() {
   $('logBox').innerHTML = '<div class="entry" style="color:#64748b">尚無交易記錄</div>';
   renderAll();
   addLog('已重置', 'neutral');
+  saveState();
+}
+
+function doClearSave() {
+  stopMonitor();
+  state = resetState();
+  simPrice = 0;
+  enableSimMode(false);
+  clearSave();
+  $('logBox').innerHTML = '<div class="entry" style="color:#64748b">尚無交易記錄</div>';
+  $('loadNotice').style.display = 'none';
+  lastSource = '—';
+  lastUpdateTime = '—';
+  $('sourceBar').textContent = '來源：— ｜ 更新：—';
+  POLL_MS = 5000;
+  $('pollInput').value = 5;
+  stockInput.value = '2330';
+  stockSelect.value = '2330';
+  renderAll();
+  addLog('存檔已清除，回到初始狀態', 'neutral');
 }
 
 /* ── Render ── */
@@ -477,7 +558,61 @@ function addLog(msg, type) {
 /* ── Init ── */
 updateMarketBar();
 setInterval(updateMarketBar, 30000);
-renderAll();
+
+// Load saved state from localStorage
+(function initLoad() {
+  const saved = loadState();
+  if (!saved) { renderAll(); return; }
+
+  state.stock = saved.stock;
+  state.phase = saved.phase;
+  state.buyPrice = saved.buyPrice;
+  state.highestPrice = saved.highestPrice;
+  state.currentPrice = saved.currentPrice;
+  state.trades = saved.trades;
+
+  lastSource = saved.source;
+  lastUpdateTime = saved.sourceTime;
+  $('sourceBar').textContent = `來源：${lastSource} ｜ 更新：${lastUpdateTime}`;
+
+  POLL_MS = saved.pollSec * 1000;
+  $('pollInput').value = saved.pollSec;
+
+  stockInput.value = saved.stock;
+  if ([...stockSelect.options].some(o => o.value === saved.stock)) stockSelect.value = saved.stock;
+
+  // Restore trade log entries into logBox
+  if (saved.trades.length > 0) {
+    $('logBox').innerHTML = '';
+    // Show last 20 trades in log (most recent first — they're stored oldest-first)
+    const recent = saved.trades.slice(-20);
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const t = recent[i];
+      const sign = t.pnl >= 0 ? '+' : '';
+      const cls = t.pnl >= 0 ? 'log-entry-up' : 'log-entry-down';
+      const div = document.createElement('div');
+      div.className = 'entry ' + cls;
+      div.textContent = `賣出 @ $${t.sellPrice}（${t.reason}）報酬 ${sign}${t.returnPct.toFixed(2)}%  損益 ${sign}$${t.pnl.toFixed(0)}`;
+      $('logBox').appendChild(div);
+    }
+  }
+
+  renderAll();
+
+  // Show notice if there's a meaningful saved position
+  const hasPosition = saved.phase === 'holding' || saved.phase === 'trailing';
+  const hasTrades = saved.trades.length > 0;
+  if (hasPosition || hasTrades) {
+    const notice = $('loadNotice');
+    if (hasPosition) {
+      notice.textContent = `已載入上次庫存（${saved.stock}，${saved.phase === 'holding' ? '持有' : '停利模式'}，買入 $${saved.buyPrice}），可按「開始監控」繼續`;
+    } else {
+      notice.textContent = `已載入上次存檔（${saved.trades.length} 筆交易記錄），可繼續監控`;
+    }
+    notice.style.display = 'block';
+  }
+})();
+
 </script>
 </body>
 </html>
