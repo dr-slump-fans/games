@@ -53,6 +53,14 @@ button.clear-save{background:#7c2d12}
 
 /* inventory query button */
 button.query{background:#0d9488}
+button.manual-buy{background:#7c3aed}
+button.manual-buy:disabled{opacity:.4;cursor:default}
+.manual-buy-row{display:flex;gap:8px;margin:6px 0;flex-wrap:wrap;align-items:center}
+.manual-buy-row input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 10px;font-size:.95rem;width:110px}
+.manual-buy-row label{font-size:.8rem;color:#94a3b8;white-space:nowrap}
+.time-row{display:flex;gap:8px;margin:6px 0;flex-wrap:wrap;align-items:center}
+.time-row input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:6px 8px;font-size:.9rem;width:80px}
+.time-row label{font-size:.8rem;color:#94a3b8;white-space:nowrap}
 
 /* inventory modal overlay */
 .inv-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:100;justify-content:center;align-items:center}
@@ -71,7 +79,7 @@ button.query{background:#0d9488}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.3</span></h1>
+  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.4</span></h1>
   <span id="simBadge" class="sim-badge">模擬模式</span>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
@@ -81,6 +89,15 @@ button.query{background:#0d9488}
   <div class="row" style="align-items:center">
     <label style="font-size:.8rem;color:#94a3b8;white-space:nowrap">輪詢間隔</label>
     <input id="pollInput" type="number" min="3" max="60" value="5" style="width:60px;flex:none"/> <span style="font-size:.8rem;color:#94a3b8">秒</span>
+  </div>
+
+  <!-- monitoring time window -->
+  <div class="time-row">
+    <label>監控時窗</label>
+    <input id="monitorStart" type="text" value="09:10" placeholder="09:10"/>
+    <span style="font-size:.8rem;color:#94a3b8">~</span>
+    <input id="monitorEnd" type="text" value="12:00" placeholder="12:00"/>
+    <span style="font-size:.75rem;color:#64748b">(Asia/Taipei)</span>
   </div>
 
   <!-- stock input -->
@@ -100,6 +117,14 @@ button.query{background:#0d9488}
     <button id="btnClearSave" class="reset" style="background:#7c2d12">清除存檔</button>
     <button id="btnQuery" class="query">查詢庫存</button>
   </div>
+  <!-- manual buy -->
+  <div class="manual-buy-row">
+    <label>手動買入價</label>
+    <input id="manualBuyPrice" type="number" step="0.01" min="0" placeholder="留空=現價"/>
+    <label>股數</label>
+    <input id="manualBuyShares" type="number" min="1" value="1000" style="width:80px"/>
+    <button id="btnManualBuy" class="manual-buy">手動買入</button>
+  </div>
   <div id="loadNotice" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.82rem;text-align:center"></div>
 
   <!-- status -->
@@ -110,8 +135,11 @@ button.query{background:#0d9488}
       <div><div class="lbl">現價</div><div class="val" id="dPrice">—</div></div>
       <div><div class="lbl">買入價</div><div class="val" id="dBuy">—</div></div>
       <div><div class="lbl">最高價</div><div class="val" id="dHigh">—</div></div>
+      <div><div class="lbl">股數</div><div class="val" id="dShares">—</div></div>
+      <div><div class="lbl">買入來源</div><div class="val" id="dBuySource">—</div></div>
       <div><div class="lbl">狀態</div><div class="val neutral" id="dState">等待中</div></div>
       <div><div class="lbl">報酬率</div><div class="val neutral" id="dReturn">—</div></div>
+      <div><div class="lbl">監控時窗</div><div class="val" id="dTimeWindow" style="font-size:.85rem">—</div></div>
     </div>
   </div>
 
@@ -144,15 +172,16 @@ button.query{background:#0d9488}
 
 <script>
 /* ── Config ── */
-const SHARES = 1000;
+let SHARES = 1000;           // default shares (can be overridden by manual buy)
 const STOP_LOSS = 0.9;       // sell if price <= buyPrice * 0.9
 const ENTER_TP = 1.1;        // enter trailing-stop mode at +10%
 const NEAR_HIGH = 0.998;     // treat as new high if >= highest * 0.998
 const TP_EXIT = 0.92;        // sell if price <= highestPrice * 0.92
 let POLL_MS = 5000;          // poll interval (configurable)
 const POLL_MIN = 3000;
-const MARKET_OPEN_H = 9, MARKET_OPEN_M = 10;
-const MARKET_CLOSE_H = 12, MARKET_CLOSE_M = 0;
+/* Configurable monitoring time window (HH:MM format, Asia/Taipei) */
+let MONITOR_START = '09:10';
+let MONITOR_END = '12:00';
 
 /* ── Price source tracking ── */
 let lastSource = '—';
@@ -171,7 +200,9 @@ function resetState() {
     buyPrice: 0,
     highestPrice: 0,
     currentPrice: 0,
-    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason}
+    shares: 1000,        // current position shares
+    buySource: '',       // '' | 'auto' | 'manual'
+    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason, shares, buySource}
   };
 }
 
@@ -186,10 +217,14 @@ function saveState() {
       buyPrice: state.buyPrice,
       highestPrice: state.highestPrice,
       currentPrice: state.currentPrice,
+      shares: state.shares,
+      buySource: state.buySource,
       trades: (state.trades || []).slice(-100),
       source: lastSource,
       sourceTime: lastUpdateTime,
       pollSec: POLL_MS / 1000,
+      monitorStart: MONITOR_START,
+      monitorEnd: MONITOR_END,
       savedAt: Date.now(),
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -208,10 +243,14 @@ function loadState() {
       buyPrice:     typeof d.buyPrice === 'number' && d.buyPrice >= 0 ? d.buyPrice : 0,
       highestPrice: typeof d.highestPrice === 'number' && d.highestPrice >= 0 ? d.highestPrice : 0,
       currentPrice: typeof d.currentPrice === 'number' && d.currentPrice >= 0 ? d.currentPrice : 0,
+      shares:       typeof d.shares === 'number' && d.shares > 0 ? d.shares : 1000,
+      buySource:    typeof d.buySource === 'string' ? d.buySource : '',
       trades:       Array.isArray(d.trades) ? d.trades.slice(-100) : [],
       source:       typeof d.source === 'string' ? d.source : '—',
       sourceTime:   typeof d.sourceTime === 'string' ? d.sourceTime : '—',
       pollSec:      typeof d.pollSec === 'number' && d.pollSec >= POLL_MIN/1000 ? d.pollSec : 5,
+      monitorStart: typeof d.monitorStart === 'string' && /^\d{2}:\d{2}$/.test(d.monitorStart) ? d.monitorStart : '09:10',
+      monitorEnd:   typeof d.monitorEnd === 'string' && /^\d{2}:\d{2}$/.test(d.monitorEnd) ? d.monitorEnd : '12:00',
     };
   } catch (_) { return null; }
 }
@@ -233,12 +272,14 @@ stockInput.addEventListener('input', () => {
 });
 
 const btnQuery = $('btnQuery');
+const btnManualBuy = $('btnManualBuy');
 
 btnStart.addEventListener('click', startMonitor);
 btnStop.addEventListener('click', stopMonitor);
 btnReset.addEventListener('click', doReset);
 btnClearSave.addEventListener('click', doClearSave);
 btnQuery.addEventListener('click', showInventory);
+btnManualBuy.addEventListener('click', doManualBuy);
 $('invClose').addEventListener('click', () => { $('invOverlay').classList.remove('show'); });
 $('invOverlay').addEventListener('click', e => { if (e.target === $('invOverlay')) $('invOverlay').classList.remove('show'); });
 
@@ -246,21 +287,25 @@ $('invOverlay').addEventListener('click', e => { if (e.target === $('invOverlay'
 function taipeiNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
 }
+function parseHHMM(s) {
+  const [h, m] = s.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
 function isMarketOpen() {
   const d = taipeiNow();
   const day = d.getDay();
   if (day === 0 || day === 6) return false;
   const mins = d.getHours() * 60 + d.getMinutes();
-  return mins >= MARKET_OPEN_H * 60 + MARKET_OPEN_M && mins < MARKET_CLOSE_H * 60 + MARKET_CLOSE_M;
+  return mins >= parseHHMM(MONITOR_START) && mins < parseHHMM(MONITOR_END);
 }
 function updateMarketBar() {
   const bar = $('marketBar');
   if (isMarketOpen()) {
     bar.className = 'market-bar open';
-    bar.textContent = '盤中交易時段 09:10 – 12:00';
+    bar.textContent = `監控中 ${MONITOR_START} – ${MONITOR_END}`;
   } else {
     bar.className = 'market-bar closed';
-    bar.textContent = '非盤中時段 — 等待開盤';
+    bar.textContent = `非監控時段 — 等待 ${MONITOR_START}`;
   }
 }
 
@@ -394,16 +439,9 @@ async function tick() {
   state.currentPrice = price;
   renderPrice();
 
-  if (!isMarketOpen()) return;  // no strategy outside market hours
+  if (!isMarketOpen()) return;  // no strategy outside monitoring window
 
-  if (state.phase === 'idle') {
-    // auto-buy on first tick during market hours
-    state.buyPrice = price;
-    state.highestPrice = price;
-    state.phase = 'holding';
-    addLog(`買入 ${SHARES} 股 @ $${price}`, 'neutral');
-    saveState();
-  }
+  // No auto-buy; user must use "手動買入" or "開始監控" (which does auto-buy)
 
   if (state.phase === 'holding') {
     if (price <= state.buyPrice * STOP_LOSS) {
@@ -429,14 +467,16 @@ async function tick() {
 }
 
 function executeSell(price, reason) {
-  const pnl = (price - state.buyPrice) * SHARES;
+  const sh = state.shares || 1000;
+  const pnl = (price - state.buyPrice) * sh;
   const returnPct = ((price - state.buyPrice) / state.buyPrice) * 100;
-  const trade = { buyPrice: state.buyPrice, sellPrice: price, pnl, returnPct, reason };
+  const trade = { buyPrice: state.buyPrice, sellPrice: price, pnl, returnPct, reason, shares: sh, buySource: state.buySource || 'auto' };
   state.trades.push(trade);
   state.phase = 'sold';
+  state.buySource = '';
   const sign = pnl >= 0 ? '+' : '';
   addLog(
-    `賣出 ${SHARES} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
+    `賣出 ${sh} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
     pnl >= 0 ? 'up' : 'down'
   );
   saveState();
@@ -451,23 +491,79 @@ function startMonitor() {
     state.phase = 'idle';
     state.buyPrice = 0;
     state.highestPrice = 0;
+    state.buySource = '';
   }
   simPrice = 0;
   // Read configurable poll interval
   const pollSec = Math.max(POLL_MIN / 1000, parseInt($('pollInput').value) || 5);
   POLL_MS = pollSec * 1000;
   $('pollInput').value = pollSec;
+  // Read monitoring time window
+  readMonitorTime();
   btnStart.disabled = true;
   btnStop.disabled = false;
   stockInput.disabled = true;
   stockSelect.disabled = true;
   $('pollInput').disabled = true;
+  $('monitorStart').disabled = true;
+  $('monitorEnd').disabled = true;
   $('loadNotice').style.display = 'none';
   const modeLabel = resuming ? '續監' : '開始監控';
-  addLog(`${modeLabel} ${state.stock}（輪詢 ${pollSec}s）`, 'neutral');
+  addLog(`${modeLabel} ${state.stock}（輪詢 ${pollSec}s，時窗 ${MONITOR_START}~${MONITOR_END}）`, 'neutral');
   saveState();
   tick();
   timer = setInterval(tick, POLL_MS);
+}
+
+/* Read monitoring time from UI inputs */
+function readMonitorTime() {
+  const s = $('monitorStart').value.trim();
+  const e = $('monitorEnd').value.trim();
+  if (/^\d{1,2}:\d{2}$/.test(s)) MONITOR_START = s.padStart(5, '0');
+  if (/^\d{1,2}:\d{2}$/.test(e)) MONITOR_END = e.padStart(5, '0');
+  $('monitorStart').value = MONITOR_START;
+  $('monitorEnd').value = MONITOR_END;
+}
+
+/* ── Manual Buy ── */
+async function doManualBuy() {
+  if (state.phase === 'holding' || state.phase === 'trailing') {
+    alert('已有持倉，請先賣出或停止監控後才能再買入');
+    return;
+  }
+  const inputStock = stockInput.value.trim() || '2330';
+  const sharesVal = parseInt($('manualBuyShares').value) || 1000;
+  const priceVal = parseFloat($('manualBuyPrice').value);
+
+  let buyP;
+  if (!isNaN(priceVal) && priceVal > 0) {
+    buyP = priceVal;
+  } else {
+    // fetch current price
+    try {
+      buyP = await fetchPrice(inputStock);
+    } catch (_) {
+      alert('無法取得現價，請手動輸入買入價');
+      return;
+    }
+  }
+
+  state.stock = inputStock;
+  state.buyPrice = buyP;
+  state.highestPrice = buyP;
+  state.currentPrice = buyP;
+  state.shares = sharesVal;
+  state.buySource = 'manual';
+  state.phase = 'holding';
+  SHARES = sharesVal;
+  addLog(`手動買入 ${sharesVal} 股 ${inputStock} @ $${buyP}`, 'neutral');
+  saveState();
+  renderAll();
+
+  // Auto-start monitoring if not already running
+  if (!timer) {
+    startMonitor();
+  }
 }
 
 function stopMonitor() {
@@ -478,6 +574,8 @@ function stopMonitor() {
   stockInput.disabled = false;
   stockSelect.disabled = false;
   $('pollInput').disabled = false;
+  $('monitorStart').disabled = false;
+  $('monitorEnd').disabled = false;
   if (state.phase === 'holding' || state.phase === 'trailing') {
     // force sell at current price
     executeSell(state.currentPrice, '手動停止');
@@ -485,6 +583,7 @@ function stopMonitor() {
   }
   addLog('監控已停止', 'neutral');
   state.phase = 'idle';
+  state.buySource = '';
   saveState();
 }
 
@@ -512,6 +611,13 @@ function doClearSave() {
   $('sourceBar').textContent = '來源：— ｜ 更新：—';
   POLL_MS = 5000;
   $('pollInput').value = 5;
+  MONITOR_START = '09:10';
+  MONITOR_END = '12:00';
+  $('monitorStart').value = '09:10';
+  $('monitorEnd').value = '12:00';
+  SHARES = 1000;
+  $('manualBuyShares').value = 1000;
+  $('manualBuyPrice').value = '';
   stockInput.value = '2330';
   stockSelect.value = '2330';
   renderAll();
@@ -528,6 +634,10 @@ function renderAll() {
   renderPrice();
   $('dBuy').textContent = state.buyPrice ? `$${state.buyPrice.toFixed(2)}` : '—';
   $('dHigh').textContent = state.highestPrice ? `$${state.highestPrice.toFixed(2)}` : '—';
+  $('dShares').textContent = (state.phase === 'holding' || state.phase === 'trailing') ? state.shares : '—';
+  const srcLabels = { manual: '手動買入', auto: '自動買入' };
+  $('dBuySource').textContent = state.buySource ? (srcLabels[state.buySource] || state.buySource) : '—';
+  $('dTimeWindow').textContent = `${MONITOR_START} ~ ${MONITOR_END}`;
 
   // state label
   const labels = { idle: '等待中', holding: '持有', trailing: '停利模式', sold: '已賣出' };
@@ -598,16 +708,19 @@ async function showInventory() {
   let html = '';
 
   if (hasPos) {
-    const pnl = (state.currentPrice - state.buyPrice) * SHARES;
+    const sh = state.shares || 1000;
+    const pnl = (state.currentPrice - state.buyPrice) * sh;
     const retPct = ((state.currentPrice - state.buyPrice) / state.buyPrice) * 100;
     const sign = pnl >= 0 ? '+' : '';
     const cls = pnl >= 0 ? 'up' : 'down';
     const phaseLabel = state.phase === 'trailing' ? '停利模式' : '持有中';
+    const srcLabel = state.buySource === 'manual' ? '手動買入' : '自動買入';
 
     html += '<div class="inv-grid">';
     html += `<div><div class="lbl">股票代號</div><div class="val">${state.stock}</div></div>`;
     html += `<div><div class="lbl">持有狀態</div><div class="val">${phaseLabel}</div></div>`;
-    html += `<div><div class="lbl">持有股數</div><div class="val">${SHARES}</div></div>`;
+    html += `<div><div class="lbl">持有股數</div><div class="val">${sh}</div></div>`;
+    html += `<div><div class="lbl">買入來源</div><div class="val">${srcLabel}</div></div>`;
     html += `<div><div class="lbl">買入價</div><div class="val">$${state.buyPrice.toFixed(2)}</div></div>`;
     html += `<div><div class="lbl">現價</div><div class="val ${cls}">$${state.currentPrice.toFixed(2)}</div></div>`;
     html += `<div><div class="lbl">未實現損益</div><div class="val ${cls}">${sign}$${pnl.toFixed(0)}</div></div>`;
@@ -659,6 +772,8 @@ setInterval(updateMarketBar, 30000);
   state.buyPrice = saved.buyPrice;
   state.highestPrice = saved.highestPrice;
   state.currentPrice = saved.currentPrice;
+  state.shares = saved.shares;
+  state.buySource = saved.buySource;
   state.trades = saved.trades;
 
   lastSource = saved.source;
@@ -667,6 +782,13 @@ setInterval(updateMarketBar, 30000);
 
   POLL_MS = saved.pollSec * 1000;
   $('pollInput').value = saved.pollSec;
+
+  MONITOR_START = saved.monitorStart;
+  MONITOR_END = saved.monitorEnd;
+  $('monitorStart').value = MONITOR_START;
+  $('monitorEnd').value = MONITOR_END;
+
+  SHARES = saved.shares;
 
   stockInput.value = saved.stock;
   if ([...stockSelect.options].some(o => o.value === saved.stock)) stockSelect.value = saved.stock;
@@ -695,7 +817,8 @@ setInterval(updateMarketBar, 30000);
   if (hasPosition || hasTrades) {
     const notice = $('loadNotice');
     if (hasPosition) {
-      notice.textContent = `已載入上次庫存（${saved.stock}，${saved.phase === 'holding' ? '持有' : '停利模式'}，買入 $${saved.buyPrice}），可按「開始監控」繼續`;
+      const srcTag = saved.buySource === 'manual' ? '手動買入' : '自動買入';
+      notice.textContent = `已載入上次庫存（${saved.stock}，${saved.phase === 'holding' ? '持有' : '停利模式'}，${srcTag} ${saved.shares}股 @ $${saved.buyPrice}），可按「開始監控」繼續`;
     } else {
       notice.textContent = `已載入上次存檔（${saved.trades.length} 筆交易記錄），可繼續監控`;
     }
