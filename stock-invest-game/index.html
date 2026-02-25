@@ -53,6 +53,8 @@ button.clear-save{background:#7c2d12}
 
 /* inventory query button */
 button.query{background:#0d9488}
+button.manual-sell{background:#f97316}
+button.manual-sell:disabled{opacity:.4;cursor:default}
 button.manual-buy{background:#7c3aed}
 button.manual-buy:disabled{opacity:.4;cursor:default}
 .manual-buy-row{display:flex;gap:8px;margin:6px 0;flex-wrap:wrap;align-items:center}
@@ -79,7 +81,7 @@ button.manual-buy:disabled{opacity:.4;cursor:default}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.4</span></h1>
+  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.5</span></h1>
   <span id="simBadge" class="sim-badge">模擬模式</span>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
@@ -112,7 +114,8 @@ button.manual-buy:disabled{opacity:.4;cursor:default}
   </div>
   <div class="row">
     <button id="btnStart">開始監控</button>
-    <button id="btnStop" class="stop" disabled>停止</button>
+    <button id="btnStop" class="stop" disabled>停止監控</button>
+    <button id="btnManualSell" class="manual-sell" disabled>手動賣出</button>
     <button id="btnReset" class="reset">重置</button>
     <button id="btnClearSave" class="reset" style="background:#7c2d12">清除存檔</button>
     <button id="btnQuery" class="query">查詢庫存</button>
@@ -272,6 +275,7 @@ stockInput.addEventListener('input', () => {
 });
 
 const btnQuery = $('btnQuery');
+const btnManualSell = $('btnManualSell');
 const btnManualBuy = $('btnManualBuy');
 
 btnStart.addEventListener('click', startMonitor);
@@ -280,6 +284,7 @@ btnReset.addEventListener('click', doReset);
 btnClearSave.addEventListener('click', doClearSave);
 btnQuery.addEventListener('click', showInventory);
 btnManualBuy.addEventListener('click', doManualBuy);
+btnManualSell.addEventListener('click', doManualSell);
 $('invClose').addEventListener('click', () => { $('invOverlay').classList.remove('show'); });
 $('invOverlay').addEventListener('click', e => { if (e.target === $('invOverlay')) $('invOverlay').classList.remove('show'); });
 
@@ -576,15 +581,36 @@ function stopMonitor() {
   $('pollInput').disabled = false;
   $('monitorStart').disabled = false;
   $('monitorEnd').disabled = false;
-  if (state.phase === 'holding' || state.phase === 'trailing') {
-    // force sell at current price
-    executeSell(state.currentPrice, '手動停止');
-    renderAll();
+  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
+  if (hasPos) {
+    addLog('已停止監控（持倉保留）', 'neutral');
+  } else {
+    addLog('監控已停止', 'neutral');
   }
-  addLog('監控已停止', 'neutral');
-  state.phase = 'idle';
-  state.buySource = '';
+  updateManualSellBtn();
   saveState();
+}
+
+/* ── Manual Sell ── */
+async function doManualSell() {
+  if (state.phase !== 'holding' && state.phase !== 'trailing') {
+    alert('目前無持倉，無法賣出');
+    return;
+  }
+  // Try to get fresh price
+  let price = state.currentPrice;
+  try {
+    price = await fetchPrice(state.stock);
+    state.currentPrice = price;
+  } catch (_) { /* use last known price */ }
+  executeSell(price, '手動賣出');
+  updateManualSellBtn();
+  renderAll();
+}
+
+function updateManualSellBtn() {
+  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
+  btnManualSell.disabled = !hasPos;
 }
 
 function doReset() {
@@ -632,6 +658,7 @@ function renderPrice() {
 
 function renderAll() {
   renderPrice();
+  updateManualSellBtn();
   $('dBuy').textContent = state.buyPrice ? `$${state.buyPrice.toFixed(2)}` : '—';
   $('dHigh').textContent = state.highestPrice ? `$${state.highestPrice.toFixed(2)}` : '—';
   $('dShares').textContent = (state.phase === 'holding' || state.phase === 'trailing') ? state.shares : '—';
@@ -642,7 +669,9 @@ function renderAll() {
   // state label
   const labels = { idle: '等待中', holding: '持有', trailing: '停利模式', sold: '已賣出' };
   const el = $('dState');
-  el.textContent = labels[state.phase] || '—';
+  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
+  const stoppedSuffix = (hasPos && !timer) ? '（未監控）' : '';
+  el.textContent = (labels[state.phase] || '—') + stoppedSuffix;
   el.className = 'val ' + (state.phase === 'trailing' ? 'up' : state.phase === 'sold' ? 'neutral' : 'neutral');
 
   // current return
@@ -698,8 +727,8 @@ function addLog(msg, type) {
 
 /* ── Inventory Query ── */
 async function showInventory() {
-  // If monitoring is active, trigger a fresh price fetch (non-blocking)
-  if (timer && state.stock) {
+  // Trigger a fresh price fetch if we have a stock to check
+  if (state.stock) {
     try { state.currentPrice = await fetchPrice(state.stock); } catch (_) { /* use stale price */ }
   }
 
@@ -713,7 +742,8 @@ async function showInventory() {
     const retPct = ((state.currentPrice - state.buyPrice) / state.buyPrice) * 100;
     const sign = pnl >= 0 ? '+' : '';
     const cls = pnl >= 0 ? 'up' : 'down';
-    const phaseLabel = state.phase === 'trailing' ? '停利模式' : '持有中';
+    const monitorLabel = timer ? '' : '（監控已停止）';
+    const phaseLabel = (state.phase === 'trailing' ? '停利模式' : '持有中') + monitorLabel;
     const srcLabel = state.buySource === 'manual' ? '手動買入' : '自動買入';
 
     html += '<div class="inv-grid">';
@@ -818,7 +848,7 @@ setInterval(updateMarketBar, 30000);
     const notice = $('loadNotice');
     if (hasPosition) {
       const srcTag = saved.buySource === 'manual' ? '手動買入' : '自動買入';
-      notice.textContent = `已載入上次庫存（${saved.stock}，${saved.phase === 'holding' ? '持有' : '停利模式'}，${srcTag} ${saved.shares}股 @ $${saved.buyPrice}），可按「開始監控」繼續`;
+      notice.textContent = `已載入上次庫存（${saved.stock}，${saved.phase === 'holding' ? '持有' : '停利模式'}，${srcTag} ${saved.shares}股 @ $${saved.buyPrice}），可按「開始監控」繼續或「手動賣出」平倉`;
     } else {
       notice.textContent = `已載入上次存檔（${saved.trades.length} 筆交易記錄），可繼續監控`;
     }
