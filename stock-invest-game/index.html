@@ -76,12 +76,27 @@ button.manual-buy:disabled{opacity:.4;cursor:default}
 .inv-modal .section-title{font-size:.82rem;color:#94a3b8;margin:12px 0 6px;border-top:1px solid #334155;padding-top:8px}
 .inv-modal .no-pos{text-align:center;color:#94a3b8;padding:16px 0;font-size:.9rem}
 .inv-modal .last-trade{background:#111827;border-radius:8px;padding:10px;margin-top:8px;font-size:.82rem;line-height:1.6}
+
+/* lots table */
+.lots-panel{margin:10px 0}
+.lots-panel h2{font-size:.95rem;margin-bottom:6px;color:#94a3b8}
+.lots-table{width:100%;border-collapse:collapse;font-size:.78rem}
+.lots-table th{text-align:left;color:#64748b;padding:4px 6px;border-bottom:1px solid #334155;font-weight:500}
+.lots-table td{padding:4px 6px;border-bottom:1px solid #1e293b;vertical-align:middle}
+.lots-table .lot-up{color:#22c55e}
+.lots-table .lot-down{color:#ef4444}
+.lots-table .lot-neutral{color:#94a3b8}
+button.sell-lot{background:#f97316;color:#fff;border:none;border-radius:6px;padding:3px 8px;font-size:.72rem;cursor:pointer;font-weight:600}
+button.sell-lot:hover{background:#ea580c}
+button.sell-all{background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.82rem;cursor:pointer;font-weight:600;margin-top:6px}
+button.sell-all:hover{background:#b91c1c}
+.lots-empty{color:#64748b;font-size:.82rem;text-align:center;padding:10px 0}
 </style>
 </head>
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.5</span></h1>
+  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.6</span></h1>
   <span id="simBadge" class="sim-badge">模擬模式</span>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
@@ -115,7 +130,7 @@ button.manual-buy:disabled{opacity:.4;cursor:default}
   <div class="row">
     <button id="btnStart">開始監控</button>
     <button id="btnStop" class="stop" disabled>停止監控</button>
-    <button id="btnManualSell" class="manual-sell" disabled>手動賣出</button>
+    <button id="btnManualSell" class="manual-sell" disabled>賣出全部</button>
     <button id="btnReset" class="reset">重置</button>
     <button id="btnClearSave" class="reset" style="background:#7c2d12">清除存檔</button>
     <button id="btnQuery" class="query">查詢庫存</button>
@@ -128,6 +143,12 @@ button.manual-buy:disabled{opacity:.4;cursor:default}
     <input id="manualBuyShares" type="number" min="1" value="1000" style="width:80px"/>
     <button id="btnManualBuy" class="manual-buy">手動買入</button>
   </div>
+  <!-- active lots panel -->
+  <div class="panel lots-panel" id="lotsPanel" style="display:none">
+    <h2>持倉清單</h2>
+    <div id="lotsBody"></div>
+  </div>
+
   <div id="loadNotice" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.82rem;text-align:center"></div>
 
   <!-- status -->
@@ -191,21 +212,35 @@ let lastSource = '—';
 let lastUpdateTime = '—';
 
 /* ── State ── */
+let nextLotId = 1;
 let state = resetState();
 let timer = null;
 let simMode = false;
 let simPrice = 0;
 
+function makeLot(opts) {
+  return {
+    lotId: nextLotId++,
+    stock: opts.stock || '2330',
+    shares: opts.shares || 1000,
+    buyPrice: opts.buyPrice || 0,
+    highestPrice: opts.highestPrice || opts.buyPrice || 0,
+    phase: opts.phase || 'holding',   // holding | trailing | sold
+    buyTime: opts.buyTime || Date.now(),
+    buySource: opts.buySource || 'manual',
+    sellPrice: null,
+    sellTime: null,
+    sellReason: null,
+  };
+}
+
 function resetState() {
+  nextLotId = 1;
   return {
     stock: '2330',
-    phase: 'idle',       // idle | holding | trailing | sold
-    buyPrice: 0,
-    highestPrice: 0,
     currentPrice: 0,
-    shares: 1000,        // current position shares
-    buySource: '',       // '' | 'auto' | 'manual'
-    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason, shares, buySource}
+    lots: [],            // active + sold lots
+    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason, shares, buySource, lotId}
   };
 }
 
@@ -215,13 +250,11 @@ const SAVE_KEY = 'stockInvestGame_v1';
 function saveState() {
   try {
     const data = {
+      version: 2,        // v0.1.6 multi-lot format
       stock: state.stock,
-      phase: state.phase,
-      buyPrice: state.buyPrice,
-      highestPrice: state.highestPrice,
       currentPrice: state.currentPrice,
-      shares: state.shares,
-      buySource: state.buySource,
+      lots: state.lots,
+      nextLotId: nextLotId,
       trades: (state.trades || []).slice(-100),
       source: lastSource,
       sourceTime: lastUpdateTime,
@@ -240,21 +273,43 @@ function loadState() {
     if (!raw) return null;
     const d = JSON.parse(raw);
     if (!d || typeof d !== 'object') return null;
-    return {
-      stock:        typeof d.stock === 'string' && d.stock ? d.stock : '2330',
-      phase:        ['idle','holding','trailing','sold'].includes(d.phase) ? d.phase : 'idle',
-      buyPrice:     typeof d.buyPrice === 'number' && d.buyPrice >= 0 ? d.buyPrice : 0,
-      highestPrice: typeof d.highestPrice === 'number' && d.highestPrice >= 0 ? d.highestPrice : 0,
-      currentPrice: typeof d.currentPrice === 'number' && d.currentPrice >= 0 ? d.currentPrice : 0,
-      shares:       typeof d.shares === 'number' && d.shares > 0 ? d.shares : 1000,
-      buySource:    typeof d.buySource === 'string' ? d.buySource : '',
-      trades:       Array.isArray(d.trades) ? d.trades.slice(-100) : [],
+
+    const base = {
       source:       typeof d.source === 'string' ? d.source : '—',
       sourceTime:   typeof d.sourceTime === 'string' ? d.sourceTime : '—',
       pollSec:      typeof d.pollSec === 'number' && d.pollSec >= POLL_MIN/1000 ? d.pollSec : 5,
       monitorStart: typeof d.monitorStart === 'string' && /^\d{2}:\d{2}$/.test(d.monitorStart) ? d.monitorStart : '09:10',
       monitorEnd:   typeof d.monitorEnd === 'string' && /^\d{2}:\d{2}$/.test(d.monitorEnd) ? d.monitorEnd : '12:00',
+      trades:       Array.isArray(d.trades) ? d.trades.slice(-100) : [],
+      currentPrice: typeof d.currentPrice === 'number' && d.currentPrice >= 0 ? d.currentPrice : 0,
+      stock:        typeof d.stock === 'string' && d.stock ? d.stock : '2330',
     };
+
+    // v2 format (multi-lot)
+    if (d.version === 2 && Array.isArray(d.lots)) {
+      base.lots = d.lots;
+      base.nextLotId = typeof d.nextLotId === 'number' ? d.nextLotId : 1;
+      return base;
+    }
+
+    // v1 migration: single position → lots array
+    base.lots = [];
+    base.nextLotId = 1;
+    const phase = ['holding','trailing'].includes(d.phase) ? d.phase : null;
+    if (phase && typeof d.buyPrice === 'number' && d.buyPrice > 0) {
+      base.lots.push({
+        lotId: base.nextLotId++,
+        stock: base.stock,
+        shares: typeof d.shares === 'number' && d.shares > 0 ? d.shares : 1000,
+        buyPrice: d.buyPrice,
+        highestPrice: typeof d.highestPrice === 'number' && d.highestPrice > 0 ? d.highestPrice : d.buyPrice,
+        phase: phase,
+        buyTime: d.savedAt || Date.now(),
+        buySource: typeof d.buySource === 'string' && d.buySource ? d.buySource : 'manual',
+        sellPrice: null, sellTime: null, sellReason: null,
+      });
+    }
+    return base;
   } catch (_) { return null; }
 }
 
@@ -431,6 +486,9 @@ function enableSimMode(on) {
   $('simBadge').className = 'sim-badge' + (on ? ' on' : '');
 }
 
+/* ── Helper: get active lots ── */
+function activeLots() { return state.lots.filter(l => l.phase === 'holding' || l.phase === 'trailing'); }
+
 /* ── Core loop ── */
 async function tick() {
   updateMarketBar();
@@ -446,42 +504,44 @@ async function tick() {
 
   if (!isMarketOpen()) return;  // no strategy outside monitoring window
 
-  // No auto-buy; user must use "手動買入" or "開始監控" (which does auto-buy)
-
-  if (state.phase === 'holding') {
-    if (price <= state.buyPrice * STOP_LOSS) {
-      executeSell(price, '停損');
-    } else if (price >= state.buyPrice * ENTER_TP) {
-      state.phase = 'trailing';
-      state.highestPrice = price;
-      addLog(`進入停利模式 (現價 $${price}, 買入 $${state.buyPrice})`, 'neutral');
-      saveState();
+  // Apply strategy to each active lot independently
+  for (const lot of activeLots()) {
+    if (lot.phase === 'holding') {
+      if (price <= lot.buyPrice * STOP_LOSS) {
+        executeSellLot(lot, price, '停損');
+      } else if (price >= lot.buyPrice * ENTER_TP) {
+        lot.phase = 'trailing';
+        lot.highestPrice = price;
+        addLog(`Lot#${lot.lotId} 進入停利模式 (現價 $${price}, 買入 $${lot.buyPrice})`, 'neutral');
+        saveState();
+      }
     }
-  }
-
-  if (state.phase === 'trailing') {
-    if (price >= state.highestPrice * NEAR_HIGH) {
-      state.highestPrice = Math.max(state.highestPrice, price);
-    }
-    if (price <= state.highestPrice * TP_EXIT) {
-      executeSell(price, '移動停利');
+    if (lot.phase === 'trailing') {
+      if (price >= lot.highestPrice * NEAR_HIGH) {
+        lot.highestPrice = Math.max(lot.highestPrice, price);
+      }
+      if (price <= lot.highestPrice * TP_EXIT) {
+        executeSellLot(lot, price, '移動停利');
+      }
     }
   }
 
   renderAll();
 }
 
-function executeSell(price, reason) {
-  const sh = state.shares || 1000;
-  const pnl = (price - state.buyPrice) * sh;
-  const returnPct = ((price - state.buyPrice) / state.buyPrice) * 100;
-  const trade = { buyPrice: state.buyPrice, sellPrice: price, pnl, returnPct, reason, shares: sh, buySource: state.buySource || 'auto' };
+function executeSellLot(lot, price, reason) {
+  const sh = lot.shares || 1000;
+  const pnl = (price - lot.buyPrice) * sh;
+  const returnPct = ((price - lot.buyPrice) / lot.buyPrice) * 100;
+  const trade = { buyPrice: lot.buyPrice, sellPrice: price, pnl, returnPct, reason, shares: sh, buySource: lot.buySource || 'manual', lotId: lot.lotId };
   state.trades.push(trade);
-  state.phase = 'sold';
-  state.buySource = '';
+  lot.phase = 'sold';
+  lot.sellPrice = price;
+  lot.sellTime = Date.now();
+  lot.sellReason = reason;
   const sign = pnl >= 0 ? '+' : '';
   addLog(
-    `賣出 ${sh} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
+    `Lot#${lot.lotId} 賣出 ${sh} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
     pnl >= 0 ? 'up' : 'down'
   );
   saveState();
@@ -490,14 +550,7 @@ function executeSell(price, reason) {
 /* ── Start / Stop / Reset ── */
 function startMonitor() {
   const inputStock = stockInput.value.trim() || '2330';
-  const resuming = (state.phase === 'holding' || state.phase === 'trailing') && state.stock === inputStock;
-  if (!resuming) {
-    state.stock = inputStock;
-    state.phase = 'idle';
-    state.buyPrice = 0;
-    state.highestPrice = 0;
-    state.buySource = '';
-  }
+  state.stock = inputStock;
   simPrice = 0;
   // Read configurable poll interval
   const pollSec = Math.max(POLL_MIN / 1000, parseInt($('pollInput').value) || 5);
@@ -513,7 +566,8 @@ function startMonitor() {
   $('monitorStart').disabled = true;
   $('monitorEnd').disabled = true;
   $('loadNotice').style.display = 'none';
-  const modeLabel = resuming ? '續監' : '開始監控';
+  const lotsCount = activeLots().length;
+  const modeLabel = lotsCount > 0 ? `續監（${lotsCount} 筆持倉）` : '開始監控';
   addLog(`${modeLabel} ${state.stock}（輪詢 ${pollSec}s，時窗 ${MONITOR_START}~${MONITOR_END}）`, 'neutral');
   saveState();
   tick();
@@ -532,10 +586,6 @@ function readMonitorTime() {
 
 /* ── Manual Buy ── */
 async function doManualBuy() {
-  if (state.phase === 'holding' || state.phase === 'trailing') {
-    alert('已有持倉，請先賣出或停止監控後才能再買入');
-    return;
-  }
   const inputStock = stockInput.value.trim() || '2330';
   const sharesVal = parseInt($('manualBuyShares').value) || 1000;
   const priceVal = parseFloat($('manualBuyPrice').value);
@@ -544,7 +594,6 @@ async function doManualBuy() {
   if (!isNaN(priceVal) && priceVal > 0) {
     buyP = priceVal;
   } else {
-    // fetch current price
     try {
       buyP = await fetchPrice(inputStock);
     } catch (_) {
@@ -554,14 +603,10 @@ async function doManualBuy() {
   }
 
   state.stock = inputStock;
-  state.buyPrice = buyP;
-  state.highestPrice = buyP;
   state.currentPrice = buyP;
-  state.shares = sharesVal;
-  state.buySource = 'manual';
-  state.phase = 'holding';
-  SHARES = sharesVal;
-  addLog(`手動買入 ${sharesVal} 股 ${inputStock} @ $${buyP}`, 'neutral');
+  const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: 'manual' });
+  state.lots.push(lot);
+  addLog(`Lot#${lot.lotId} 手動買入 ${sharesVal} 股 ${inputStock} @ $${buyP}`, 'neutral');
   saveState();
   renderAll();
 
@@ -581,9 +626,9 @@ function stopMonitor() {
   $('pollInput').disabled = false;
   $('monitorStart').disabled = false;
   $('monitorEnd').disabled = false;
-  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
-  if (hasPos) {
-    addLog('已停止監控（持倉保留）', 'neutral');
+  const active = activeLots();
+  if (active.length > 0) {
+    addLog(`已停止監控（${active.length} 筆持倉保留）`, 'neutral');
   } else {
     addLog('監控已停止', 'neutral');
   }
@@ -593,24 +638,38 @@ function stopMonitor() {
 
 /* ── Manual Sell ── */
 async function doManualSell() {
-  if (state.phase !== 'holding' && state.phase !== 'trailing') {
+  const active = activeLots();
+  if (active.length === 0) {
     alert('目前無持倉，無法賣出');
     return;
   }
-  // Try to get fresh price
   let price = state.currentPrice;
   try {
     price = await fetchPrice(state.stock);
     state.currentPrice = price;
   } catch (_) { /* use last known price */ }
-  executeSell(price, '手動賣出');
+  for (const lot of active) {
+    executeSellLot(lot, price, '手動賣出');
+  }
+  updateManualSellBtn();
+  renderAll();
+}
+
+async function doManualSellLot(lotId) {
+  const lot = state.lots.find(l => l.lotId === lotId);
+  if (!lot || (lot.phase !== 'holding' && lot.phase !== 'trailing')) return;
+  let price = state.currentPrice;
+  try {
+    price = await fetchPrice(state.stock);
+    state.currentPrice = price;
+  } catch (_) { /* use last known price */ }
+  executeSellLot(lot, price, '手動賣出');
   updateManualSellBtn();
   renderAll();
 }
 
 function updateManualSellBtn() {
-  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
-  btnManualSell.disabled = !hasPos;
+  btnManualSell.disabled = activeLots().length === 0;
 }
 
 function doReset() {
@@ -659,34 +718,50 @@ function renderPrice() {
 function renderAll() {
   renderPrice();
   updateManualSellBtn();
-  $('dBuy').textContent = state.buyPrice ? `$${state.buyPrice.toFixed(2)}` : '—';
-  $('dHigh').textContent = state.highestPrice ? `$${state.highestPrice.toFixed(2)}` : '—';
-  $('dShares').textContent = (state.phase === 'holding' || state.phase === 'trailing') ? state.shares : '—';
-  const srcLabels = { manual: '手動買入', auto: '自動買入' };
-  $('dBuySource').textContent = state.buySource ? (srcLabels[state.buySource] || state.buySource) : '—';
+
+  const active = activeLots();
+  const hasPos = active.length > 0;
   $('dTimeWindow').textContent = `${MONITOR_START} ~ ${MONITOR_END}`;
 
-  // state label
-  const labels = { idle: '等待中', holding: '持有', trailing: '停利模式', sold: '已賣出' };
-  const el = $('dState');
-  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
-  const stoppedSuffix = (hasPos && !timer) ? '（未監控）' : '';
-  el.textContent = (labels[state.phase] || '—') + stoppedSuffix;
-  el.className = 'val ' + (state.phase === 'trailing' ? 'up' : state.phase === 'sold' ? 'neutral' : 'neutral');
+  // Summary of active lots in the status panel
+  if (hasPos) {
+    const totalShares = active.reduce((s, l) => s + l.shares, 0);
+    const avgBuy = active.reduce((s, l) => s + l.buyPrice * l.shares, 0) / totalShares;
+    const hasTrailing = active.some(l => l.phase === 'trailing');
+    const maxHigh = Math.max(...active.map(l => l.highestPrice));
 
-  // current return
-  const retEl = $('dReturn');
-  if (state.phase === 'holding' || state.phase === 'trailing') {
-    const pct = ((state.currentPrice - state.buyPrice) / state.buyPrice) * 100;
-    retEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-    retEl.className = 'val ' + (pct >= 0 ? 'up' : 'down');
-  } else if (state.phase === 'sold' && state.trades.length > 0) {
-    const last = state.trades[state.trades.length - 1];
-    retEl.textContent = (last.returnPct >= 0 ? '+' : '') + last.returnPct.toFixed(2) + '%';
-    retEl.className = 'val ' + (last.returnPct >= 0 ? 'up' : 'down');
+    $('dBuy').textContent = active.length === 1 ? `$${active[0].buyPrice.toFixed(2)}` : `avg $${avgBuy.toFixed(2)}`;
+    $('dHigh').textContent = hasTrailing ? `$${maxHigh.toFixed(2)}` : '—';
+    $('dShares').textContent = `${totalShares}（${active.length}筆）`;
+    $('dBuySource').textContent = active.length === 1 ? (active[0].buySource === 'manual' ? '手動買入' : '自動買入') : `${active.length} 筆`;
+
+    const stoppedSuffix = !timer ? '（未監控）' : '';
+    const phaseLabel = hasTrailing ? '停利模式' : '持有';
+    $('dState').textContent = phaseLabel + stoppedSuffix;
+    $('dState').className = 'val ' + (hasTrailing ? 'up' : 'neutral');
+
+    const totalPnl = active.reduce((s, l) => s + (state.currentPrice - l.buyPrice) * l.shares, 0);
+    const totalCost = active.reduce((s, l) => s + l.buyPrice * l.shares, 0);
+    const pctReturn = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+    const retEl = $('dReturn');
+    retEl.textContent = (pctReturn >= 0 ? '+' : '') + pctReturn.toFixed(2) + '%';
+    retEl.className = 'val ' + (pctReturn >= 0 ? 'up' : 'down');
   } else {
-    retEl.textContent = '—';
-    retEl.className = 'val neutral';
+    $('dBuy').textContent = '—';
+    $('dHigh').textContent = '—';
+    $('dShares').textContent = '—';
+    $('dBuySource').textContent = '—';
+    $('dState').textContent = state.trades.length > 0 ? '已賣出' : '等待中';
+    $('dState').className = 'val neutral';
+    const retEl = $('dReturn');
+    if (state.trades.length > 0) {
+      const last = state.trades[state.trades.length - 1];
+      retEl.textContent = (last.returnPct >= 0 ? '+' : '') + last.returnPct.toFixed(2) + '%';
+      retEl.className = 'val ' + (last.returnPct >= 0 ? 'up' : 'down');
+    } else {
+      retEl.textContent = '—';
+      retEl.className = 'val neutral';
+    }
   }
 
   // cumulative stats
@@ -710,6 +785,41 @@ function renderAll() {
     $('sTotalPnl').textContent = '$0';
     $('sTotalPnl').className = 'val neutral';
   }
+
+  // Render active lots panel
+  renderLotsPanel();
+}
+
+function renderLotsPanel() {
+  const active = activeLots();
+  const panel = $('lotsPanel');
+  const body = $('lotsBody');
+  if (active.length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  let html = '<table class="lots-table"><tr><th>#</th><th>買入價</th><th>股數</th><th>狀態</th><th>最高</th><th>損益%</th><th></th></tr>';
+  for (const lot of active) {
+    const pct = lot.buyPrice > 0 ? ((state.currentPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
+    const cls = pct >= 0 ? 'lot-up' : 'lot-down';
+    const sign = pct >= 0 ? '+' : '';
+    const phaseLabel = lot.phase === 'trailing' ? '停利' : '持有';
+    html += `<tr>`;
+    html += `<td>${lot.lotId}</td>`;
+    html += `<td>$${lot.buyPrice.toFixed(2)}</td>`;
+    html += `<td>${lot.shares}</td>`;
+    html += `<td>${phaseLabel}</td>`;
+    html += `<td>${lot.phase === 'trailing' ? '$' + lot.highestPrice.toFixed(2) : '—'}</td>`;
+    html += `<td class="${cls}">${sign}${pct.toFixed(2)}%</td>`;
+    html += `<td><button class="sell-lot" onclick="doManualSellLot(${lot.lotId})">賣出</button></td>`;
+    html += `</tr>`;
+  }
+  html += '</table>';
+  if (active.length > 1) {
+    html += '<button class="sell-all" onclick="doManualSell()">賣出全部</button>';
+  }
+  body.innerHTML = html;
 }
 
 function addLog(msg, type) {
@@ -727,51 +837,62 @@ function addLog(msg, type) {
 
 /* ── Inventory Query ── */
 async function showInventory() {
-  // Trigger a fresh price fetch if we have a stock to check
   if (state.stock) {
     try { state.currentPrice = await fetchPrice(state.stock); } catch (_) { /* use stale price */ }
   }
 
-  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
+  const active = activeLots();
   const container = $('invContent');
   let html = '';
 
-  if (hasPos) {
-    const sh = state.shares || 1000;
-    const pnl = (state.currentPrice - state.buyPrice) * sh;
-    const retPct = ((state.currentPrice - state.buyPrice) / state.buyPrice) * 100;
-    const sign = pnl >= 0 ? '+' : '';
-    const cls = pnl >= 0 ? 'up' : 'down';
+  if (active.length > 0) {
+    const totalShares = active.reduce((s, l) => s + l.shares, 0);
+    const totalCost = active.reduce((s, l) => s + l.buyPrice * l.shares, 0);
+    const totalPnl = active.reduce((s, l) => s + (state.currentPrice - l.buyPrice) * l.shares, 0);
+    const totalRetPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+    const tSign = totalPnl >= 0 ? '+' : '';
+    const tCls = totalPnl >= 0 ? 'up' : 'down';
     const monitorLabel = timer ? '' : '（監控已停止）';
-    const phaseLabel = (state.phase === 'trailing' ? '停利模式' : '持有中') + monitorLabel;
-    const srcLabel = state.buySource === 'manual' ? '手動買入' : '自動買入';
 
+    // Summary
     html += '<div class="inv-grid">';
     html += `<div><div class="lbl">股票代號</div><div class="val">${state.stock}</div></div>`;
-    html += `<div><div class="lbl">持有狀態</div><div class="val">${phaseLabel}</div></div>`;
-    html += `<div><div class="lbl">持有股數</div><div class="val">${sh}</div></div>`;
-    html += `<div><div class="lbl">買入來源</div><div class="val">${srcLabel}</div></div>`;
-    html += `<div><div class="lbl">買入價</div><div class="val">$${state.buyPrice.toFixed(2)}</div></div>`;
-    html += `<div><div class="lbl">現價</div><div class="val ${cls}">$${state.currentPrice.toFixed(2)}</div></div>`;
-    html += `<div><div class="lbl">未實現損益</div><div class="val ${cls}">${sign}$${pnl.toFixed(0)}</div></div>`;
-    html += `<div><div class="lbl">未實現報酬率</div><div class="val ${cls}">${sign}${retPct.toFixed(2)}%</div></div>`;
-    if (state.phase === 'trailing') {
-      html += `<div><div class="lbl">最高價</div><div class="val up">$${state.highestPrice.toFixed(2)}</div></div>`;
-    }
-    html += `<div><div class="lbl">最後更新</div><div class="val" style="font-size:.8rem">${lastUpdateTime}</div></div>`;
-    html += `<div><div class="lbl">來源</div><div class="val" style="font-size:.8rem">${lastSource}</div></div>`;
+    html += `<div><div class="lbl">持倉筆數</div><div class="val">${active.length} 筆${monitorLabel}</div></div>`;
+    html += `<div><div class="lbl">總持有股數</div><div class="val">${totalShares}</div></div>`;
+    html += `<div><div class="lbl">現價</div><div class="val">$${state.currentPrice.toFixed(2)}</div></div>`;
+    html += `<div><div class="lbl">總未實現損益</div><div class="val ${tCls}">${tSign}$${totalPnl.toFixed(0)}</div></div>`;
+    html += `<div><div class="lbl">總報酬率</div><div class="val ${tCls}">${tSign}${totalRetPct.toFixed(2)}%</div></div>`;
     html += '</div>';
+
+    // Per-lot detail
+    html += '<div class="section-title">各筆持倉</div>';
+    for (const lot of active) {
+      const pnl = (state.currentPrice - lot.buyPrice) * lot.shares;
+      const retPct = lot.buyPrice > 0 ? ((state.currentPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
+      const sign = pnl >= 0 ? '+' : '';
+      const cls = pnl >= 0 ? 'up' : 'down';
+      const phaseLabel = lot.phase === 'trailing' ? '停利模式' : '持有中';
+      html += '<div class="last-trade">';
+      html += `<div><strong>Lot#${lot.lotId}</strong> — ${phaseLabel}（${lot.buySource === 'manual' ? '手動' : '自動'}）</div>`;
+      html += `<div>買入價：$${lot.buyPrice.toFixed(2)} × ${lot.shares} 股</div>`;
+      html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${pnl.toFixed(0)}</span>（${sign}${retPct.toFixed(2)}%）</div>`;
+      if (lot.phase === 'trailing') {
+        html += `<div>最高價：$${lot.highestPrice.toFixed(2)}</div>`;
+      }
+      html += '</div>';
+    }
+
+    html += `<div style="margin-top:8px;font-size:.75rem;color:#64748b;text-align:center">最後更新：${lastUpdateTime} ｜ 來源：${lastSource}</div>`;
   } else {
     html += '<div class="no-pos">目前無持倉</div>';
 
-    // Show last realized trade if any
     if (state.trades.length > 0) {
       const last = state.trades[state.trades.length - 1];
       const sign = last.pnl >= 0 ? '+' : '';
       const cls = last.pnl >= 0 ? 'up' : 'down';
       html += '<div class="section-title">最近一次已實現交易</div>';
       html += '<div class="last-trade">';
-      html += `<div>買入價：$${last.buyPrice.toFixed(2)}</div>`;
+      html += `<div>Lot#${last.lotId || '—'} 買入價：$${last.buyPrice.toFixed(2)}</div>`;
       html += `<div>賣出價：$${last.sellPrice.toFixed(2)}</div>`;
       html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${last.pnl.toFixed(0)}</span></div>`;
       html += `<div>報酬率：<span class="val ${cls}" style="font-size:.82rem">${sign}${last.returnPct.toFixed(2)}%</span></div>`;
@@ -779,9 +900,7 @@ async function showInventory() {
       html += '</div>';
     }
 
-    html += '<div style="margin-top:10px;font-size:.75rem;color:#64748b;text-align:center">';
-    html += `最後更新：${lastUpdateTime} ｜ 來源：${lastSource}`;
-    html += '</div>';
+    html += `<div style="margin-top:10px;font-size:.75rem;color:#64748b;text-align:center">最後更新：${lastUpdateTime} ｜ 來源：${lastSource}</div>`;
   }
 
   container.innerHTML = html;
@@ -798,13 +917,10 @@ setInterval(updateMarketBar, 30000);
   if (!saved) { renderAll(); return; }
 
   state.stock = saved.stock;
-  state.phase = saved.phase;
-  state.buyPrice = saved.buyPrice;
-  state.highestPrice = saved.highestPrice;
   state.currentPrice = saved.currentPrice;
-  state.shares = saved.shares;
-  state.buySource = saved.buySource;
+  state.lots = saved.lots || [];
   state.trades = saved.trades;
+  nextLotId = saved.nextLotId || 1;
 
   lastSource = saved.source;
   lastUpdateTime = saved.sourceTime;
@@ -818,15 +934,12 @@ setInterval(updateMarketBar, 30000);
   $('monitorStart').value = MONITOR_START;
   $('monitorEnd').value = MONITOR_END;
 
-  SHARES = saved.shares;
-
   stockInput.value = saved.stock;
   if ([...stockSelect.options].some(o => o.value === saved.stock)) stockSelect.value = saved.stock;
 
   // Restore trade log entries into logBox
   if (saved.trades.length > 0) {
     $('logBox').innerHTML = '';
-    // Show last 20 trades in log (most recent first — they're stored oldest-first)
     const recent = saved.trades.slice(-20);
     for (let i = recent.length - 1; i >= 0; i--) {
       const t = recent[i];
@@ -834,7 +947,7 @@ setInterval(updateMarketBar, 30000);
       const cls = t.pnl >= 0 ? 'log-entry-up' : 'log-entry-down';
       const div = document.createElement('div');
       div.className = 'entry ' + cls;
-      div.textContent = `賣出 @ $${t.sellPrice}（${t.reason}）報酬 ${sign}${t.returnPct.toFixed(2)}%  損益 ${sign}$${t.pnl.toFixed(0)}`;
+      div.textContent = `Lot#${t.lotId || '—'} 賣出 @ $${t.sellPrice}（${t.reason}）報酬 ${sign}${t.returnPct.toFixed(2)}%  損益 ${sign}$${t.pnl.toFixed(0)}`;
       $('logBox').appendChild(div);
     }
   }
@@ -842,13 +955,13 @@ setInterval(updateMarketBar, 30000);
   renderAll();
 
   // Show notice if there's a meaningful saved position
-  const hasPosition = saved.phase === 'holding' || saved.phase === 'trailing';
+  const active = activeLots();
   const hasTrades = saved.trades.length > 0;
-  if (hasPosition || hasTrades) {
+  if (active.length > 0 || hasTrades) {
     const notice = $('loadNotice');
-    if (hasPosition) {
-      const srcTag = saved.buySource === 'manual' ? '手動買入' : '自動買入';
-      notice.textContent = `已載入上次庫存（${saved.stock}，${saved.phase === 'holding' ? '持有' : '停利模式'}，${srcTag} ${saved.shares}股 @ $${saved.buyPrice}），可按「開始監控」繼續或「手動賣出」平倉`;
+    if (active.length > 0) {
+      const totalShares = active.reduce((s, l) => s + l.shares, 0);
+      notice.textContent = `已載入上次庫存（${saved.stock}，${active.length} 筆持倉，共 ${totalShares} 股），可按「開始監控」繼續或「賣出全部」平倉`;
     } else {
       notice.textContent = `已載入上次存檔（${saved.trades.length} 筆交易記錄），可繼續監控`;
     }
