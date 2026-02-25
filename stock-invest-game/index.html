@@ -50,12 +50,28 @@ button.clear-save{background:#7c2d12}
 .market-bar.closed{background:#422006;color:#fbbf24}
 
 .back{display:inline-block;margin-bottom:8px;color:#38bdf8;text-decoration:none;font-size:.85rem}
+
+/* inventory query button */
+button.query{background:#0d9488}
+
+/* inventory modal overlay */
+.inv-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:100;justify-content:center;align-items:center}
+.inv-overlay.show{display:flex}
+.inv-modal{background:#1e293b;border:1px solid #475569;border-radius:14px;padding:16px;max-width:460px;width:92%;max-height:85vh;overflow-y:auto;position:relative}
+.inv-modal h2{font-size:1rem;margin-bottom:10px;color:#e2e8f0}
+.inv-modal .close-btn{position:absolute;top:10px;right:14px;background:none;border:none;color:#94a3b8;font-size:1.3rem;cursor:pointer;padding:0}
+.inv-modal .inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+.inv-modal .lbl{font-size:.75rem;color:#64748b}
+.inv-modal .val{font-size:.95rem;font-weight:700}
+.inv-modal .section-title{font-size:.82rem;color:#94a3b8;margin:12px 0 6px;border-top:1px solid #334155;padding-top:8px}
+.inv-modal .no-pos{text-align:center;color:#94a3b8;padding:16px 0;font-size:.9rem}
+.inv-modal .last-trade{background:#111827;border-radius:8px;padding:10px;margin-top:8px;font-size:.82rem;line-height:1.6}
 </style>
 </head>
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.2</span></h1>
+  <h1>📈 股市投資策略模擬器 <span class="ver">v0.1.3</span></h1>
   <span id="simBadge" class="sim-badge">模擬模式</span>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
@@ -82,6 +98,7 @@ button.clear-save{background:#7c2d12}
     <button id="btnStop" class="stop" disabled>停止</button>
     <button id="btnReset" class="reset">重置</button>
     <button id="btnClearSave" class="reset" style="background:#7c2d12">清除存檔</button>
+    <button id="btnQuery" class="query">查詢庫存</button>
   </div>
   <div id="loadNotice" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.82rem;text-align:center"></div>
 
@@ -113,6 +130,15 @@ button.clear-save{background:#7c2d12}
   <div class="panel">
     <h2>交易日誌</h2>
     <div class="log-box" id="logBox"><div class="entry" style="color:#64748b">尚無交易記錄</div></div>
+  </div>
+</div>
+
+<!-- inventory query modal -->
+<div id="invOverlay" class="inv-overlay">
+  <div class="inv-modal">
+    <button class="close-btn" id="invClose">&times;</button>
+    <h2>庫存查詢</h2>
+    <div id="invContent"></div>
   </div>
 </div>
 
@@ -206,10 +232,15 @@ stockInput.addEventListener('input', () => {
   if ([...stockSelect.options].some(o => o.value === v)) stockSelect.value = v;
 });
 
+const btnQuery = $('btnQuery');
+
 btnStart.addEventListener('click', startMonitor);
 btnStop.addEventListener('click', stopMonitor);
 btnReset.addEventListener('click', doReset);
 btnClearSave.addEventListener('click', doClearSave);
+btnQuery.addEventListener('click', showInventory);
+$('invClose').addEventListener('click', () => { $('invOverlay').classList.remove('show'); });
+$('invOverlay').addEventListener('click', e => { if (e.target === $('invOverlay')) $('invOverlay').classList.remove('show'); });
 
 /* ── Market hours check (Asia/Taipei) ── */
 function taipeiNow() {
@@ -553,6 +584,65 @@ function addLog(msg, type) {
   div.className = 'entry ' + cls;
   div.textContent = `[${ts}] ${msg}`;
   box.prepend(div);
+}
+
+/* ── Inventory Query ── */
+async function showInventory() {
+  // If monitoring is active, trigger a fresh price fetch (non-blocking)
+  if (timer && state.stock) {
+    try { state.currentPrice = await fetchPrice(state.stock); } catch (_) { /* use stale price */ }
+  }
+
+  const hasPos = state.phase === 'holding' || state.phase === 'trailing';
+  const container = $('invContent');
+  let html = '';
+
+  if (hasPos) {
+    const pnl = (state.currentPrice - state.buyPrice) * SHARES;
+    const retPct = ((state.currentPrice - state.buyPrice) / state.buyPrice) * 100;
+    const sign = pnl >= 0 ? '+' : '';
+    const cls = pnl >= 0 ? 'up' : 'down';
+    const phaseLabel = state.phase === 'trailing' ? '停利模式' : '持有中';
+
+    html += '<div class="inv-grid">';
+    html += `<div><div class="lbl">股票代號</div><div class="val">${state.stock}</div></div>`;
+    html += `<div><div class="lbl">持有狀態</div><div class="val">${phaseLabel}</div></div>`;
+    html += `<div><div class="lbl">持有股數</div><div class="val">${SHARES}</div></div>`;
+    html += `<div><div class="lbl">買入價</div><div class="val">$${state.buyPrice.toFixed(2)}</div></div>`;
+    html += `<div><div class="lbl">現價</div><div class="val ${cls}">$${state.currentPrice.toFixed(2)}</div></div>`;
+    html += `<div><div class="lbl">未實現損益</div><div class="val ${cls}">${sign}$${pnl.toFixed(0)}</div></div>`;
+    html += `<div><div class="lbl">未實現報酬率</div><div class="val ${cls}">${sign}${retPct.toFixed(2)}%</div></div>`;
+    if (state.phase === 'trailing') {
+      html += `<div><div class="lbl">最高價</div><div class="val up">$${state.highestPrice.toFixed(2)}</div></div>`;
+    }
+    html += `<div><div class="lbl">最後更新</div><div class="val" style="font-size:.8rem">${lastUpdateTime}</div></div>`;
+    html += `<div><div class="lbl">來源</div><div class="val" style="font-size:.8rem">${lastSource}</div></div>`;
+    html += '</div>';
+  } else {
+    html += '<div class="no-pos">目前無持倉</div>';
+
+    // Show last realized trade if any
+    if (state.trades.length > 0) {
+      const last = state.trades[state.trades.length - 1];
+      const sign = last.pnl >= 0 ? '+' : '';
+      const cls = last.pnl >= 0 ? 'up' : 'down';
+      html += '<div class="section-title">最近一次已實現交易</div>';
+      html += '<div class="last-trade">';
+      html += `<div>買入價：$${last.buyPrice.toFixed(2)}</div>`;
+      html += `<div>賣出價：$${last.sellPrice.toFixed(2)}</div>`;
+      html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${last.pnl.toFixed(0)}</span></div>`;
+      html += `<div>報酬率：<span class="val ${cls}" style="font-size:.82rem">${sign}${last.returnPct.toFixed(2)}%</span></div>`;
+      html += `<div>原因：${last.reason}</div>`;
+      html += '</div>';
+    }
+
+    html += '<div style="margin-top:10px;font-size:.75rem;color:#64748b;text-align:center">';
+    html += `最後更新：${lastUpdateTime} ｜ 來源：${lastSource}`;
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+  $('invOverlay').classList.add('show');
 }
 
 /* ── Init ── */
