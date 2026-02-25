@@ -94,7 +94,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.1.7</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.1.8</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -246,7 +246,7 @@ const SAVE_KEY = 'stockInvestGame_v1';
 function saveState() {
   try {
     const data = {
-      version: 2,        // v0.1.6 multi-lot format
+      version: 2,        // v0.1.6+ multi-lot format (v0.1.8: per-symbol pricing)
       stock: state.stock,
       currentPrice: state.currentPrice,
       lots: state.lots,
@@ -283,7 +283,11 @@ function loadState() {
 
     // v2 format (multi-lot)
     if (d.version === 2 && Array.isArray(d.lots)) {
-      base.lots = d.lots;
+      // Backfill stock field for old lots that may lack it
+      base.lots = d.lots.map(l => {
+        if (!l.stock) l.stock = base.stock;
+        return l;
+      });
       base.nextLotId = typeof d.nextLotId === 'number' ? d.nextLotId : 1;
       return base;
     }
@@ -465,31 +469,82 @@ function setSource(name) {
 /* ── Helper: get active lots ── */
 function activeLots() { return state.lots.filter(l => l.phase === 'holding' || l.phase === 'trailing'); }
 
+/* ── Per-symbol price map ── */
+let priceMap = {};  // { symbol: { price, source, time } }
+
+async function fetchPriceMap(symbols) {
+  const map = {};
+  await Promise.all(symbols.map(async (sym) => {
+    const price = await fetchPrice(sym);
+    if (price !== null) {
+      map[sym] = { price, source: lastSource, time: lastUpdateTime };
+    }
+  }));
+  return map;
+}
+
 /* ── Core loop ── */
 async function tick() {
   updateMarketBar();
 
-  // Fetch price — if all sources fail, skip trade logic
-  const price = await fetchPrice(state.stock);
-  if (price === null) {
-    $('sourceBar').textContent = `來源：查無現價 ｜ 上次：${lastUpdateTime}`;
-    return;  // no valid price — do not trade
+  // Collect unique symbols from active lots
+  const active = activeLots();
+  const symbols = [...new Set(active.map(l => l.stock))];
+  // Also include state.stock for UI display
+  if (state.stock && !symbols.includes(state.stock)) symbols.push(state.stock);
+
+  if (symbols.length === 0) {
+    // No active lots, just fetch state.stock for display
+    const price = await fetchPrice(state.stock);
+    if (price !== null) {
+      state.currentPrice = price;
+      priceMap[state.stock] = { price, source: lastSource, time: lastUpdateTime };
+    }
+    renderPrice();
+    return;
   }
 
-  state.currentPrice = price;
+  // Fetch prices for all unique symbols in parallel
+  const newMap = await fetchPriceMap(symbols);
+  Object.assign(priceMap, newMap);
+
+  // Update sourceBar with summary
+  const fetched = Object.keys(newMap);
+  const failed = symbols.filter(s => !newMap[s]);
+  if (fetched.length > 0) {
+    const lastEntry = newMap[fetched[fetched.length - 1]];
+    $('sourceBar').textContent = `來源：${lastEntry.source} ｜ 更新：${lastEntry.time}` +
+      (failed.length > 0 ? ` ｜ 查無：${failed.join(',')}` : '');
+  } else {
+    $('sourceBar').textContent = `來源：查無現價 ｜ 上次：${lastUpdateTime}`;
+  }
+
+  // Update state.currentPrice for backward compat (use state.stock's price)
+  if (priceMap[state.stock]) {
+    state.currentPrice = priceMap[state.stock].price;
+  }
   renderPrice();
 
   if (!isMarketOpen()) return;  // no strategy outside monitoring window
 
-  // Apply strategy to each active lot independently
-  for (const lot of activeLots()) {
+  // Log skipped symbols
+  for (const sym of failed) {
+    addLog(`股號 ${sym} 查無現價，跳過相關 lots`, 'neutral');
+  }
+
+  // Apply strategy to each active lot using its own symbol's price
+  for (const lot of active) {
+    const entry = priceMap[lot.stock];
+    if (!entry) continue;  // no price for this symbol — skip
+    const price = entry.price;
+
     if (lot.phase === 'holding') {
       if (price <= lot.buyPrice * STOP_LOSS) {
         executeSellLot(lot, price, '停損');
       } else if (price >= lot.buyPrice * ENTER_TP) {
         lot.phase = 'trailing';
         lot.highestPrice = price;
-        addLog(`Lot#${lot.lotId} 進入停利模式 (現價 $${price}, 買入 $${lot.buyPrice})`, 'neutral');
+        addLog(`Lot#${lot.lotId}(${lot.stock}) 進入停利模式 (現價 $${price}, 買入 $${lot.buyPrice})`, 'neutral');
         saveState();
       }
     }
@@ -518,7 +573,7 @@ function executeSellLot(lot, price, reason) {
   lot.sellReason = reason;
   const sign = pnl >= 0 ? '+' : '';
   addLog(
-    `Lot#${lot.lotId} 賣出 ${sh} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
+    `Lot#${lot.lotId}(${lot.stock}) 賣出 ${sh} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
     pnl >= 0 ? 'up' : 'down'
   );
   saveState();
@@ -619,15 +674,27 @@ async function doManualSell() {
     alert('目前無持倉，無法賣出');
     return;
   }
-  const price = await fetchPrice(state.stock);
-  if (price === null) {
-    alert('查無現價，已跳過賣出。請稍後再試。');
-    return;
-  }
-  state.currentPrice = price;
+  // Fetch prices per unique symbol
+  const symbols = [...new Set(active.map(l => l.stock))];
+  const newMap = await fetchPriceMap(symbols);
+  Object.assign(priceMap, newMap);
+
+  const failedSyms = symbols.filter(s => !newMap[s]);
+  let soldCount = 0;
   for (const lot of active) {
-    executeSellLot(lot, price, '手動賣出');
+    const entry = priceMap[lot.stock];
+    if (!entry) continue;  // skip lots without price
+    executeSellLot(lot, entry.price, '手動賣出');
+    soldCount++;
   }
+  if (failedSyms.length > 0) {
+    alert(`以下股號查無現價，相關 lots 已跳過：${failedSyms.join(', ')}`);
+  }
+  if (soldCount === 0 && failedSyms.length > 0) {
+    alert('所有股號皆查無現價，無法賣出。請稍後再試。');
+  }
+  // Update state.currentPrice for display
+  if (priceMap[state.stock]) state.currentPrice = priceMap[state.stock].price;
   updateManualSellBtn();
   renderAll();
 }
@@ -635,12 +702,12 @@ async function doManualSell() {
 async function doManualSellLot(lotId) {
   const lot = state.lots.find(l => l.lotId === lotId);
   if (!lot || (lot.phase !== 'holding' && lot.phase !== 'trailing')) return;
-  const price = await fetchPrice(state.stock);
+  const price = await fetchPrice(lot.stock);
   if (price === null) {
-    alert('查無現價，已跳過賣出。請稍後再試。');
+    alert(`股號 ${lot.stock} 查無現價，已跳過賣出。請稍後再試。`);
     return;
   }
-  state.currentPrice = price;
+  priceMap[lot.stock] = { price, source: lastSource, time: lastUpdateTime };
   executeSellLot(lot, price, '手動賣出');
   updateManualSellBtn();
   renderAll();
@@ -716,7 +783,10 @@ function renderAll() {
     $('dState').textContent = phaseLabel + stoppedSuffix;
     $('dState').className = 'val ' + (hasTrailing ? 'up' : 'neutral');
 
-    const totalPnl = active.reduce((s, l) => s + (state.currentPrice - l.buyPrice) * l.shares, 0);
+    const totalPnl = active.reduce((s, l) => {
+      const e = priceMap[l.stock];
+      return s + ((e ? e.price : state.currentPrice) - l.buyPrice) * l.shares;
+    }, 0);
     const totalCost = active.reduce((s, l) => s + l.buyPrice * l.shares, 0);
     const pctReturn = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
     const retEl = $('dReturn');
@@ -775,19 +845,25 @@ function renderLotsPanel() {
     return;
   }
   panel.style.display = 'block';
-  let html = '<table class="lots-table"><tr><th>#</th><th>買入價</th><th>股數</th><th>狀態</th><th>最高</th><th>損益%</th><th></th></tr>';
+  let html = '<table class="lots-table"><tr><th>#</th><th>股號</th><th>買入價</th><th>股數</th><th>現價</th><th>狀態</th><th>最高</th><th>損益%</th><th></th></tr>';
   for (const lot of active) {
-    const pct = lot.buyPrice > 0 ? ((state.currentPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
-    const cls = pct >= 0 ? 'lot-up' : 'lot-down';
+    const entry = priceMap[lot.stock];
+    const lotPrice = entry ? entry.price : null;
+    const pct = (lotPrice && lot.buyPrice > 0) ? ((lotPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
+    const cls = lotPrice ? (pct >= 0 ? 'lot-up' : 'lot-down') : 'lot-neutral';
     const sign = pct >= 0 ? '+' : '';
     const phaseLabel = lot.phase === 'trailing' ? '停利' : '持有';
+    const priceDisplay = lotPrice ? `$${lotPrice.toFixed(2)}` : '無即時價';
+    const pctDisplay = lotPrice ? `${sign}${pct.toFixed(2)}%` : '—';
     html += `<tr>`;
     html += `<td>${lot.lotId}</td>`;
+    html += `<td>${lot.stock}</td>`;
     html += `<td>$${lot.buyPrice.toFixed(2)}</td>`;
     html += `<td>${lot.shares}</td>`;
+    html += `<td>${priceDisplay}</td>`;
     html += `<td>${phaseLabel}</td>`;
     html += `<td>${lot.phase === 'trailing' ? '$' + lot.highestPrice.toFixed(2) : '—'}</td>`;
-    html += `<td class="${cls}">${sign}${pct.toFixed(2)}%</td>`;
+    html += `<td class="${cls}">${pctDisplay}</td>`;
     html += `<td><button class="sell-lot" onclick="doManualSellLot(${lot.lotId})">賣出</button></td>`;
     html += `</tr>`;
   }
@@ -813,57 +889,74 @@ function addLog(msg, type) {
 
 /* ── Inventory Query ── */
 async function showInventory() {
-  let priceStale = false;
-  if (state.stock) {
+  const active = activeLots();
+
+  // Fetch prices per unique symbol across all active lots
+  const symbols = [...new Set(active.map(l => l.stock))];
+  if (symbols.length > 0) {
+    const newMap = await fetchPriceMap(symbols);
+    Object.assign(priceMap, newMap);
+  } else if (state.stock) {
     const p = await fetchPrice(state.stock);
     if (p !== null) {
+      priceMap[state.stock] = { price: p, source: lastSource, time: lastUpdateTime };
       state.currentPrice = p;
-    } else {
-      priceStale = true;  // could not fetch — use last known price
     }
   }
 
-  const active = activeLots();
   const container = $('invContent');
   let html = '';
-  const priceAvailable = state.currentPrice > 0;
 
   if (active.length > 0) {
     const totalShares = active.reduce((s, l) => s + l.shares, 0);
-    const totalCost = active.reduce((s, l) => s + l.buyPrice * l.shares, 0);
-    const totalPnl = active.reduce((s, l) => s + (state.currentPrice - l.buyPrice) * l.shares, 0);
+    const monitorLabel = timer ? '' : '（監控已停止）';
+
+    // Compute total PnL only for lots with price
+    let totalPnl = 0, totalCost = 0, allHavePrice = true;
+    for (const lot of active) {
+      const entry = priceMap[lot.stock];
+      if (entry) {
+        totalPnl += (entry.price - lot.buyPrice) * lot.shares;
+        totalCost += lot.buyPrice * lot.shares;
+      } else {
+        allHavePrice = false;
+        totalCost += lot.buyPrice * lot.shares;
+      }
+    }
     const totalRetPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
     const tSign = totalPnl >= 0 ? '+' : '';
     const tCls = totalPnl >= 0 ? 'up' : 'down';
-    const monitorLabel = timer ? '' : '（監控已停止）';
 
     // Summary
     html += '<div class="inv-grid">';
-    html += `<div><div class="lbl">股票代號</div><div class="val">${state.stock}</div></div>`;
+    const stockList = [...new Set(active.map(l => l.stock))].join(', ');
+    html += `<div><div class="lbl">股票代號</div><div class="val">${stockList}</div></div>`;
     html += `<div><div class="lbl">持倉筆數</div><div class="val">${active.length} 筆${monitorLabel}</div></div>`;
     html += `<div><div class="lbl">總持有股數</div><div class="val">${totalShares}</div></div>`;
-    const priceDisplay = priceAvailable
-      ? `$${state.currentPrice.toFixed(2)}${priceStale ? '（非即時）' : ''}`
-      : '目前無可用現價';
-    html += `<div><div class="lbl">現價</div><div class="val">${priceDisplay}</div></div>`;
-    if (priceAvailable) {
-      html += `<div><div class="lbl">總未實現損益</div><div class="val ${tCls}">${tSign}$${totalPnl.toFixed(0)}</div></div>`;
-      html += `<div><div class="lbl">總報酬率</div><div class="val ${tCls}">${tSign}${totalRetPct.toFixed(2)}%</div></div>`;
-    }
+    html += `<div><div class="lbl">總未實現損益</div><div class="val ${tCls}">${tSign}$${totalPnl.toFixed(0)}${allHavePrice ? '' : '（部分無即時價）'}</div></div>`;
+    html += `<div><div class="lbl">總報酬率</div><div class="val ${tCls}">${tSign}${totalRetPct.toFixed(2)}%</div></div>`;
     html += '</div>';
 
     // Per-lot detail
     html += '<div class="section-title">各筆持倉</div>';
     for (const lot of active) {
-      const pnl = (state.currentPrice - lot.buyPrice) * lot.shares;
-      const retPct = lot.buyPrice > 0 ? ((state.currentPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
-      const sign = pnl >= 0 ? '+' : '';
-      const cls = pnl >= 0 ? 'up' : 'down';
+      const entry = priceMap[lot.stock];
+      const lotPrice = entry ? entry.price : null;
       const phaseLabel = lot.phase === 'trailing' ? '停利模式' : '持有中';
       html += '<div class="last-trade">';
-      html += `<div><strong>Lot#${lot.lotId}</strong> — ${phaseLabel}（${lot.buySource === 'manual' ? '手動' : '自動'}）</div>`;
+      html += `<div><strong>Lot#${lot.lotId}</strong> ${lot.stock} — ${phaseLabel}（${lot.buySource === 'manual' ? '手動' : '自動'}）</div>`;
       html += `<div>買入價：$${lot.buyPrice.toFixed(2)} × ${lot.shares} 股</div>`;
-      html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${pnl.toFixed(0)}</span>（${sign}${retPct.toFixed(2)}%）</div>`;
+      if (lotPrice !== null) {
+        const pnl = (lotPrice - lot.buyPrice) * lot.shares;
+        const retPct = lot.buyPrice > 0 ? ((lotPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
+        const sign = pnl >= 0 ? '+' : '';
+        const cls = pnl >= 0 ? 'up' : 'down';
+        html += `<div>現價：$${lotPrice.toFixed(2)}（${entry.source}）</div>`;
+        html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${pnl.toFixed(0)}</span>（${sign}${retPct.toFixed(2)}%）</div>`;
+      } else {
+        html += `<div>現價：<span style="color:#f59e0b">無即時價</span></div>`;
+        html += `<div>損益：—</div>`;
+      }
       if (lot.phase === 'trailing') {
         html += `<div>最高價：$${lot.highestPrice.toFixed(2)}</div>`;
       }
