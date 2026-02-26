@@ -111,7 +111,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.2.4</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.5</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -682,16 +682,28 @@ async function doManualBuy() {
   btnManualBuy.textContent = '驗證中…';
 
   try {
-    // Always validate stock symbol before buying
-    const result = await validateStock(inputStock);
-    if (!result.valid) {
-      alert(result.reason);
-      return;
+    // If user provides a manual buy price, allow order with format-validated symbol
+    // even when live quote is temporarily unavailable.
+    let result = null;
+    if (!isNaN(priceVal) && priceVal > 0) {
+      if (!/^\d{4,6}$/.test(inputStock)) {
+        alert('股號格式錯誤：台股代號應為 4~6 位數字');
+        return;
+      }
+    } else {
+      // No manual price: require live quote validation
+      result = await validateStock(inputStock);
+      if (!result.valid) {
+        alert(result.reason + '。若你已知成交價，可輸入手動買入價下單。');
+        return;
+      }
     }
 
     let buyP;
     if (!isNaN(priceVal) && priceVal > 0) {
       buyP = priceVal;
+      setSource('MANUAL');
+      lastPriceType = 'TRADE';
     } else {
       // validateStock already fetched a valid price
       buyP = result.price;
