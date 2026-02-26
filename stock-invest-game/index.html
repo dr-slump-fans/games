@@ -110,7 +110,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.2.0</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.1</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -1147,7 +1147,16 @@ setInterval(updateMarketBar, 30000);
     const notice = $('loadNotice');
     if (active.length > 0) {
       const totalShares = active.reduce((s, l) => s + l.shares, 0);
-      notice.textContent = `已載入上次庫存（${saved.stock}，${active.length} 筆持倉，共 ${totalShares} 股），可按「開始監控」繼續或「賣出全部」平倉`;
+      const symbols = [...new Set(active.map(l => l.stock))];
+      let stockDesc;
+      if (symbols.length === 1) {
+        stockDesc = symbols[0];
+      } else if (symbols.length <= 3) {
+        stockDesc = `${symbols.length} 檔股票：${symbols.join('、')}`;
+      } else {
+        stockDesc = `${symbols.length} 檔股票：${symbols.slice(0, 3).join('、')}+${symbols.length - 3} 檔`;
+      }
+      notice.textContent = `已載入上次庫存（${active.length} 筆持倉，${stockDesc}，共 ${totalShares} 股），可按「開始監控」繼續或「賣出全部」平倉`;
     } else {
       notice.textContent = `已載入上次存檔（${saved.trades.length} 筆交易記錄），可繼續監控`;
     }
