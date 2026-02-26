@@ -417,11 +417,15 @@ async function fetchTWSE(stock) {
   const ts = Date.now();
   for (const ex of ['tse', 'otc']) {
     try {
-      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${ex}_${stock}.tw&_=${ts}`;
+      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${ex}_${stock}.tw|otc_${stock}.tw&json=1&delay=0&_=${ts}`;
       const resp = await tryDirectOrProxy(url);
       const json = await resp.json();
       if (json.msgArray && json.msgArray.length > 0) {
-        const info = json.msgArray[0];
+        // TWSE sometimes returns placeholder rows first; pick the exact stock row.
+        const info = json.msgArray.find(it => String((it && it.c) || '').trim() === String(stock))
+          || json.msgArray.find(it => String((it && it['@']) || '').includes(`${stock}.tw`));
+        if (!info) continue;
+
         // 1) 成交價 z
         let price = parseFloat(info.z);
         if (!isNaN(price) && price > 0) return { price, priceType: 'TRADE' };
@@ -429,9 +433,9 @@ async function fetchTWSE(stock) {
         price = parseFloat(info.y);
         if (!isNaN(price) && price > 0) return { price, priceType: 'TRADE' };
         // 2) Fallback: 最佳賣價 a 第一檔
-        const a1 = info.a ? parseFloat(info.a.split('_')[0]) : NaN;
+        const a1 = info.a ? parseFloat(String(info.a).split('_')[0]) : NaN;
         // 3) Fallback: 最佳買價 b 第一檔
-        const b1 = info.b ? parseFloat(info.b.split('_')[0]) : NaN;
+        const b1 = info.b ? parseFloat(String(info.b).split('_')[0]) : NaN;
         const aOk = !isNaN(a1) && a1 > 0;
         const bOk = !isNaN(b1) && b1 > 0;
         if (aOk && bOk) return { price: (a1 + b1) / 2, priceType: 'MID' };
