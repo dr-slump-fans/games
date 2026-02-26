@@ -111,7 +111,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.2.2</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.3</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -151,7 +151,9 @@ button.sell-all:hover{background:#b91c1c}
   </div>
   <!-- manual buy -->
   <div class="manual-buy-row">
-    <label>手動買入價</label>
+    <label>買入股號</label>
+    <input id="manualBuyStock" type="text" placeholder="股號" style="width:70px"/>
+    <label>買入價</label>
     <input id="manualBuyPrice" type="number" step="0.01" min="0" placeholder="留空=現價"/>
     <label>股數</label>
     <input id="manualBuyShares" type="number" min="1" value="1000" style="width:80px"/>
@@ -332,10 +334,14 @@ const btnStart = $('btnStart'), btnStop = $('btnStop'), btnReset = $('btnReset')
 const btnClearSave = $('btnClearSave');
 const stockInput = $('stockInput'), stockSelect = $('stockSelect');
 
-stockSelect.addEventListener('change', () => { stockInput.value = stockSelect.value; });
+stockSelect.addEventListener('change', () => {
+  stockInput.value = stockSelect.value;
+  $('manualBuyStock').value = stockSelect.value;
+});
 stockInput.addEventListener('input', () => {
   const v = stockInput.value.trim();
   if ([...stockSelect.options].some(o => o.value === v)) stockSelect.value = v;
+  $('manualBuyStock').value = v;
 });
 
 const btnQuery = $('btnQuery');
@@ -466,6 +472,20 @@ async function fetchPrice(stock) {
   }
   // All sources failed — return null (no simulation)
   return null;
+}
+
+/* ── Stock symbol validation ── */
+async function validateStock(symbol) {
+  // Format check: Taiwan stocks are 4-6 digit numbers
+  if (!/^\d{4,6}$/.test(symbol)) {
+    return { valid: false, reason: '股號格式錯誤：台股代號應為 4~6 位數字' };
+  }
+  // Price check: at least one source must return a valid price
+  const price = await fetchPrice(symbol);
+  if (price === null) {
+    return { valid: false, reason: `股號 ${symbol} 查無報價，請確認代號是否正確` };
+  }
+  return { valid: true, price };
 }
 
 function setSource(name) {
@@ -628,32 +648,46 @@ function readMonitorTime() {
 
 /* ── Manual Buy ── */
 async function doManualBuy() {
-  const inputStock = stockInput.value.trim() || '2330';
+  // Read stock from buy-row input first (always enabled), fallback to main stockInput
+  const inputStock = $('manualBuyStock').value.trim() || stockInput.value.trim() || '2330';
   const sharesVal = parseInt($('manualBuyShares').value) || 1000;
   const priceVal = parseFloat($('manualBuyPrice').value);
 
-  let buyP;
-  if (!isNaN(priceVal) && priceVal > 0) {
-    buyP = priceVal;
-  } else {
-    buyP = await fetchPrice(inputStock);
-    if (buyP === null) {
-      alert('查無現價，無法買入。請手動輸入買入價或稍後再試。');
+  // Disable buy button and show validation state
+  btnManualBuy.disabled = true;
+  btnManualBuy.textContent = '驗證中…';
+
+  try {
+    // Always validate stock symbol before buying
+    const result = await validateStock(inputStock);
+    if (!result.valid) {
+      alert(result.reason);
       return;
     }
-  }
 
-  state.stock = inputStock;
-  state.currentPrice = buyP;
-  const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: 'manual' });
-  state.lots.push(lot);
-  addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}`, 'neutral');
-  saveState();
-  renderAll();
+    let buyP;
+    if (!isNaN(priceVal) && priceVal > 0) {
+      buyP = priceVal;
+    } else {
+      // validateStock already fetched a valid price
+      buyP = result.price;
+    }
 
-  // Auto-start monitoring if not already running
-  if (!timer) {
-    startMonitor();
+    state.stock = inputStock;
+    state.currentPrice = buyP;
+    const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: 'manual' });
+    state.lots.push(lot);
+    addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}`, 'neutral');
+    saveState();
+    renderAll();
+
+    // Auto-start monitoring if not already running
+    if (!timer) {
+      startMonitor();
+    }
+  } finally {
+    btnManualBuy.disabled = false;
+    btnManualBuy.textContent = '手動買入';
   }
 }
 
@@ -757,6 +791,7 @@ function doClearSave() {
   SHARES = 1000;
   $('manualBuyShares').value = 1000;
   $('manualBuyPrice').value = '';
+  $('manualBuyStock').value = '2330';
   stockInput.value = '2330';
   stockSelect.value = '2330';
   renderAll();
@@ -1133,6 +1168,7 @@ setInterval(updateMarketBar, 30000);
   $('monitorEnd').value = MONITOR_END;
 
   stockInput.value = saved.stock;
+  $('manualBuyStock').value = saved.stock;
   if ([...stockSelect.options].some(o => o.value === saved.stock)) stockSelect.value = saved.stock;
 
   // Restore log entries into logBox
