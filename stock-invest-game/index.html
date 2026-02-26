@@ -41,6 +41,7 @@ button.clear-save{background:#7c2d12}
 .log-box .entry:last-child{border:none}
 .log-entry-up{color:#22c55e}
 .log-entry-down{color:#ef4444}
+.log-entry-neutral{color:#94a3b8}
 
 /* market status bar */
 .market-bar{text-align:center;padding:6px;border-radius:8px;font-size:.8rem;font-weight:600;margin:8px 0}
@@ -110,7 +111,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.2.1</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.2</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -241,7 +242,8 @@ function resetState() {
     stock: '2330',
     currentPrice: 0,
     lots: [],            // active + sold lots
-    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason, shares, buySource, lotId}
+    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason, shares, buySource, lotId, stock, time}
+    logEntries: [],      // persisted log entries [{ts, msg, type}]
   };
 }
 
@@ -251,12 +253,13 @@ const SAVE_KEY = 'stockInvestGame_v1';
 function saveState() {
   try {
     const data = {
-      version: 2,        // v0.1.6+ multi-lot format (v0.1.8: per-symbol pricing)
+      version: 2,        // v0.1.6+ multi-lot format (v0.2.2: logEntries persistence)
       stock: state.stock,
       currentPrice: state.currentPrice,
       lots: state.lots,
       nextLotId: nextLotId,
       trades: (state.trades || []).slice(-100),
+      logEntries: (state.logEntries || []).slice(-200),
       source: lastSource,
       sourceTime: lastUpdateTime,
       pollSec: POLL_MS / 1000,
@@ -282,6 +285,7 @@ function loadState() {
       monitorStart: typeof d.monitorStart === 'string' && /^\d{2}:\d{2}$/.test(d.monitorStart) ? d.monitorStart : '09:10',
       monitorEnd:   typeof d.monitorEnd === 'string' && /^\d{2}:\d{2}$/.test(d.monitorEnd) ? d.monitorEnd : '12:00',
       trades:       Array.isArray(d.trades) ? d.trades.slice(-100) : [],
+      logEntries:   Array.isArray(d.logEntries) ? d.logEntries.slice(-200) : [],
       currentPrice: typeof d.currentPrice === 'number' && d.currentPrice >= 0 ? d.currentPrice : 0,
       stock:        typeof d.stock === 'string' && d.stock ? d.stock : '2330',
     };
@@ -534,7 +538,7 @@ async function tick() {
 
   // Log skipped symbols
   for (const sym of failed) {
-    addLog(`股號 ${sym} 查無現價，跳過相關 lots`, 'neutral');
+    addLog(`[${sym}] 查無現價，跳過相關 lots`, 'neutral');
   }
 
   // Apply strategy to each active lot using its own symbol's price
@@ -549,7 +553,7 @@ async function tick() {
       } else if (price >= lot.buyPrice * ENTER_TP) {
         lot.phase = 'trailing';
         lot.highestPrice = price;
-        addLog(`Lot#${lot.lotId}(${lot.stock}) 進入停利模式 (現價 $${price}, 買入 $${lot.buyPrice})`, 'neutral');
+        addLog(`[${lot.stock}][Lot#${lot.lotId}] 進入停利模式（現價 $${price}，買入 $${lot.buyPrice}）`, 'neutral');
         saveState();
       }
     }
@@ -570,15 +574,16 @@ function executeSellLot(lot, price, reason) {
   const sh = lot.shares || 1000;
   const pnl = (price - lot.buyPrice) * sh;
   const returnPct = ((price - lot.buyPrice) / lot.buyPrice) * 100;
-  const trade = { buyPrice: lot.buyPrice, sellPrice: price, pnl, returnPct, reason, shares: sh, buySource: lot.buySource || 'manual', lotId: lot.lotId };
+  const trade = { buyPrice: lot.buyPrice, sellPrice: price, pnl, returnPct, reason, shares: sh, buySource: lot.buySource || 'manual', lotId: lot.lotId, stock: lot.stock || '—', time: Date.now() };
   state.trades.push(trade);
   lot.phase = 'sold';
   lot.sellPrice = price;
   lot.sellTime = Date.now();
   lot.sellReason = reason;
   const sign = pnl >= 0 ? '+' : '';
+  const actionLabel = reason.endsWith('賣出') ? reason : reason + '賣出';
   addLog(
-    `Lot#${lot.lotId}(${lot.stock}) 賣出 ${sh} 股 @ $${price}（${reason}）報酬 ${sign}${returnPct.toFixed(2)}%  損益 ${sign}$${pnl.toFixed(0)}`,
+    `[${lot.stock}][Lot#${lot.lotId}] ${actionLabel} ${sh} 股 @ $${price}　報酬 ${sign}${returnPct.toFixed(2)}%　損益 ${sign}$${pnl.toFixed(0)}`,
     pnl >= 0 ? 'up' : 'down'
   );
   saveState();
@@ -605,7 +610,7 @@ function startMonitor() {
   $('loadNotice').style.display = 'none';
   const lotsCount = activeLots().length;
   const modeLabel = lotsCount > 0 ? `續監（${lotsCount} 筆持倉）` : '開始監控';
-  addLog(`${modeLabel} ${state.stock}（輪詢 ${pollSec}s，時窗 ${MONITOR_START}~${MONITOR_END}）`, 'neutral');
+  addLog(`[${state.stock}] ${modeLabel}（輪詢 ${pollSec}s，時窗 ${MONITOR_START}~${MONITOR_END}）`, 'neutral');
   saveState();
   tick();
   timer = setInterval(tick, POLL_MS);
@@ -642,7 +647,7 @@ async function doManualBuy() {
   state.currentPrice = buyP;
   const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: 'manual' });
   state.lots.push(lot);
-  addLog(`Lot#${lot.lotId} 手動買入 ${sharesVal} 股 ${inputStock} @ $${buyP}`, 'neutral');
+  addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}`, 'neutral');
   saveState();
   renderAll();
 
@@ -664,7 +669,8 @@ function stopMonitor() {
   $('monitorEnd').disabled = false;
   const active = activeLots();
   if (active.length > 0) {
-    addLog(`已停止監控（${active.length} 筆持倉保留）`, 'neutral');
+    const syms = [...new Set(active.map(l => l.stock))].join('、');
+    addLog(`已停止監控（${active.length} 筆持倉保留：${syms}）`, 'neutral');
   } else {
     addLog('監控已停止', 'neutral');
   }
@@ -951,11 +957,16 @@ function addLog(msg, type) {
   if (box.querySelector('.entry[style]')) box.innerHTML = '';
   const now = taipeiNow();
   const ts = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const cls = type === 'up' ? 'log-entry-up' : type === 'down' ? 'log-entry-down' : '';
+  const cls = type === 'up' ? 'log-entry-up' : type === 'down' ? 'log-entry-down' : 'log-entry-neutral';
   const div = document.createElement('div');
   div.className = 'entry ' + cls;
   div.textContent = `[${ts}] ${msg}`;
   box.prepend(div);
+  // Persist log entry
+  if (state.logEntries) {
+    state.logEntries.push({ ts, msg, type: type || 'neutral' });
+    if (state.logEntries.length > 200) state.logEntries = state.logEntries.slice(-200);
+  }
 }
 
 /* ── Inventory Query ── */
@@ -1078,7 +1089,7 @@ async function showInventory() {
       const cls = last.pnl >= 0 ? 'up' : 'down';
       html += '<div class="section-title">最近一次已實現交易</div>';
       html += '<div class="last-trade">';
-      html += `<div>Lot#${last.lotId || '—'} 買入價：$${last.buyPrice.toFixed(2)}</div>`;
+      html += `<div>[${last.stock || '—'}] Lot#${last.lotId || '—'} 買入價：$${last.buyPrice.toFixed(2)}</div>`;
       html += `<div>賣出價：$${last.sellPrice.toFixed(2)}</div>`;
       html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${last.pnl.toFixed(0)}</span></div>`;
       html += `<div>報酬率：<span class="val ${cls}" style="font-size:.82rem">${sign}${last.returnPct.toFixed(2)}%</span></div>`;
@@ -1106,6 +1117,7 @@ setInterval(updateMarketBar, 30000);
   state.currentPrice = saved.currentPrice;
   state.lots = saved.lots || [];
   state.trades = saved.trades;
+  state.logEntries = saved.logEntries || [];
   nextLotId = saved.nextLotId || 1;
 
   lastSource = saved.source;
@@ -1123,17 +1135,30 @@ setInterval(updateMarketBar, 30000);
   stockInput.value = saved.stock;
   if ([...stockSelect.options].some(o => o.value === saved.stock)) stockSelect.value = saved.stock;
 
-  // Restore trade log entries into logBox
-  if (saved.trades.length > 0) {
+  // Restore log entries into logBox
+  if (state.logEntries.length > 0) {
+    // New format: persisted logEntries with ts, msg, type
+    $('logBox').innerHTML = '';
+    const recent = state.logEntries.slice(-50);
+    for (const entry of recent) {
+      const cls = entry.type === 'up' ? 'log-entry-up' : entry.type === 'down' ? 'log-entry-down' : 'log-entry-neutral';
+      const div = document.createElement('div');
+      div.className = 'entry ' + cls;
+      div.textContent = `[${entry.ts}] ${entry.msg}`;
+      $('logBox').prepend(div);
+    }
+  } else if (saved.trades.length > 0) {
+    // Fallback: old saves without logEntries — reconstruct from trades
     $('logBox').innerHTML = '';
     const recent = saved.trades.slice(-20);
     for (let i = recent.length - 1; i >= 0; i--) {
       const t = recent[i];
       const sign = t.pnl >= 0 ? '+' : '';
       const cls = t.pnl >= 0 ? 'log-entry-up' : 'log-entry-down';
+      const actionLabel = (t.reason || '—').endsWith('賣出') ? t.reason : (t.reason || '—') + '賣出';
       const div = document.createElement('div');
       div.className = 'entry ' + cls;
-      div.textContent = `Lot#${t.lotId || '—'} 賣出 @ $${t.sellPrice}（${t.reason}）報酬 ${sign}${t.returnPct.toFixed(2)}%  損益 ${sign}$${t.pnl.toFixed(0)}`;
+      div.textContent = `[${t.stock || '—'}][Lot#${t.lotId || '—'}] ${actionLabel} ${t.shares || '—'} 股 @ $${t.sellPrice}　報酬 ${sign}${t.returnPct.toFixed(2)}%　損益 ${sign}$${t.pnl.toFixed(0)}`;
       $('logBox').appendChild(div);
     }
   }
