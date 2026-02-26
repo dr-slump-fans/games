@@ -111,7 +111,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.2.3</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.4</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -215,6 +215,7 @@ let MONITOR_END = '12:00';
 /* ── Price source tracking ── */
 let lastSource = '—';
 let lastUpdateTime = '—';
+let lastPriceType = 'TRADE';  // TRADE / ASK1 / BID1 / MID
 
 /* ── State ── */
 let nextLotId = 1;
@@ -264,6 +265,7 @@ function saveState() {
       logEntries: (state.logEntries || []).slice(-200),
       source: lastSource,
       sourceTime: lastUpdateTime,
+      priceType: lastPriceType,
       pollSec: POLL_MS / 1000,
       monitorStart: MONITOR_START,
       monitorEnd: MONITOR_END,
@@ -283,6 +285,7 @@ function loadState() {
     const base = {
       source:       typeof d.source === 'string' ? d.source : '—',
       sourceTime:   typeof d.sourceTime === 'string' ? d.sourceTime : '—',
+      priceType:    typeof d.priceType === 'string' ? d.priceType : 'TRADE',
       pollSec:      typeof d.pollSec === 'number' && d.pollSec >= POLL_MIN/1000 ? d.pollSec : 5,
       monitorStart: typeof d.monitorStart === 'string' && /^\d{2}:\d{2}$/.test(d.monitorStart) ? d.monitorStart : '09:10',
       monitorEnd:   typeof d.monitorEnd === 'string' && /^\d{2}:\d{2}$/.test(d.monitorEnd) ? d.monitorEnd : '12:00',
@@ -409,6 +412,7 @@ async function tryDirectOrProxy(url, ms = 4000) {
 }
 
 // Source A: TWSE JSON (tse + otc)
+// Returns { price, priceType } where priceType is TRADE / ASK1 / BID1 / MID
 async function fetchTWSE(stock) {
   const ts = Date.now();
   for (const ex of ['tse', 'otc']) {
@@ -418,10 +422,22 @@ async function fetchTWSE(stock) {
       const json = await resp.json();
       if (json.msgArray && json.msgArray.length > 0) {
         const info = json.msgArray[0];
+        // 1) 成交價 z
         let price = parseFloat(info.z);
-        if (isNaN(price) || price <= 0) price = parseFloat(info.y);
-        if (isNaN(price) || price <= 0) continue;
-        return price;
+        if (!isNaN(price) && price > 0) return { price, priceType: 'TRADE' };
+        // 1b) 昨收 y (still counts as TRADE-level)
+        price = parseFloat(info.y);
+        if (!isNaN(price) && price > 0) return { price, priceType: 'TRADE' };
+        // 2) Fallback: 最佳賣價 a 第一檔
+        const a1 = info.a ? parseFloat(info.a.split('_')[0]) : NaN;
+        // 3) Fallback: 最佳買價 b 第一檔
+        const b1 = info.b ? parseFloat(info.b.split('_')[0]) : NaN;
+        const aOk = !isNaN(a1) && a1 > 0;
+        const bOk = !isNaN(b1) && b1 > 0;
+        if (aOk && bOk) return { price: (a1 + b1) / 2, priceType: 'MID' };
+        if (aOk) return { price: a1, priceType: 'ASK1' };
+        if (bOk) return { price: b1, priceType: 'BID1' };
+        continue;
       }
     } catch (_) { /* try next exchange */ }
   }
@@ -437,7 +453,7 @@ async function fetchYahoo(stock) {
   const meta = json?.chart?.result?.[0]?.meta;
   const price = meta?.regularMarketPrice;
   if (typeof price !== 'number' || price <= 0) throw new Error('Yahoo no price');
-  return price;
+  return { price, priceType: 'TRADE' };
 }
 
 // Source C: Stooq (text/csv endpoint)
@@ -451,7 +467,7 @@ async function fetchStooq(stock) {
   const cols = lines[1].split(',');
   const close = parseFloat(cols[6]); // Close column
   if (isNaN(close) || close <= 0) throw new Error('Stooq no price');
-  return close;
+  return { price: close, priceType: 'TRADE' };
 }
 
 // Main dispatcher — tries sources in priority order, returns null on failure
@@ -464,10 +480,12 @@ const SOURCES = [
 async function fetchPrice(stock) {
   for (const src of SOURCES) {
     try {
-      const price = await src.fn(stock);
-      setSource(src.name);
-      lastValidPrice = price;
-      return price;
+      const result = await src.fn(stock);  // { price, priceType }
+      const srcLabel = result.priceType !== 'TRADE' ? `${src.name}-${result.priceType}` : src.name;
+      setSource(srcLabel);
+      lastPriceType = result.priceType;
+      lastValidPrice = result.price;
+      return result.price;
     } catch (_) { /* try next */ }
   }
   // All sources failed — return null (no simulation)
@@ -506,7 +524,7 @@ async function fetchPriceMap(symbols) {
   await Promise.all(symbols.map(async (sym) => {
     const price = await fetchPrice(sym);
     if (price !== null) {
-      map[sym] = { price, source: lastSource, time: lastUpdateTime };
+      map[sym] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
     }
   }));
   return map;
@@ -527,7 +545,7 @@ async function tick() {
     const price = await fetchPrice(state.stock);
     if (price !== null) {
       state.currentPrice = price;
-      priceMap[state.stock] = { price, source: lastSource, time: lastUpdateTime };
+      priceMap[state.stock] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
     }
     renderPrice();
     return;
@@ -602,8 +620,10 @@ function executeSellLot(lot, price, reason) {
   lot.sellReason = reason;
   const sign = pnl >= 0 ? '+' : '';
   const actionLabel = reason.endsWith('賣出') ? reason : reason + '賣出';
+  const sellEntry = priceMap[lot.stock];
+  const sellPriceNote = (sellEntry && sellEntry.priceType && sellEntry.priceType !== 'TRADE') ? `（${sellEntry.source}，推估價）` : '';
   addLog(
-    `[${lot.stock}][Lot#${lot.lotId}] ${actionLabel} ${sh} 股 @ $${price}　報酬 ${sign}${returnPct.toFixed(2)}%　損益 ${sign}$${pnl.toFixed(0)}`,
+    `[${lot.stock}][Lot#${lot.lotId}] ${actionLabel} ${sh} 股 @ $${price}${sellPriceNote}　報酬 ${sign}${returnPct.toFixed(2)}%　損益 ${sign}$${pnl.toFixed(0)}`,
     pnl >= 0 ? 'up' : 'down'
   );
   saveState();
@@ -677,7 +697,8 @@ async function doManualBuy() {
     state.currentPrice = buyP;
     const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: 'manual' });
     state.lots.push(lot);
-    addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}`, 'neutral');
+    const buyNote = (lastPriceType !== 'TRADE' && (isNaN(priceVal) || priceVal <= 0)) ? `（${lastSource}，推估價）` : '';
+    addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}${buyNote}`, 'neutral');
     saveState();
     renderAll();
 
@@ -752,7 +773,7 @@ async function doManualSellLot(lotId) {
     alert(`股號 ${lot.stock} 查無現價，已跳過賣出。請稍後再試。`);
     return;
   }
-  priceMap[lot.stock] = { price, source: lastSource, time: lastUpdateTime };
+  priceMap[lot.stock] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
   executeSellLot(lot, price, '手動賣出');
   updateManualSellBtn();
   renderAll();
@@ -781,6 +802,7 @@ function doClearSave() {
   $('loadNotice').style.display = 'none';
   lastSource = '—';
   lastUpdateTime = '—';
+  lastPriceType = 'TRADE';
   $('sourceBar').textContent = '來源：— ｜ 更新：—';
   POLL_MS = 5000;
   $('pollInput').value = 5;
@@ -947,10 +969,11 @@ function renderLotsPanel() {
     const priceStr = lotPrice !== null ? `$${lotPrice.toFixed(2)}` : '<span style="color:#f59e0b">無即時價</span>';
     const srcStr = entry ? entry.source : '—';
     const timeStr = entry ? entry.time : '—';
+    const estNote = (entry && entry.priceType && entry.priceType !== 'TRADE') ? ' <span style="color:#f59e0b;font-size:.7rem">推估</span>' : '';
     const pctStr = pct !== null ? `<span class="${pctCls}">${sign}${pct.toFixed(2)}%</span>` : '—';
     html += '<div class="lot-price-row">';
     html += `<span>買 $${lot.buyPrice.toFixed(2)} × ${lot.shares}股</span>`;
-    html += `<span>現價 ${priceStr} ${pctStr}</span>`;
+    html += `<span>現價 ${priceStr}${estNote} ${pctStr}</span>`;
     html += `<span class="lot-meta">${srcStr} ${timeStr}</span>`;
     html += '</div>';
 
@@ -1016,7 +1039,7 @@ async function showInventory() {
   } else if (state.stock) {
     const p = await fetchPrice(state.stock);
     if (p !== null) {
-      priceMap[state.stock] = { price: p, source: lastSource, time: lastUpdateTime };
+      priceMap[state.stock] = { price: p, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
       state.currentPrice = p;
     }
   }
@@ -1085,7 +1108,8 @@ async function showInventory() {
         const retPct = lot.buyPrice > 0 ? ((lotPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
         const sign = pnl >= 0 ? '+' : '';
         const cls = pnl >= 0 ? 'up' : 'down';
-        html += `<div>現價：$${lotPrice.toFixed(2)}（${entry.source} ${entry.time}）</div>`;
+        const estLabel = (entry.priceType && entry.priceType !== 'TRADE') ? '　⚠ 委買委賣推估價' : '';
+        html += `<div>現價：$${lotPrice.toFixed(2)}（${entry.source} ${entry.time}）${estLabel}</div>`;
         html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${pnl.toFixed(0)}</span>（${sign}${retPct.toFixed(2)}%）</div>`;
       } else {
         html += `<div>現價：<span style="color:#f59e0b">無即時價</span>（來源：—）</div>`;
@@ -1157,6 +1181,7 @@ setInterval(updateMarketBar, 30000);
 
   lastSource = saved.source;
   lastUpdateTime = saved.sourceTime;
+  lastPriceType = saved.priceType || 'TRADE';
   $('sourceBar').textContent = `來源：${lastSource} ｜ 更新：${lastUpdateTime}`;
 
   POLL_MS = saved.pollSec * 1000;
