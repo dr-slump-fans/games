@@ -106,15 +106,25 @@ button.sell-all:hover{background:#b91c1c}
 .phase-badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.72rem;font-weight:600}
 .phase-holding{background:#1e3a5f;color:#93c5fd}
 .phase-trailing{background:#14532d;color:#4ade80}
+/* v0.2.6 estimated price warning */
+.est-warn{background:#423006;color:#fbbf24;border-radius:6px;padding:4px 10px;font-size:.78rem;margin:4px 0}
+.price-type-badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.68rem;font-weight:600;margin-left:4px}
+.price-type-trade{background:#14532d;color:#4ade80}
+.price-type-est{background:#713f12;color:#fbbf24}
+/* v0.2.6 source chain log */
+.source-chain{font-size:.75rem;color:#94a3b8;margin:4px 0;line-height:1.5}
+.source-chain .src-ok{color:#4ade80}
+.source-chain .src-fail{color:#ef4444}
 </style>
 </head>
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.2.5</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.6</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
+  <div id="sourceChainBar" class="source-chain" style="text-align:center;display:none"></div>
 
   <!-- poll interval -->
   <div class="row" style="align-items:center">
@@ -222,6 +232,11 @@ let nextLotId = 1;
 let state = resetState();
 let timer = null;
 let lastValidPrice = 0;  // last successfully fetched price
+
+/* v0.2.6: debounce & duplicate-sell guards */
+let _sellAllLock = false;        // prevent rapid sell-all clicks
+let _sellLotLocks = new Set();   // prevent rapid per-lot sell clicks
+let _tickSoldLots = new Set();   // lots already sold in current tick cycle
 
 function makeLot(opts) {
   return {
@@ -481,33 +496,68 @@ const SOURCES = [
   { name: 'Stooq', fn: fetchStooq },
 ];
 
+/* v0.2.6: last fetch attempt chain for diagnostics */
+let lastFetchChain = [];  // [{source, ok, error, priceType}]
+
 async function fetchPrice(stock) {
+  const chain = [];
   for (const src of SOURCES) {
     try {
       const result = await src.fn(stock);  // { price, priceType }
       const srcLabel = result.priceType !== 'TRADE' ? `${src.name}-${result.priceType}` : src.name;
+      chain.push({ source: src.name, ok: true, priceType: result.priceType });
+      lastFetchChain = chain;
       setSource(srcLabel);
       lastPriceType = result.priceType;
       lastValidPrice = result.price;
       return result.price;
-    } catch (_) { /* try next */ }
+    } catch (e) {
+      const reason = classifyFetchError(e);
+      chain.push({ source: src.name, ok: false, error: reason });
+    }
   }
+  lastFetchChain = chain;
   // All sources failed — return null (no simulation)
   return null;
+}
+
+/* v0.2.6: classify fetch error into user-friendly reason */
+function classifyFetchError(e) {
+  if (!e) return '未知錯誤';
+  const msg = String(e.message || e).toLowerCase();
+  if (msg.includes('timeout') || msg.includes('abort')) return '超時';
+  if (msg.includes('429')) return 'HTTP429(頻率限制)';
+  if (msg.includes('cors') || msg.includes('opaque') || msg.includes('networkerror') || msg.includes('failed to fetch')) return 'CORS/網路錯誤';
+  if (msg.includes('http 4') || msg.includes('http 5')) return `HTTP錯誤(${msg.match(/http (\d+)/)?.[1] || '?'})`;
+  if (msg.includes('no price') || msg.includes('empty') || msg.includes('failed')) return '無價格資料';
+  return '取價失敗';
+}
+
+/* v0.2.6: format source chain for display */
+function formatSourceChain(chain) {
+  if (!chain || chain.length === 0) return '';
+  return chain.map(c => {
+    if (c.ok) {
+      const pt = c.priceType !== 'TRADE' ? `(${c.priceType})` : '';
+      return `<span class="src-ok">${c.source}${pt} ✓</span>`;
+    }
+    return `<span class="src-fail">${c.source} ✗ ${c.error}</span>`;
+  }).join(' → ');
 }
 
 /* ── Stock symbol validation ── */
 async function validateStock(symbol) {
   // Format check: Taiwan stocks are 4-6 digit numbers
   if (!/^\d{4,6}$/.test(symbol)) {
-    return { valid: false, reason: '股號格式錯誤：台股代號應為 4~6 位數字' };
+    return { valid: false, reason: '股號格式錯誤：台股代號應為 4~6 位數字', chain: [] };
   }
   // Price check: at least one source must return a valid price
   const price = await fetchPrice(symbol);
   if (price === null) {
-    return { valid: false, reason: `股號 ${symbol} 查無報價，請確認代號是否正確` };
+    const chainDesc = lastFetchChain.map(c => `${c.source}: ${c.error}`).join('、');
+    return { valid: false, reason: `股號 ${symbol} 查無報價（${chainDesc}）`, chain: lastFetchChain };
   }
-  return { valid: true, price };
+  return { valid: true, price, chain: lastFetchChain };
 }
 
 function setSource(name) {
@@ -569,6 +619,12 @@ async function tick() {
   } else {
     $('sourceBar').textContent = `來源：查無現價 ｜ 上次：${lastUpdateTime}`;
   }
+  // v0.2.6: show source chain bar
+  const chainBar = $('sourceChainBar');
+  if (lastFetchChain.length > 0) {
+    chainBar.innerHTML = '取價鏈：' + formatSourceChain(lastFetchChain);
+    chainBar.style.display = 'block';
+  }
 
   // Update state.currentPrice for backward compat (use state.stock's price)
   if (priceMap[state.stock]) {
@@ -583,14 +639,20 @@ async function tick() {
     addLog(`[${sym}] 查無現價，跳過相關 lots`, 'neutral');
   }
 
+  // v0.2.6: reset per-tick sold guard
+  _tickSoldLots = new Set();
+
   // Apply strategy to each active lot using its own symbol's price
   for (const lot of active) {
+    // v0.2.6: skip if already sold in this tick cycle
+    if (_tickSoldLots.has(lot.lotId)) continue;
     const entry = priceMap[lot.stock];
     if (!entry) continue;  // no price for this symbol — skip
     const price = entry.price;
 
     if (lot.phase === 'holding') {
       if (price <= lot.buyPrice * STOP_LOSS) {
+        _tickSoldLots.add(lot.lotId);
         executeSellLot(lot, price, '停損');
       } else if (price >= lot.buyPrice * ENTER_TP) {
         lot.phase = 'trailing';
@@ -599,11 +661,12 @@ async function tick() {
         saveState();
       }
     }
-    if (lot.phase === 'trailing') {
+    if (lot.phase === 'trailing' && !_tickSoldLots.has(lot.lotId)) {
       if (price >= lot.highestPrice * NEAR_HIGH) {
         lot.highestPrice = Math.max(lot.highestPrice, price);
       }
       if (price <= lot.highestPrice * TP_EXIT) {
+        _tickSoldLots.add(lot.lotId);
         executeSellLot(lot, price, '移動停利');
       }
     }
@@ -692,14 +755,18 @@ async function doManualBuy() {
       }
     } else {
       // No manual price: require live quote validation
+      btnManualBuy.textContent = '取價中…';
       result = await validateStock(inputStock);
       if (!result.valid) {
-        alert(result.reason + '。若你已知成交價，可輸入手動買入價下單。');
+        alert(result.reason + '\n\n💡 若你已知成交價，可在「買入價」欄位輸入價格，改用手動價買入。');
+        // v0.2.6: log source chain on buy failure
+        addLog(`[${inputStock}] 買入取價失敗：${lastFetchChain.map(c => `${c.source}:${c.error || 'OK'}`).join('→')}`, 'neutral');
         return;
       }
     }
 
     let buyP;
+    let buySourceLabel = 'manual';
     if (!isNaN(priceVal) && priceVal > 0) {
       buyP = priceVal;
       setSource('MANUAL');
@@ -711,10 +778,11 @@ async function doManualBuy() {
 
     state.stock = inputStock;
     state.currentPrice = buyP;
-    const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: 'manual' });
+    const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: buySourceLabel });
     state.lots.push(lot);
     const buyNote = (lastPriceType !== 'TRADE' && (isNaN(priceVal) || priceVal <= 0)) ? `（${lastSource}，推估價）` : '';
-    addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}${buyNote}`, 'neutral');
+    const chainStr = lastFetchChain.length > 0 ? `（來源：${lastFetchChain.filter(c=>c.ok).map(c=>c.source).join(',')||'MANUAL'}）` : '';
+    addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}${buyNote}${chainStr}`, 'neutral');
     saveState();
     renderAll();
 
@@ -751,48 +819,68 @@ function stopMonitor() {
 
 /* ── Manual Sell ── */
 async function doManualSell() {
-  const active = activeLots();
-  if (active.length === 0) {
-    alert('目前無持倉，無法賣出');
-    return;
-  }
-  // Fetch prices per unique symbol
-  const symbols = [...new Set(active.map(l => l.stock))];
-  const newMap = await fetchPriceMap(symbols);
-  Object.assign(priceMap, newMap);
+  // v0.2.6: debounce — prevent rapid double-click
+  if (_sellAllLock) return;
+  _sellAllLock = true;
+  btnManualSell.disabled = true;
+  // Also disable sell-all button in lots panel
+  const sellAllBtn = document.querySelector('button.sell-all');
+  if (sellAllBtn) sellAllBtn.disabled = true;
 
-  const failedSyms = symbols.filter(s => !newMap[s]);
-  let soldCount = 0;
-  for (const lot of active) {
-    const entry = priceMap[lot.stock];
-    if (!entry) continue;  // skip lots without price
-    executeSellLot(lot, entry.price, '手動賣出');
-    soldCount++;
+  try {
+    const active = activeLots();
+    if (active.length === 0) {
+      alert('目前無持倉，無法賣出');
+      return;
+    }
+    // Fetch prices per unique symbol
+    const symbols = [...new Set(active.map(l => l.stock))];
+    const newMap = await fetchPriceMap(symbols);
+    Object.assign(priceMap, newMap);
+
+    const failedSyms = symbols.filter(s => !newMap[s]);
+    let soldCount = 0;
+    for (const lot of active) {
+      const entry = priceMap[lot.stock];
+      if (!entry) continue;  // skip lots without price
+      executeSellLot(lot, entry.price, '手動賣出');
+      soldCount++;
+    }
+    if (failedSyms.length > 0) {
+      alert(`以下股號查無現價，相關 lots 已跳過：${failedSyms.join(', ')}`);
+    }
+    if (soldCount === 0 && failedSyms.length > 0) {
+      alert('所有股號皆查無現價，無法賣出。請稍後再試。');
+    }
+    // Update state.currentPrice for display
+    if (priceMap[state.stock]) state.currentPrice = priceMap[state.stock].price;
+    updateManualSellBtn();
+    renderAll();
+  } finally {
+    setTimeout(() => { _sellAllLock = false; updateManualSellBtn(); }, 1000);
   }
-  if (failedSyms.length > 0) {
-    alert(`以下股號查無現價，相關 lots 已跳過：${failedSyms.join(', ')}`);
-  }
-  if (soldCount === 0 && failedSyms.length > 0) {
-    alert('所有股號皆查無現價，無法賣出。請稍後再試。');
-  }
-  // Update state.currentPrice for display
-  if (priceMap[state.stock]) state.currentPrice = priceMap[state.stock].price;
-  updateManualSellBtn();
-  renderAll();
 }
 
 async function doManualSellLot(lotId) {
-  const lot = state.lots.find(l => l.lotId === lotId);
-  if (!lot || (lot.phase !== 'holding' && lot.phase !== 'trailing')) return;
-  const price = await fetchPrice(lot.stock);
-  if (price === null) {
-    alert(`股號 ${lot.stock} 查無現價，已跳過賣出。請稍後再試。`);
-    return;
+  // v0.2.6: debounce per-lot sell
+  if (_sellLotLocks.has(lotId)) return;
+  _sellLotLocks.add(lotId);
+
+  try {
+    const lot = state.lots.find(l => l.lotId === lotId);
+    if (!lot || (lot.phase !== 'holding' && lot.phase !== 'trailing')) return;
+    const price = await fetchPrice(lot.stock);
+    if (price === null) {
+      alert(`股號 ${lot.stock} 查無現價，已跳過賣出。請稍後再試。`);
+      return;
+    }
+    priceMap[lot.stock] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
+    executeSellLot(lot, price, '手動賣出');
+    updateManualSellBtn();
+    renderAll();
+  } finally {
+    setTimeout(() => { _sellLotLocks.delete(lotId); }, 1000);
   }
-  priceMap[lot.stock] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
-  executeSellLot(lot, price, '手動賣出');
-  updateManualSellBtn();
-  renderAll();
 }
 
 function updateManualSellBtn() {
@@ -985,13 +1073,19 @@ function renderLotsPanel() {
     const priceStr = lotPrice !== null ? `$${lotPrice.toFixed(2)}` : '<span style="color:#f59e0b">無即時價</span>';
     const srcStr = entry ? entry.source : '—';
     const timeStr = entry ? entry.time : '—';
-    const estNote = (entry && entry.priceType && entry.priceType !== 'TRADE') ? ' <span style="color:#f59e0b;font-size:.7rem">推估</span>' : '';
+    // v0.2.6: priceType badge
+    const pt = entry ? (entry.priceType || 'TRADE') : null;
+    const ptBadge = pt ? `<span class="price-type-badge ${pt === 'TRADE' ? 'price-type-trade' : 'price-type-est'}">${pt}</span>` : '';
     const pctStr = pct !== null ? `<span class="${pctCls}">${sign}${pct.toFixed(2)}%</span>` : '—';
     html += '<div class="lot-price-row">';
     html += `<span>買 $${lot.buyPrice.toFixed(2)} × ${lot.shares}股</span>`;
-    html += `<span>現價 ${priceStr}${estNote} ${pctStr}</span>`;
+    html += `<span>現價 ${priceStr}${ptBadge} ${pctStr}</span>`;
     html += `<span class="lot-meta">${srcStr} ${timeStr}</span>`;
     html += '</div>';
+    // v0.2.6: estimated price warning row
+    if (pt && pt !== 'TRADE') {
+      html += `<div class="est-warn">⚠ 推估價（${srcStr}-${pt}），非實際成交價，僅供參考</div>`;
+    }
 
     // Strategy thresholds row
     html += '<div class="strat-row">';
@@ -1124,8 +1218,12 @@ async function showInventory() {
         const retPct = lot.buyPrice > 0 ? ((lotPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
         const sign = pnl >= 0 ? '+' : '';
         const cls = pnl >= 0 ? 'up' : 'down';
-        const estLabel = (entry.priceType && entry.priceType !== 'TRADE') ? '　⚠ 委買委賣推估價' : '';
-        html += `<div>現價：$${lotPrice.toFixed(2)}（${entry.source} ${entry.time}）${estLabel}</div>`;
+        const invPt = entry.priceType || 'TRADE';
+        const invPtBadge = `<span class="price-type-badge ${invPt === 'TRADE' ? 'price-type-trade' : 'price-type-est'}">${invPt}</span>`;
+        html += `<div>現價：$${lotPrice.toFixed(2)}${invPtBadge}（${entry.source} ${entry.time}）</div>`;
+        if (invPt !== 'TRADE') {
+          html += `<div class="est-warn">⚠ 推估價（${entry.source}-${invPt}），非實際成交價</div>`;
+        }
         html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${pnl.toFixed(0)}</span>（${sign}${retPct.toFixed(2)}%）</div>`;
       } else {
         html += `<div>現價：<span style="color:#f59e0b">無即時價</span>（來源：—）</div>`;
