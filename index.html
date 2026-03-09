@@ -1,47 +1,1369 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>小蝦米遊樂場 Shrimp Arcade</title>
-  <style>
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px}
-    .wrap{max-width:760px;margin:0 auto}
-    h1{margin:0 0 8px}
-    p{color:#94a3b8}
-    .card{background:#111827;border:1px solid #334155;border-radius:14px;padding:16px;margin:14px 0}
-    a{color:#38bdf8;text-decoration:none;font-weight:700}
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>股市投資策略工具（台股盤中規則版）</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;background:#0f172a;color:#e2e8f0;padding:12px}
+.wrap{max-width:520px;margin:0 auto}
+h1{font-size:1.2rem;margin-bottom:4px}
+.ver{font-size:.7rem;color:#64748b}
+
+/* inputs */
+.row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+.row input,.row select{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 10px;font-size:.95rem}
+.row input{flex:1;min-width:80px}
+.row select{min-width:100px}
+button{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.9rem;cursor:pointer;font-weight:600}
+button:disabled{opacity:.4;cursor:default}
+button.stop{background:#dc2626}
+button.reset{background:#475569}
+button.clear-save{background:#7c2d12}
+
+/* status panel */
+.panel{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:12px;margin:10px 0}
+.panel h2{font-size:.95rem;margin-bottom:8px;color:#94a3b8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+.grid .lbl{font-size:.75rem;color:#64748b}
+.grid .val{font-size:1rem;font-weight:700}
+.val.up{color:#22c55e}
+.val.down{color:#ef4444}
+.val.neutral{color:#94a3b8}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 16px}
+
+/* log */
+.log-box{background:#111827;border:1px solid #334155;border-radius:10px;padding:10px;max-height:200px;overflow-y:auto;font-size:.78rem;line-height:1.5}
+.log-box .entry{border-bottom:1px solid #1e293b;padding:3px 0}
+.log-box .entry:last-child{border:none}
+.log-entry-up{color:#22c55e}
+.log-entry-down{color:#ef4444}
+.log-entry-neutral{color:#94a3b8}
+
+/* market status bar */
+.market-bar{text-align:center;padding:6px;border-radius:8px;font-size:.8rem;font-weight:600;margin:8px 0}
+.market-bar.open{background:#14532d;color:#4ade80}
+.market-bar.closed{background:#422006;color:#fbbf24}
+
+.back{display:inline-block;margin-bottom:8px;color:#38bdf8;text-decoration:none;font-size:.85rem}
+
+/* inventory query button */
+button.query{background:#0d9488}
+button.manual-sell{background:#f97316}
+button.manual-sell:disabled{opacity:.4;cursor:default}
+button.manual-buy{background:#7c3aed}
+button.manual-buy:disabled{opacity:.4;cursor:default}
+.manual-buy-row{display:flex;gap:8px;margin:6px 0;flex-wrap:wrap;align-items:center}
+.manual-buy-row input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 10px;font-size:.95rem;width:110px}
+.manual-buy-row label{font-size:.8rem;color:#94a3b8;white-space:nowrap}
+.time-row{display:flex;gap:8px;margin:6px 0;flex-wrap:wrap;align-items:center}
+.time-row input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:6px 8px;font-size:.9rem;width:80px}
+.time-row label{font-size:.8rem;color:#94a3b8;white-space:nowrap}
+
+/* inventory modal overlay */
+.inv-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:100;justify-content:center;align-items:center}
+.inv-overlay.show{display:flex}
+.inv-modal{background:#1e293b;border:1px solid #475569;border-radius:14px;padding:16px;max-width:460px;width:92%;max-height:85vh;overflow-y:auto;position:relative}
+.inv-modal h2{font-size:1rem;margin-bottom:10px;color:#e2e8f0}
+.inv-modal .close-btn{position:absolute;top:10px;right:14px;background:none;border:none;color:#94a3b8;font-size:1.3rem;cursor:pointer;padding:0}
+.inv-modal .inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+.inv-modal .lbl{font-size:.75rem;color:#64748b}
+.inv-modal .val{font-size:.95rem;font-weight:700}
+.inv-modal .section-title{font-size:.82rem;color:#94a3b8;margin:12px 0 6px;border-top:1px solid #334155;padding-top:8px}
+.inv-modal .no-pos{text-align:center;color:#94a3b8;padding:16px 0;font-size:.9rem}
+.inv-modal .last-trade{background:#111827;border-radius:8px;padding:10px;margin-top:8px;font-size:.82rem;line-height:1.6}
+
+/* lots table */
+.lots-panel{margin:10px 0}
+.lots-panel h2{font-size:.95rem;margin-bottom:6px;color:#94a3b8}
+.lots-table{width:100%;border-collapse:collapse;font-size:.78rem}
+.lots-table th{text-align:left;color:#64748b;padding:4px 6px;border-bottom:1px solid #334155;font-weight:500}
+.lots-table td{padding:4px 6px;border-bottom:1px solid #1e293b;vertical-align:middle}
+.lots-table .lot-up{color:#22c55e}
+.lots-table .lot-down{color:#ef4444}
+.lots-table .lot-neutral{color:#94a3b8}
+button.sell-lot{background:#f97316;color:#fff;border:none;border-radius:6px;padding:3px 8px;font-size:.72rem;cursor:pointer;font-weight:600}
+button.sell-lot:hover{background:#ea580c}
+button.sell-all{background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.82rem;cursor:pointer;font-weight:600;margin-top:6px}
+button.sell-all:hover{background:#b91c1c}
+.lots-empty{color:#64748b;font-size:.82rem;text-align:center;padding:10px 0}
+
+/* v0.1.9 strategy dashboard */
+.lot-detail{background:#111827;border-radius:8px;padding:8px 10px;margin:4px 0;font-size:.76rem;line-height:1.6}
+.lot-detail .lot-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.lot-detail .lot-header strong{font-size:.82rem}
+.lot-detail .lot-meta{color:#94a3b8}
+.lot-detail .lot-price-row{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0}
+.lot-detail .strat-row{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0}
+.strat-tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.72rem;font-weight:600}
+.strat-safe{background:#14532d;color:#4ade80}
+.strat-warn{background:#713f12;color:#fbbf24}
+.strat-danger{background:#7f1d1d;color:#fca5a5}
+.strat-info{background:#1e3a5f;color:#93c5fd}
+.phase-badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.72rem;font-weight:600}
+.phase-holding{background:#1e3a5f;color:#93c5fd}
+.phase-trailing{background:#14532d;color:#4ade80}
+/* v0.2.6 estimated price warning */
+.est-warn{background:#423006;color:#fbbf24;border-radius:6px;padding:4px 10px;font-size:.78rem;margin:4px 0}
+.price-type-badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.68rem;font-weight:600;margin-left:4px}
+.price-type-trade{background:#14532d;color:#4ade80}
+.price-type-est{background:#713f12;color:#fbbf24}
+/* v0.2.6 source chain log */
+.source-chain{font-size:.75rem;color:#94a3b8;margin:4px 0;line-height:1.5}
+.source-chain .src-ok{color:#4ade80}
+.source-chain .src-fail{color:#ef4444}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>🎮 小蝦米遊樂場 Shrimp Arcade</h1>
-    <p>歡迎來玩！選一個開始。</p>
+<div class="wrap">
+  <a class="back" href="../index.html">← 回首頁</a>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.6</span></h1>
 
-    <div class="card">
-      <a href="./cc-fun-idea-web/index.html">交易員壓力測試：限時決策</a>
-      <p>10 題快問快答，20/10/5 秒難度。</p>
-    </div>
+  <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
+  <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
+  <div id="sourceChainBar" class="source-chain" style="text-align:center;display:none"></div>
 
-    <div class="card">
-      <a href="./cc-word-quiz/index.html">英文單字測驗（中譯選擇）</a>
-      <p>支援 3000/7000 題庫切換與難度模式。</p>
-    </div>
+  <!-- poll interval -->
+  <div class="row" style="align-items:center">
+    <label style="font-size:.8rem;color:#94a3b8;white-space:nowrap">輪詢間隔</label>
+    <input id="pollInput" type="number" min="3" max="60" value="5" style="width:60px;flex:none"/> <span style="font-size:.8rem;color:#94a3b8">秒</span>
+  </div>
 
-    <div class="card">
-      <a href="./brick-breaker/index.html">敲磚塊 Breakout</a>
-      <p>經典街機玩法，支援桌機鍵盤與手機觸控。</p>
-    </div>
+  <!-- monitoring time window -->
+  <div class="time-row">
+    <label>監控時窗</label>
+    <input id="monitorStart" type="text" value="09:10" placeholder="09:10"/>
+    <span style="font-size:.8rem;color:#94a3b8">~</span>
+    <input id="monitorEnd" type="text" value="12:00" placeholder="12:00"/>
+    <span style="font-size:.75rem;color:#64748b">(Asia/Taipei)</span>
+  </div>
 
-    <div class="card">
-      <a href="./plumber-runner/index.html">Plumber Runner 管線跑者</a>
-      <p>橫向捲軸自動前進，長按可跳更高，閃避隨機水管。</p>
-    </div>
+  <!-- stock input -->
+  <div class="row">
+    <input id="stockInput" type="text" placeholder="股票代號" value="2330"/>
+    <select id="stockSelect">
+      <option value="2330">2330 台積電</option>
+      <option value="2317">2317 鴻海</option>
+      <option value="0050">0050 元大台灣50</option>
+      <option value="2454">2454 聯發科</option>
+    </select>
+  </div>
+  <div class="row">
+    <button id="btnStart">開始監控</button>
+    <button id="btnStop" class="stop" disabled>停止監控</button>
+    <button id="btnManualSell" class="manual-sell" disabled>賣出全部</button>
+    <button id="btnReset" class="reset">重置</button>
+    <button id="btnClearSave" class="reset" style="background:#7c2d12">清除存檔</button>
+    <button id="btnQuery" class="query">查詢庫存</button>
+  </div>
+  <!-- manual buy -->
+  <div class="manual-buy-row">
+    <label>買入股號</label>
+    <input id="manualBuyStock" type="text" placeholder="股號" style="width:70px"/>
+    <label>買入價</label>
+    <input id="manualBuyPrice" type="number" step="0.01" min="0" placeholder="留空=現價"/>
+    <label>股數</label>
+    <input id="manualBuyShares" type="number" min="1" value="1000" style="width:80px"/>
+    <button id="btnManualBuy" class="manual-buy">手動買入</button>
+  </div>
+  <!-- active lots panel -->
+  <div class="panel lots-panel" id="lotsPanel" style="display:none">
+    <h2>持倉清單</h2>
+    <div id="lotsBody"></div>
+  </div>
 
-    <div class="card">
-      <a href="./stock-invest-game/index.html">股市投資策略模擬器（台股盤中版）</a>
-      <p>台股盤中自動停損停利策略，支援即時報價與模擬模式。</p>
+  <div id="loadNotice" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.82rem;text-align:center"></div>
+
+  <!-- global summary bar -->
+  <div class="panel" id="globalSummary" style="padding:8px 12px">
+    <div id="summaryContent" style="font-size:.85rem;line-height:1.6;color:#94a3b8">等待中 — 無持倉</div>
+  </div>
+
+  <!-- cumulative stats -->
+  <div class="panel">
+    <h2>累積統計</h2>
+    <div class="stats">
+      <div><div class="lbl">交易次數</div><div class="val" id="sTrades">0</div></div>
+      <div><div class="lbl">勝率</div><div class="val" id="sWinRate">—</div></div>
+      <div><div class="lbl">平均報酬率</div><div class="val" id="sAvgReturn">—</div></div>
+      <div><div class="lbl">累積損益</div><div class="val neutral" id="sTotalPnl">$0</div></div>
     </div>
   </div>
+
+  <!-- trade log -->
+  <div class="panel">
+    <h2>交易日誌</h2>
+    <div class="log-box" id="logBox"><div class="entry" style="color:#64748b">尚無交易記錄</div></div>
+  </div>
+</div>
+
+<!-- inventory query modal -->
+<div id="invOverlay" class="inv-overlay">
+  <div class="inv-modal">
+    <button class="close-btn" id="invClose">&times;</button>
+    <h2>庫存查詢</h2>
+    <div id="invContent"></div>
+  </div>
+</div>
+
+<script>
+/* ── Config ── */
+let SHARES = 1000;           // default shares (can be overridden by manual buy)
+const STOP_LOSS = 0.9;       // sell if price <= buyPrice * 0.9
+const ENTER_TP = 1.1;        // enter trailing-stop mode at +10%
+const NEAR_HIGH = 0.998;     // treat as new high if >= highest * 0.998
+const TP_EXIT = 0.92;        // sell if price <= highestPrice * 0.92
+let POLL_MS = 5000;          // poll interval (configurable)
+const POLL_MIN = 3000;
+/* Configurable monitoring time window (HH:MM format, Asia/Taipei) */
+let MONITOR_START = '09:10';
+let MONITOR_END = '12:00';
+
+/* ── Price source tracking ── */
+let lastSource = '—';
+let lastUpdateTime = '—';
+let lastPriceType = 'TRADE';  // TRADE / ASK1 / BID1 / MID
+
+/* ── State ── */
+let nextLotId = 1;
+let state = resetState();
+let timer = null;
+let lastValidPrice = 0;  // last successfully fetched price
+
+/* v0.2.6: debounce & duplicate-sell guards */
+let _sellAllLock = false;        // prevent rapid sell-all clicks
+let _sellLotLocks = new Set();   // prevent rapid per-lot sell clicks
+let _tickSoldLots = new Set();   // lots already sold in current tick cycle
+
+function makeLot(opts) {
+  return {
+    lotId: nextLotId++,
+    stock: opts.stock || '2330',
+    shares: opts.shares || 1000,
+    buyPrice: opts.buyPrice || 0,
+    highestPrice: opts.highestPrice || opts.buyPrice || 0,
+    phase: opts.phase || 'holding',   // holding | trailing | sold
+    buyTime: opts.buyTime || Date.now(),
+    buySource: opts.buySource || 'manual',
+    sellPrice: null,
+    sellTime: null,
+    sellReason: null,
+  };
+}
+
+function resetState() {
+  nextLotId = 1;
+  return {
+    stock: '2330',
+    currentPrice: 0,
+    lots: [],            // active + sold lots
+    trades: [],          // {buyPrice, sellPrice, pnl, returnPct, reason, shares, buySource, lotId, stock, time}
+    logEntries: [],      // persisted log entries [{ts, msg, type}]
+  };
+}
+
+/* ── localStorage persistence ── */
+const SAVE_KEY = 'stockInvestGame_v1';
+
+function saveState() {
+  try {
+    const data = {
+      version: 2,        // v0.1.6+ multi-lot format (v0.2.2: logEntries persistence)
+      stock: state.stock,
+      currentPrice: state.currentPrice,
+      lots: state.lots,
+      nextLotId: nextLotId,
+      trades: (state.trades || []).slice(-100),
+      logEntries: (state.logEntries || []).slice(-200),
+      source: lastSource,
+      sourceTime: lastUpdateTime,
+      priceType: lastPriceType,
+      pollSec: POLL_MS / 1000,
+      monitorStart: MONITOR_START,
+      monitorEnd: MONITOR_END,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (_) { /* localStorage unavailable — silently ignore */ }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object') return null;
+
+    const base = {
+      source:       typeof d.source === 'string' ? d.source : '—',
+      sourceTime:   typeof d.sourceTime === 'string' ? d.sourceTime : '—',
+      priceType:    typeof d.priceType === 'string' ? d.priceType : 'TRADE',
+      pollSec:      typeof d.pollSec === 'number' && d.pollSec >= POLL_MIN/1000 ? d.pollSec : 5,
+      monitorStart: typeof d.monitorStart === 'string' && /^\d{2}:\d{2}$/.test(d.monitorStart) ? d.monitorStart : '09:10',
+      monitorEnd:   typeof d.monitorEnd === 'string' && /^\d{2}:\d{2}$/.test(d.monitorEnd) ? d.monitorEnd : '12:00',
+      trades:       Array.isArray(d.trades) ? d.trades.slice(-100) : [],
+      logEntries:   Array.isArray(d.logEntries) ? d.logEntries.slice(-200) : [],
+      currentPrice: typeof d.currentPrice === 'number' && d.currentPrice >= 0 ? d.currentPrice : 0,
+      stock:        typeof d.stock === 'string' && d.stock ? d.stock : '2330',
+    };
+
+    // v2 format (multi-lot)
+    if (d.version === 2 && Array.isArray(d.lots)) {
+      // Backfill stock field for old lots that may lack it
+      base.lots = d.lots.map(l => {
+        if (!l.stock) l.stock = base.stock;
+        return l;
+      });
+      base.nextLotId = typeof d.nextLotId === 'number' ? d.nextLotId : 1;
+      return base;
+    }
+
+    // v1 migration: single position → lots array
+    base.lots = [];
+    base.nextLotId = 1;
+    const phase = ['holding','trailing'].includes(d.phase) ? d.phase : null;
+    if (phase && typeof d.buyPrice === 'number' && d.buyPrice > 0) {
+      base.lots.push({
+        lotId: base.nextLotId++,
+        stock: base.stock,
+        shares: typeof d.shares === 'number' && d.shares > 0 ? d.shares : 1000,
+        buyPrice: d.buyPrice,
+        highestPrice: typeof d.highestPrice === 'number' && d.highestPrice > 0 ? d.highestPrice : d.buyPrice,
+        phase: phase,
+        buyTime: d.savedAt || Date.now(),
+        buySource: typeof d.buySource === 'string' && d.buySource ? d.buySource : 'manual',
+        sellPrice: null, sellTime: null, sellReason: null,
+      });
+    }
+    return base;
+  } catch (_) { return null; }
+}
+
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (_) { /* ignore */ }
+}
+
+/* ── DOM refs ── */
+const $ = id => document.getElementById(id);
+const btnStart = $('btnStart'), btnStop = $('btnStop'), btnReset = $('btnReset');
+const btnClearSave = $('btnClearSave');
+const stockInput = $('stockInput'), stockSelect = $('stockSelect');
+
+stockSelect.addEventListener('change', () => {
+  stockInput.value = stockSelect.value;
+  $('manualBuyStock').value = stockSelect.value;
+});
+stockInput.addEventListener('input', () => {
+  const v = stockInput.value.trim();
+  if ([...stockSelect.options].some(o => o.value === v)) stockSelect.value = v;
+  $('manualBuyStock').value = v;
+});
+
+const btnQuery = $('btnQuery');
+const btnManualSell = $('btnManualSell');
+const btnManualBuy = $('btnManualBuy');
+
+btnStart.addEventListener('click', startMonitor);
+btnStop.addEventListener('click', stopMonitor);
+btnReset.addEventListener('click', doReset);
+btnClearSave.addEventListener('click', doClearSave);
+btnQuery.addEventListener('click', showInventory);
+btnManualBuy.addEventListener('click', doManualBuy);
+btnManualSell.addEventListener('click', doManualSell);
+$('invClose').addEventListener('click', () => { $('invOverlay').classList.remove('show'); });
+$('invOverlay').addEventListener('click', e => { if (e.target === $('invOverlay')) $('invOverlay').classList.remove('show'); });
+
+/* ── Market hours check (Asia/Taipei) ── */
+function taipeiNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+}
+function parseHHMM(s) {
+  const [h, m] = s.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+function isMarketOpen() {
+  const d = taipeiNow();
+  const day = d.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = d.getHours() * 60 + d.getMinutes();
+  return mins >= parseHHMM(MONITOR_START) && mins < parseHHMM(MONITOR_END);
+}
+function updateMarketBar() {
+  const bar = $('marketBar');
+  if (isMarketOpen()) {
+    bar.className = 'market-bar open';
+    bar.textContent = `監控中 ${MONITOR_START} – ${MONITOR_END}`;
+  } else {
+    bar.className = 'market-bar closed';
+    bar.textContent = `非監控時段 — 等待 ${MONITOR_START}`;
+  }
+}
+
+/* ── Price fetching — multi-source with fallback chain ── */
+
+// CORS proxy helpers — used when direct fetch fails due to CORS
+const PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+];
+
+async function fetchWithTimeout(url, ms = 4000) {
+  const resp = await fetch(url, { signal: AbortSignal.timeout(ms) });
+  if (!resp.ok) throw new Error('http ' + resp.status);
+  return resp;
+}
+
+async function tryDirectOrProxy(url, ms = 4000) {
+  // Try direct first
+  try { return await fetchWithTimeout(url, ms); } catch (_) { /* fall through */ }
+  // Try each proxy
+  for (const mkProxy of PROXIES) {
+    try { return await fetchWithTimeout(mkProxy(url), ms); } catch (_) { /* next */ }
+  }
+  throw new Error('all fetch attempts failed');
+}
+
+// Source A: TWSE JSON (tse + otc)
+// Returns { price, priceType } where priceType is TRADE / ASK1 / BID1 / MID
+async function fetchTWSE(stock) {
+  const ts = Date.now();
+  for (const ex of ['tse', 'otc']) {
+    try {
+      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${ex}_${stock}.tw|otc_${stock}.tw&json=1&delay=0&_=${ts}`;
+      const resp = await tryDirectOrProxy(url);
+      const json = await resp.json();
+      if (json.msgArray && json.msgArray.length > 0) {
+        // TWSE sometimes returns placeholder rows first; pick the exact stock row.
+        const info = json.msgArray.find(it => String((it && it.c) || '').trim() === String(stock))
+          || json.msgArray.find(it => String((it && it['@']) || '').includes(`${stock}.tw`));
+        if (!info) continue;
+
+        // 1) 成交價 z
+        let price = parseFloat(info.z);
+        if (!isNaN(price) && price > 0) return { price, priceType: 'TRADE' };
+        // 1b) 昨收 y (still counts as TRADE-level)
+        price = parseFloat(info.y);
+        if (!isNaN(price) && price > 0) return { price, priceType: 'TRADE' };
+        // 2) Fallback: 最佳賣價 a 第一檔
+        const a1 = info.a ? parseFloat(String(info.a).split('_')[0]) : NaN;
+        // 3) Fallback: 最佳買價 b 第一檔
+        const b1 = info.b ? parseFloat(String(info.b).split('_')[0]) : NaN;
+        const aOk = !isNaN(a1) && a1 > 0;
+        const bOk = !isNaN(b1) && b1 > 0;
+        if (aOk && bOk) return { price: (a1 + b1) / 2, priceType: 'MID' };
+        if (aOk) return { price: a1, priceType: 'ASK1' };
+        if (bOk) return { price: b1, priceType: 'BID1' };
+        continue;
+      }
+    } catch (_) { /* try next exchange */ }
+  }
+  throw new Error('TWSE failed');
+}
+
+// Source B: Yahoo Finance quote
+async function fetchYahoo(stock) {
+  const symbol = `${stock}.TW`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1m`;
+  const resp = await tryDirectOrProxy(url);
+  const json = await resp.json();
+  const meta = json?.chart?.result?.[0]?.meta;
+  const price = meta?.regularMarketPrice;
+  if (typeof price !== 'number' || price <= 0) throw new Error('Yahoo no price');
+  return { price, priceType: 'TRADE' };
+}
+
+// Source C: Stooq (text/csv endpoint)
+async function fetchStooq(stock) {
+  const url = `https://stooq.com/q/l/?s=${stock}.tw&f=sd2t2ohlcv&h&e=csv`;
+  const resp = await tryDirectOrProxy(url);
+  const text = await resp.text();
+  // CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) throw new Error('Stooq empty');
+  const cols = lines[1].split(',');
+  const close = parseFloat(cols[6]); // Close column
+  if (isNaN(close) || close <= 0) throw new Error('Stooq no price');
+  return { price: close, priceType: 'TRADE' };
+}
+
+// Main dispatcher — tries sources in priority order, returns null on failure
+const SOURCES = [
+  { name: 'TWSE', fn: fetchTWSE },
+  { name: 'Yahoo', fn: fetchYahoo },
+  { name: 'Stooq', fn: fetchStooq },
+];
+
+/* v0.2.6: last fetch attempt chain for diagnostics */
+let lastFetchChain = [];  // [{source, ok, error, priceType}]
+
+async function fetchPrice(stock) {
+  const chain = [];
+  for (const src of SOURCES) {
+    try {
+      const result = await src.fn(stock);  // { price, priceType }
+      const srcLabel = result.priceType !== 'TRADE' ? `${src.name}-${result.priceType}` : src.name;
+      chain.push({ source: src.name, ok: true, priceType: result.priceType });
+      lastFetchChain = chain;
+      setSource(srcLabel);
+      lastPriceType = result.priceType;
+      lastValidPrice = result.price;
+      return result.price;
+    } catch (e) {
+      const reason = classifyFetchError(e);
+      chain.push({ source: src.name, ok: false, error: reason });
+    }
+  }
+  lastFetchChain = chain;
+  // All sources failed — return null (no simulation)
+  return null;
+}
+
+/* v0.2.6: classify fetch error into user-friendly reason */
+function classifyFetchError(e) {
+  if (!e) return '未知錯誤';
+  const msg = String(e.message || e).toLowerCase();
+  if (msg.includes('timeout') || msg.includes('abort')) return '超時';
+  if (msg.includes('429')) return 'HTTP429(頻率限制)';
+  if (msg.includes('cors') || msg.includes('opaque') || msg.includes('networkerror') || msg.includes('failed to fetch')) return 'CORS/網路錯誤';
+  if (msg.includes('http 4') || msg.includes('http 5')) return `HTTP錯誤(${msg.match(/http (\d+)/)?.[1] || '?'})`;
+  if (msg.includes('no price') || msg.includes('empty') || msg.includes('failed')) return '無價格資料';
+  return '取價失敗';
+}
+
+/* v0.2.6: format source chain for display */
+function formatSourceChain(chain) {
+  if (!chain || chain.length === 0) return '';
+  return chain.map(c => {
+    if (c.ok) {
+      const pt = c.priceType !== 'TRADE' ? `(${c.priceType})` : '';
+      return `<span class="src-ok">${c.source}${pt} ✓</span>`;
+    }
+    return `<span class="src-fail">${c.source} ✗ ${c.error}</span>`;
+  }).join(' → ');
+}
+
+/* ── Stock symbol validation ── */
+async function validateStock(symbol) {
+  // Format check: Taiwan stocks are 4-6 digit numbers
+  if (!/^\d{4,6}$/.test(symbol)) {
+    return { valid: false, reason: '股號格式錯誤：台股代號應為 4~6 位數字', chain: [] };
+  }
+  // Price check: at least one source must return a valid price
+  const price = await fetchPrice(symbol);
+  if (price === null) {
+    const chainDesc = lastFetchChain.map(c => `${c.source}: ${c.error}`).join('、');
+    return { valid: false, reason: `股號 ${symbol} 查無報價（${chainDesc}）`, chain: lastFetchChain };
+  }
+  return { valid: true, price, chain: lastFetchChain };
+}
+
+function setSource(name) {
+  lastSource = name;
+  const now = taipeiNow();
+  lastUpdateTime = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  $('sourceBar').textContent = `來源：${lastSource} ｜ 更新：${lastUpdateTime}`;
+}
+
+/* ── Helper: get active lots ── */
+function activeLots() { return state.lots.filter(l => l.phase === 'holding' || l.phase === 'trailing'); }
+
+/* ── Per-symbol price map ── */
+let priceMap = {};  // { symbol: { price, source, time } }
+
+async function fetchPriceMap(symbols) {
+  const map = {};
+  await Promise.all(symbols.map(async (sym) => {
+    const price = await fetchPrice(sym);
+    if (price !== null) {
+      map[sym] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
+    }
+  }));
+  return map;
+}
+
+/* ── Core loop ── */
+async function tick() {
+  updateMarketBar();
+
+  // Collect unique symbols from active lots
+  const active = activeLots();
+  const symbols = [...new Set(active.map(l => l.stock))];
+  // Also include state.stock for UI display
+  if (state.stock && !symbols.includes(state.stock)) symbols.push(state.stock);
+
+  if (symbols.length === 0) {
+    // No active lots, just fetch state.stock for display
+    const price = await fetchPrice(state.stock);
+    if (price !== null) {
+      state.currentPrice = price;
+      priceMap[state.stock] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
+    }
+    renderPrice();
+    return;
+  }
+
+  // Fetch prices for all unique symbols in parallel
+  const newMap = await fetchPriceMap(symbols);
+  Object.assign(priceMap, newMap);
+
+  // Update sourceBar with summary
+  const fetched = Object.keys(newMap);
+  const failed = symbols.filter(s => !newMap[s]);
+  if (fetched.length > 0) {
+    const lastEntry = newMap[fetched[fetched.length - 1]];
+    $('sourceBar').textContent = `來源：${lastEntry.source} ｜ 更新：${lastEntry.time}` +
+      (failed.length > 0 ? ` ｜ 查無：${failed.join(',')}` : '');
+  } else {
+    $('sourceBar').textContent = `來源：查無現價 ｜ 上次：${lastUpdateTime}`;
+  }
+  // v0.2.6: show source chain bar
+  const chainBar = $('sourceChainBar');
+  if (lastFetchChain.length > 0) {
+    chainBar.innerHTML = '取價鏈：' + formatSourceChain(lastFetchChain);
+    chainBar.style.display = 'block';
+  }
+
+  // Update state.currentPrice for backward compat (use state.stock's price)
+  if (priceMap[state.stock]) {
+    state.currentPrice = priceMap[state.stock].price;
+  }
+  renderPrice();
+
+  if (!isMarketOpen()) return;  // no strategy outside monitoring window
+
+  // Log skipped symbols
+  for (const sym of failed) {
+    addLog(`[${sym}] 查無現價，跳過相關 lots`, 'neutral');
+  }
+
+  // v0.2.6: reset per-tick sold guard
+  _tickSoldLots = new Set();
+
+  // Apply strategy to each active lot using its own symbol's price
+  for (const lot of active) {
+    // v0.2.6: skip if already sold in this tick cycle
+    if (_tickSoldLots.has(lot.lotId)) continue;
+    const entry = priceMap[lot.stock];
+    if (!entry) continue;  // no price for this symbol — skip
+    const price = entry.price;
+
+    if (lot.phase === 'holding') {
+      if (price <= lot.buyPrice * STOP_LOSS) {
+        _tickSoldLots.add(lot.lotId);
+        executeSellLot(lot, price, '停損');
+      } else if (price >= lot.buyPrice * ENTER_TP) {
+        lot.phase = 'trailing';
+        lot.highestPrice = price;
+        addLog(`[${lot.stock}][Lot#${lot.lotId}] 進入停利模式（現價 $${price}，買入 $${lot.buyPrice}）`, 'neutral');
+        saveState();
+      }
+    }
+    if (lot.phase === 'trailing' && !_tickSoldLots.has(lot.lotId)) {
+      if (price >= lot.highestPrice * NEAR_HIGH) {
+        lot.highestPrice = Math.max(lot.highestPrice, price);
+      }
+      if (price <= lot.highestPrice * TP_EXIT) {
+        _tickSoldLots.add(lot.lotId);
+        executeSellLot(lot, price, '移動停利');
+      }
+    }
+  }
+
+  renderAll();
+}
+
+function executeSellLot(lot, price, reason) {
+  const sh = lot.shares || 1000;
+  const pnl = (price - lot.buyPrice) * sh;
+  const returnPct = ((price - lot.buyPrice) / lot.buyPrice) * 100;
+  const trade = { buyPrice: lot.buyPrice, sellPrice: price, pnl, returnPct, reason, shares: sh, buySource: lot.buySource || 'manual', lotId: lot.lotId, stock: lot.stock || '—', time: Date.now() };
+  state.trades.push(trade);
+  lot.phase = 'sold';
+  lot.sellPrice = price;
+  lot.sellTime = Date.now();
+  lot.sellReason = reason;
+  const sign = pnl >= 0 ? '+' : '';
+  const actionLabel = reason.endsWith('賣出') ? reason : reason + '賣出';
+  const sellEntry = priceMap[lot.stock];
+  const sellPriceNote = (sellEntry && sellEntry.priceType && sellEntry.priceType !== 'TRADE') ? `（${sellEntry.source}，推估價）` : '';
+  addLog(
+    `[${lot.stock}][Lot#${lot.lotId}] ${actionLabel} ${sh} 股 @ $${price}${sellPriceNote}　報酬 ${sign}${returnPct.toFixed(2)}%　損益 ${sign}$${pnl.toFixed(0)}`,
+    pnl >= 0 ? 'up' : 'down'
+  );
+  saveState();
+}
+
+/* ── Start / Stop / Reset ── */
+function startMonitor() {
+  const inputStock = stockInput.value.trim() || '2330';
+  state.stock = inputStock;
+  lastValidPrice = 0;
+  // Read configurable poll interval
+  const pollSec = Math.max(POLL_MIN / 1000, parseInt($('pollInput').value) || 5);
+  POLL_MS = pollSec * 1000;
+  $('pollInput').value = pollSec;
+  // Read monitoring time window
+  readMonitorTime();
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+  stockInput.disabled = true;
+  stockSelect.disabled = true;
+  $('pollInput').disabled = true;
+  $('monitorStart').disabled = true;
+  $('monitorEnd').disabled = true;
+  $('loadNotice').style.display = 'none';
+  const lotsCount = activeLots().length;
+  const modeLabel = lotsCount > 0 ? `續監（${lotsCount} 筆持倉）` : '開始監控';
+  addLog(`[${state.stock}] ${modeLabel}（輪詢 ${pollSec}s，時窗 ${MONITOR_START}~${MONITOR_END}）`, 'neutral');
+  saveState();
+  tick();
+  timer = setInterval(tick, POLL_MS);
+}
+
+/* Read monitoring time from UI inputs */
+function readMonitorTime() {
+  const s = $('monitorStart').value.trim();
+  const e = $('monitorEnd').value.trim();
+  if (/^\d{1,2}:\d{2}$/.test(s)) MONITOR_START = s.padStart(5, '0');
+  if (/^\d{1,2}:\d{2}$/.test(e)) MONITOR_END = e.padStart(5, '0');
+  $('monitorStart').value = MONITOR_START;
+  $('monitorEnd').value = MONITOR_END;
+}
+
+/* ── Manual Buy ── */
+async function doManualBuy() {
+  // Read stock from buy-row input first (always enabled), fallback to main stockInput
+  const inputStock = $('manualBuyStock').value.trim() || stockInput.value.trim() || '2330';
+  const sharesVal = parseInt($('manualBuyShares').value) || 1000;
+  const priceVal = parseFloat($('manualBuyPrice').value);
+
+  // Disable buy button and show validation state
+  btnManualBuy.disabled = true;
+  btnManualBuy.textContent = '驗證中…';
+
+  try {
+    // If user provides a manual buy price, allow order with format-validated symbol
+    // even when live quote is temporarily unavailable.
+    let result = null;
+    if (!isNaN(priceVal) && priceVal > 0) {
+      if (!/^\d{4,6}$/.test(inputStock)) {
+        alert('股號格式錯誤：台股代號應為 4~6 位數字');
+        return;
+      }
+    } else {
+      // No manual price: require live quote validation
+      btnManualBuy.textContent = '取價中…';
+      result = await validateStock(inputStock);
+      if (!result.valid) {
+        alert(result.reason + '\n\n💡 若你已知成交價，可在「買入價」欄位輸入價格，改用手動價買入。');
+        // v0.2.6: log source chain on buy failure
+        addLog(`[${inputStock}] 買入取價失敗：${lastFetchChain.map(c => `${c.source}:${c.error || 'OK'}`).join('→')}`, 'neutral');
+        return;
+      }
+    }
+
+    let buyP;
+    let buySourceLabel = 'manual';
+    if (!isNaN(priceVal) && priceVal > 0) {
+      buyP = priceVal;
+      setSource('MANUAL');
+      lastPriceType = 'TRADE';
+    } else {
+      // validateStock already fetched a valid price
+      buyP = result.price;
+    }
+
+    state.stock = inputStock;
+    state.currentPrice = buyP;
+    const lot = makeLot({ stock: inputStock, shares: sharesVal, buyPrice: buyP, buySource: buySourceLabel });
+    state.lots.push(lot);
+    const buyNote = (lastPriceType !== 'TRADE' && (isNaN(priceVal) || priceVal <= 0)) ? `（${lastSource}，推估價）` : '';
+    const chainStr = lastFetchChain.length > 0 ? `（來源：${lastFetchChain.filter(c=>c.ok).map(c=>c.source).join(',')||'MANUAL'}）` : '';
+    addLog(`[${inputStock}][Lot#${lot.lotId}] 手動買入 ${sharesVal} 股 @ $${buyP}${buyNote}${chainStr}`, 'neutral');
+    saveState();
+    renderAll();
+
+    // Auto-start monitoring if not already running
+    if (!timer) {
+      startMonitor();
+    }
+  } finally {
+    btnManualBuy.disabled = false;
+    btnManualBuy.textContent = '手動買入';
+  }
+}
+
+function stopMonitor() {
+  clearInterval(timer);
+  timer = null;
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  stockInput.disabled = false;
+  stockSelect.disabled = false;
+  $('pollInput').disabled = false;
+  $('monitorStart').disabled = false;
+  $('monitorEnd').disabled = false;
+  const active = activeLots();
+  if (active.length > 0) {
+    const syms = [...new Set(active.map(l => l.stock))].join('、');
+    addLog(`已停止監控（${active.length} 筆持倉保留：${syms}）`, 'neutral');
+  } else {
+    addLog('監控已停止', 'neutral');
+  }
+  updateManualSellBtn();
+  saveState();
+}
+
+/* ── Manual Sell ── */
+async function doManualSell() {
+  // v0.2.6: debounce — prevent rapid double-click
+  if (_sellAllLock) return;
+  _sellAllLock = true;
+  btnManualSell.disabled = true;
+  // Also disable sell-all button in lots panel
+  const sellAllBtn = document.querySelector('button.sell-all');
+  if (sellAllBtn) sellAllBtn.disabled = true;
+
+  try {
+    const active = activeLots();
+    if (active.length === 0) {
+      alert('目前無持倉，無法賣出');
+      return;
+    }
+    // Fetch prices per unique symbol
+    const symbols = [...new Set(active.map(l => l.stock))];
+    const newMap = await fetchPriceMap(symbols);
+    Object.assign(priceMap, newMap);
+
+    const failedSyms = symbols.filter(s => !newMap[s]);
+    let soldCount = 0;
+    for (const lot of active) {
+      const entry = priceMap[lot.stock];
+      if (!entry) continue;  // skip lots without price
+      executeSellLot(lot, entry.price, '手動賣出');
+      soldCount++;
+    }
+    if (failedSyms.length > 0) {
+      alert(`以下股號查無現價，相關 lots 已跳過：${failedSyms.join(', ')}`);
+    }
+    if (soldCount === 0 && failedSyms.length > 0) {
+      alert('所有股號皆查無現價，無法賣出。請稍後再試。');
+    }
+    // Update state.currentPrice for display
+    if (priceMap[state.stock]) state.currentPrice = priceMap[state.stock].price;
+    updateManualSellBtn();
+    renderAll();
+  } finally {
+    setTimeout(() => { _sellAllLock = false; updateManualSellBtn(); }, 1000);
+  }
+}
+
+async function doManualSellLot(lotId) {
+  // v0.2.6: debounce per-lot sell
+  if (_sellLotLocks.has(lotId)) return;
+  _sellLotLocks.add(lotId);
+
+  try {
+    const lot = state.lots.find(l => l.lotId === lotId);
+    if (!lot || (lot.phase !== 'holding' && lot.phase !== 'trailing')) return;
+    const price = await fetchPrice(lot.stock);
+    if (price === null) {
+      alert(`股號 ${lot.stock} 查無現價，已跳過賣出。請稍後再試。`);
+      return;
+    }
+    priceMap[lot.stock] = { price, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
+    executeSellLot(lot, price, '手動賣出');
+    updateManualSellBtn();
+    renderAll();
+  } finally {
+    setTimeout(() => { _sellLotLocks.delete(lotId); }, 1000);
+  }
+}
+
+function updateManualSellBtn() {
+  btnManualSell.disabled = activeLots().length === 0;
+}
+
+function doReset() {
+  stopMonitor();
+  state = resetState();
+  lastValidPrice = 0;
+  $('logBox').innerHTML = '<div class="entry" style="color:#64748b">尚無交易記錄</div>';
+  renderAll();
+  addLog('已重置', 'neutral');
+  saveState();
+}
+
+function doClearSave() {
+  stopMonitor();
+  state = resetState();
+  lastValidPrice = 0;
+  clearSave();
+  $('logBox').innerHTML = '<div class="entry" style="color:#64748b">尚無交易記錄</div>';
+  $('loadNotice').style.display = 'none';
+  lastSource = '—';
+  lastUpdateTime = '—';
+  lastPriceType = 'TRADE';
+  $('sourceBar').textContent = '來源：— ｜ 更新：—';
+  POLL_MS = 5000;
+  $('pollInput').value = 5;
+  MONITOR_START = '09:10';
+  MONITOR_END = '12:00';
+  $('monitorStart').value = '09:10';
+  $('monitorEnd').value = '12:00';
+  SHARES = 1000;
+  $('manualBuyShares').value = 1000;
+  $('manualBuyPrice').value = '';
+  $('manualBuyStock').value = '2330';
+  stockInput.value = '2330';
+  stockSelect.value = '2330';
+  renderAll();
+  addLog('存檔已清除，回到初始狀態', 'neutral');
+}
+
+/* ── Render ── */
+function renderPrice() {
+  renderGlobalSummary();
+}
+
+function renderAll() {
+  renderPrice();
+  updateManualSellBtn();
+
+  renderGlobalSummary();
+
+  // cumulative stats
+  const t = state.trades;
+  $('sTrades').textContent = t.length;
+  if (t.length > 0) {
+    const wins = t.filter(x => x.pnl > 0).length;
+    $('sWinRate').textContent = (wins / t.length * 100).toFixed(1) + '%';
+    const avgRet = t.reduce((s, x) => s + x.returnPct, 0) / t.length;
+    const avgEl = $('sAvgReturn');
+    avgEl.textContent = (avgRet >= 0 ? '+' : '') + avgRet.toFixed(2) + '%';
+    avgEl.className = 'val ' + (avgRet >= 0 ? 'up' : 'down');
+    const totalPnl = t.reduce((s, x) => s + x.pnl, 0);
+    const pnlEl = $('sTotalPnl');
+    pnlEl.textContent = (totalPnl >= 0 ? '+' : '') + '$' + totalPnl.toFixed(0);
+    pnlEl.className = 'val ' + (totalPnl >= 0 ? 'up' : 'down');
+  } else {
+    $('sWinRate').textContent = '—';
+    $('sAvgReturn').textContent = '—';
+    $('sAvgReturn').className = 'val neutral';
+    $('sTotalPnl').textContent = '$0';
+    $('sTotalPnl').className = 'val neutral';
+  }
+
+  // Render active lots panel
+  renderLotsPanel();
+}
+
+/* ── Global Summary ── */
+function renderGlobalSummary() {
+  const active = activeLots();
+  const el = $('summaryContent');
+  const monitorStatus = timer ? '監控中' : '已停止';
+  const monitorCls = timer ? 'color:#4ade80' : 'color:#fbbf24';
+
+  if (active.length === 0) {
+    const tradeInfo = state.trades.length > 0 ? ` ｜ 歷史 ${state.trades.length} 筆交易` : '';
+    el.innerHTML = `<span style="${monitorCls};font-weight:700">${monitorStatus}</span> ｜ 無持倉${tradeInfo}`;
+    return;
+  }
+
+  const totalShares = active.reduce((s, l) => s + l.shares, 0);
+
+  // Compute total unrealized PnL (only lots with price)
+  let totalPnl = 0, totalCost = 0, lotsWithPrice = 0;
+  for (const lot of active) {
+    const entry = priceMap[lot.stock];
+    if (entry) {
+      totalPnl += (entry.price - lot.buyPrice) * lot.shares;
+      totalCost += lot.buyPrice * lot.shares;
+      lotsWithPrice++;
+    } else {
+      totalCost += lot.buyPrice * lot.shares;
+    }
+  }
+  const pctReturn = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+  const sign = pctReturn >= 0 ? '+' : '';
+  const pnlCls = pctReturn >= 0 ? 'color:#22c55e' : 'color:#ef4444';
+  const partial = lotsWithPrice < active.length ? `（${lotsWithPrice}/${active.length} 有價）` : '';
+
+  el.innerHTML = `<span style="${monitorCls};font-weight:700">${monitorStatus}</span>`
+    + ` ｜ ${active.length} 筆持倉 ｜ ${totalShares} 股`
+    + ` ｜ <span style="${pnlCls};font-weight:700">${sign}${pctReturn.toFixed(2)}%</span>${partial}`;
+}
+
+/* ── Strategy helper: compute thresholds & distance for a lot ── */
+function lotStrategyInfo(lot, lotPrice) {
+  const bp = lot.buyPrice;
+  const stopLossPrice = bp * STOP_LOSS;         // 0.9
+  const enterTpPrice = bp * ENTER_TP;           // 1.1
+  const info = {
+    stopLossPrice,
+    enterTpPrice,
+    trailSellPrice: null,
+    distStopLoss: null,    // % distance from current price to stop-loss (positive = safe)
+    distEnterTp: null,     // % distance to enter trailing
+    distTrailSell: null,   // % distance to trailing sell
+    phase: lot.phase,
+  };
+  if (lotPrice !== null && bp > 0) {
+    info.distStopLoss = ((lotPrice - stopLossPrice) / stopLossPrice) * 100;
+    info.distEnterTp = ((enterTpPrice - lotPrice) / lotPrice) * 100;
+  }
+  if (lot.phase === 'trailing') {
+    info.trailSellPrice = lot.highestPrice * TP_EXIT;  // 0.92
+    if (lotPrice !== null) {
+      info.distTrailSell = ((lotPrice - info.trailSellPrice) / info.trailSellPrice) * 100;
+    }
+  }
+  return info;
+}
+
+/* Color tag class based on distance % */
+function distClass(pct, isLoss) {
+  if (pct === null) return 'strat-info';
+  const abs = Math.abs(pct);
+  if (isLoss) {
+    // distance to stop-loss: smaller = more dangerous
+    if (abs <= 2) return 'strat-danger';
+    if (abs <= 5) return 'strat-warn';
+    return 'strat-safe';
+  }
+  // distance to take-profit or trail-sell: smaller = closer to trigger
+  if (abs <= 2) return 'strat-warn';
+  if (abs <= 5) return 'strat-info';
+  return 'strat-safe';
+}
+
+function renderLotsPanel() {
+  const active = activeLots();
+  const panel = $('lotsPanel');
+  const body = $('lotsBody');
+  if (active.length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  let html = '';
+  for (const lot of active) {
+    const entry = priceMap[lot.stock];
+    const lotPrice = entry ? entry.price : null;
+    const si = lotStrategyInfo(lot, lotPrice);
+    const pct = (lotPrice && lot.buyPrice > 0) ? ((lotPrice - lot.buyPrice) / lot.buyPrice * 100) : null;
+    const pctCls = pct !== null ? (pct >= 0 ? 'lot-up' : 'lot-down') : 'lot-neutral';
+    const sign = pct !== null && pct >= 0 ? '+' : '';
+    const phaseBadge = lot.phase === 'trailing'
+      ? '<span class="phase-badge phase-trailing">停利追蹤</span>'
+      : '<span class="phase-badge phase-holding">持有中</span>';
+
+    html += '<div class="lot-detail">';
+    // Header: lotId, stock, shares, phase, sell button
+    html += '<div class="lot-header">';
+    html += `<strong>Lot#${lot.lotId} ${lot.stock}</strong> ${phaseBadge}`;
+    html += `<button class="sell-lot" onclick="doManualSellLot(${lot.lotId})">賣出</button>`;
+    html += '</div>';
+
+    // Price row: buy price, current price, source, update time
+    const priceStr = lotPrice !== null ? `$${lotPrice.toFixed(2)}` : '<span style="color:#f59e0b">無即時價</span>';
+    const srcStr = entry ? entry.source : '—';
+    const timeStr = entry ? entry.time : '—';
+    // v0.2.6: priceType badge
+    const pt = entry ? (entry.priceType || 'TRADE') : null;
+    const ptBadge = pt ? `<span class="price-type-badge ${pt === 'TRADE' ? 'price-type-trade' : 'price-type-est'}">${pt}</span>` : '';
+    const pctStr = pct !== null ? `<span class="${pctCls}">${sign}${pct.toFixed(2)}%</span>` : '—';
+    html += '<div class="lot-price-row">';
+    html += `<span>買 $${lot.buyPrice.toFixed(2)} × ${lot.shares}股</span>`;
+    html += `<span>現價 ${priceStr}${ptBadge} ${pctStr}</span>`;
+    html += `<span class="lot-meta">${srcStr} ${timeStr}</span>`;
+    html += '</div>';
+    // v0.2.6: estimated price warning row
+    if (pt && pt !== 'TRADE') {
+      html += `<div class="est-warn">⚠ 推估價（${srcStr}-${pt}），非實際成交價，僅供參考</div>`;
+    }
+
+    // Strategy thresholds row
+    html += '<div class="strat-row">';
+    // Stop-loss
+    const slDist = si.distStopLoss;
+    const slCls = distClass(slDist, true);
+    const slDistStr = slDist !== null ? `距 ${slDist.toFixed(1)}%` : '';
+    html += `<span class="strat-tag ${slCls}">停損 $${si.stopLossPrice.toFixed(2)} ${slDistStr}</span>`;
+
+    if (lot.phase === 'holding') {
+      // Distance to enter trailing
+      const tpDist = si.distEnterTp;
+      const tpCls = distClass(tpDist, false);
+      const tpDistStr = tpDist !== null ? `差 ${tpDist.toFixed(1)}%` : '';
+      html += `<span class="strat-tag ${tpCls}">進停利 $${si.enterTpPrice.toFixed(2)} ${tpDistStr}</span>`;
+    }
+    if (lot.phase === 'trailing') {
+      // Trailing sell threshold
+      const tsDist = si.distTrailSell;
+      const tsCls = distClass(tsDist, true);
+      const tsDistStr = tsDist !== null ? `距 ${tsDist.toFixed(1)}%` : '';
+      html += `<span class="strat-tag ${tsCls}">回撤賣 $${si.trailSellPrice.toFixed(2)} ${tsDistStr}</span>`;
+      html += `<span class="strat-tag strat-info">最高 $${lot.highestPrice.toFixed(2)}</span>`;
+    }
+    html += '</div>';
+    html += '</div>';
+  }
+  if (active.length > 1) {
+    html += '<button class="sell-all" onclick="doManualSell()">賣出全部</button>';
+  }
+  body.innerHTML = html;
+}
+
+function addLog(msg, type) {
+  const box = $('logBox');
+  // remove placeholder
+  if (box.querySelector('.entry[style]')) box.innerHTML = '';
+  const now = taipeiNow();
+  const ts = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const cls = type === 'up' ? 'log-entry-up' : type === 'down' ? 'log-entry-down' : 'log-entry-neutral';
+  const div = document.createElement('div');
+  div.className = 'entry ' + cls;
+  div.textContent = `[${ts}] ${msg}`;
+  box.prepend(div);
+  // Persist log entry
+  if (state.logEntries) {
+    state.logEntries.push({ ts, msg, type: type || 'neutral' });
+    if (state.logEntries.length > 200) state.logEntries = state.logEntries.slice(-200);
+  }
+}
+
+/* ── Inventory Query ── */
+async function showInventory() {
+  const active = activeLots();
+
+  // Fetch prices per unique symbol across all active lots
+  const symbols = [...new Set(active.map(l => l.stock))];
+  if (symbols.length > 0) {
+    const newMap = await fetchPriceMap(symbols);
+    Object.assign(priceMap, newMap);
+  } else if (state.stock) {
+    const p = await fetchPrice(state.stock);
+    if (p !== null) {
+      priceMap[state.stock] = { price: p, source: lastSource, time: lastUpdateTime, priceType: lastPriceType };
+      state.currentPrice = p;
+    }
+  }
+
+  const container = $('invContent');
+  let html = '';
+
+  if (active.length > 0) {
+    const totalShares = active.reduce((s, l) => s + l.shares, 0);
+    const monitorLabel = timer ? '（監控中）' : '（已停止）';
+
+    // Compute total PnL only for lots with price
+    let totalPnl = 0, totalCost = 0, allHavePrice = true;
+    for (const lot of active) {
+      const entry = priceMap[lot.stock];
+      if (entry) {
+        totalPnl += (entry.price - lot.buyPrice) * lot.shares;
+        totalCost += lot.buyPrice * lot.shares;
+      } else {
+        allHavePrice = false;
+        totalCost += lot.buyPrice * lot.shares;
+      }
+    }
+    const totalRetPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+    const tSign = totalPnl >= 0 ? '+' : '';
+    const tCls = totalPnl >= 0 ? 'up' : 'down';
+
+    // Summary
+    html += '<div class="inv-grid">';
+    const stockList = [...new Set(active.map(l => l.stock))].join(', ');
+    html += `<div><div class="lbl">股票代號</div><div class="val">${stockList}</div></div>`;
+    html += `<div><div class="lbl">持倉筆數</div><div class="val">${active.length} 筆${monitorLabel}</div></div>`;
+    html += `<div><div class="lbl">總持有股數</div><div class="val">${totalShares}</div></div>`;
+    html += `<div><div class="lbl">總未實現損益</div><div class="val ${tCls}">${tSign}$${totalPnl.toFixed(0)}${allHavePrice ? '' : '（部分無即時價）'}</div></div>`;
+    html += `<div><div class="lbl">總報酬率</div><div class="val ${tCls}">${tSign}${totalRetPct.toFixed(2)}%</div></div>`;
+    html += '</div>';
+
+    // Per-lot detail with strategy dashboard
+    html += '<div class="section-title">各筆持倉 — 策略看板</div>';
+    for (const lot of active) {
+      const entry = priceMap[lot.stock];
+      const lotPrice = entry ? entry.price : null;
+      const si = lotStrategyInfo(lot, lotPrice);
+      const phaseBadge = lot.phase === 'trailing'
+        ? '<span class="phase-badge phase-trailing">停利追蹤</span>'
+        : '<span class="phase-badge phase-holding">持有中</span>';
+      const srcLabel = lot.buySource === 'manual' ? '手動' : '自動';
+
+      // Status summary text
+      let statusText = '';
+      if (lot.phase === 'holding') {
+        if (si.distStopLoss !== null && si.distStopLoss <= 3) statusText = '接近停損線，請留意風險';
+        else if (si.distEnterTp !== null && si.distEnterTp <= 3) statusText = '即將進入停利模式';
+        else statusText = '持有觀望中，等待突破';
+      } else if (lot.phase === 'trailing') {
+        if (si.distTrailSell !== null && si.distTrailSell <= 3) statusText = '接近回撤賣出線，留意獲利了結';
+        else statusText = '停利追蹤中，持續追高';
+      }
+
+      html += '<div class="last-trade">';
+      html += `<div><strong>Lot#${lot.lotId}</strong> ${lot.stock} ${phaseBadge}（${srcLabel}）</div>`;
+      html += `<div style="color:#94a3b8;font-size:.75rem;margin:2px 0">${statusText}</div>`;
+      html += `<div>買入價：$${lot.buyPrice.toFixed(2)} × ${lot.shares} 股</div>`;
+      if (lotPrice !== null) {
+        const pnl = (lotPrice - lot.buyPrice) * lot.shares;
+        const retPct = lot.buyPrice > 0 ? ((lotPrice - lot.buyPrice) / lot.buyPrice * 100) : 0;
+        const sign = pnl >= 0 ? '+' : '';
+        const cls = pnl >= 0 ? 'up' : 'down';
+        const invPt = entry.priceType || 'TRADE';
+        const invPtBadge = `<span class="price-type-badge ${invPt === 'TRADE' ? 'price-type-trade' : 'price-type-est'}">${invPt}</span>`;
+        html += `<div>現價：$${lotPrice.toFixed(2)}${invPtBadge}（${entry.source} ${entry.time}）</div>`;
+        if (invPt !== 'TRADE') {
+          html += `<div class="est-warn">⚠ 推估價（${entry.source}-${invPt}），非實際成交價</div>`;
+        }
+        html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${pnl.toFixed(0)}</span>（${sign}${retPct.toFixed(2)}%）</div>`;
+      } else {
+        html += `<div>現價：<span style="color:#f59e0b">無即時價</span>（來源：—）</div>`;
+        html += `<div>損益：—</div>`;
+      }
+      // Strategy thresholds
+      html += '<div style="margin-top:4px">';
+      const slDist = si.distStopLoss;
+      const slCls = distClass(slDist, true);
+      const slDistStr = slDist !== null ? `距 ${slDist.toFixed(1)}%` : '';
+      html += `<span class="strat-tag ${slCls}">停損 $${si.stopLossPrice.toFixed(2)} ${slDistStr}</span> `;
+      if (lot.phase === 'holding') {
+        const tpDist = si.distEnterTp;
+        const tpCls = distClass(tpDist, false);
+        const tpDistStr = tpDist !== null ? `差 ${tpDist.toFixed(1)}%` : '';
+        html += `<span class="strat-tag ${tpCls}">進停利 $${si.enterTpPrice.toFixed(2)} ${tpDistStr}</span> `;
+      }
+      if (lot.phase === 'trailing') {
+        html += `<div>最高價：$${lot.highestPrice.toFixed(2)}</div>`;
+        const tsDist = si.distTrailSell;
+        const tsCls = distClass(tsDist, true);
+        const tsDistStr = tsDist !== null ? `距 ${tsDist.toFixed(1)}%` : '';
+        html += `<span class="strat-tag ${tsCls}">回撤賣 $${si.trailSellPrice.toFixed(2)} ${tsDistStr}</span> `;
+      }
+      html += '</div>';
+      html += '</div>';
+    }
+
+    html += `<div style="margin-top:8px;font-size:.75rem;color:#64748b;text-align:center">最後更新：${lastUpdateTime} ｜ 來源：${lastSource}</div>`;
+  } else {
+    html += '<div class="no-pos">目前無持倉</div>';
+
+    if (state.trades.length > 0) {
+      const last = state.trades[state.trades.length - 1];
+      const sign = last.pnl >= 0 ? '+' : '';
+      const cls = last.pnl >= 0 ? 'up' : 'down';
+      html += '<div class="section-title">最近一次已實現交易</div>';
+      html += '<div class="last-trade">';
+      html += `<div>[${last.stock || '—'}] Lot#${last.lotId || '—'} 買入價：$${last.buyPrice.toFixed(2)}</div>`;
+      html += `<div>賣出價：$${last.sellPrice.toFixed(2)}</div>`;
+      html += `<div>損益：<span class="val ${cls}" style="font-size:.82rem">${sign}$${last.pnl.toFixed(0)}</span></div>`;
+      html += `<div>報酬率：<span class="val ${cls}" style="font-size:.82rem">${sign}${last.returnPct.toFixed(2)}%</span></div>`;
+      html += `<div>原因：${last.reason}</div>`;
+      html += '</div>';
+    }
+
+    html += `<div style="margin-top:10px;font-size:.75rem;color:#64748b;text-align:center">最後更新：${lastUpdateTime} ｜ 來源：${lastSource}</div>`;
+  }
+
+  container.innerHTML = html;
+  $('invOverlay').classList.add('show');
+}
+
+/* ── Init ── */
+updateMarketBar();
+setInterval(updateMarketBar, 30000);
+
+// Load saved state from localStorage
+(function initLoad() {
+  const saved = loadState();
+  if (!saved) { renderAll(); return; }
+
+  state.stock = saved.stock;
+  state.currentPrice = saved.currentPrice;
+  state.lots = saved.lots || [];
+  state.trades = saved.trades;
+  state.logEntries = saved.logEntries || [];
+  nextLotId = saved.nextLotId || 1;
+
+  lastSource = saved.source;
+  lastUpdateTime = saved.sourceTime;
+  lastPriceType = saved.priceType || 'TRADE';
+  $('sourceBar').textContent = `來源：${lastSource} ｜ 更新：${lastUpdateTime}`;
+
+  POLL_MS = saved.pollSec * 1000;
+  $('pollInput').value = saved.pollSec;
+
+  MONITOR_START = saved.monitorStart;
+  MONITOR_END = saved.monitorEnd;
+  $('monitorStart').value = MONITOR_START;
+  $('monitorEnd').value = MONITOR_END;
+
+  stockInput.value = saved.stock;
+  $('manualBuyStock').value = saved.stock;
+  if ([...stockSelect.options].some(o => o.value === saved.stock)) stockSelect.value = saved.stock;
+
+  // Restore log entries into logBox
+  if (state.logEntries.length > 0) {
+    // New format: persisted logEntries with ts, msg, type
+    $('logBox').innerHTML = '';
+    const recent = state.logEntries.slice(-50);
+    for (const entry of recent) {
+      const cls = entry.type === 'up' ? 'log-entry-up' : entry.type === 'down' ? 'log-entry-down' : 'log-entry-neutral';
+      const div = document.createElement('div');
+      div.className = 'entry ' + cls;
+      div.textContent = `[${entry.ts}] ${entry.msg}`;
+      $('logBox').prepend(div);
+    }
+  } else if (saved.trades.length > 0) {
+    // Fallback: old saves without logEntries — reconstruct from trades
+    $('logBox').innerHTML = '';
+    const recent = saved.trades.slice(-20);
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const t = recent[i];
+      const sign = t.pnl >= 0 ? '+' : '';
+      const cls = t.pnl >= 0 ? 'log-entry-up' : 'log-entry-down';
+      const actionLabel = (t.reason || '—').endsWith('賣出') ? t.reason : (t.reason || '—') + '賣出';
+      const div = document.createElement('div');
+      div.className = 'entry ' + cls;
+      div.textContent = `[${t.stock || '—'}][Lot#${t.lotId || '—'}] ${actionLabel} ${t.shares || '—'} 股 @ $${t.sellPrice}　報酬 ${sign}${t.returnPct.toFixed(2)}%　損益 ${sign}$${t.pnl.toFixed(0)}`;
+      $('logBox').appendChild(div);
+    }
+  }
+
+  renderAll();
+
+  // Show notice if there's a meaningful saved position
+  const active = activeLots();
+  const hasTrades = saved.trades.length > 0;
+  if (active.length > 0 || hasTrades) {
+    const notice = $('loadNotice');
+    if (active.length > 0) {
+      const totalShares = active.reduce((s, l) => s + l.shares, 0);
+      const symbols = [...new Set(active.map(l => l.stock))];
+      let stockDesc;
+      if (symbols.length === 1) {
+        stockDesc = symbols[0];
+      } else if (symbols.length <= 3) {
+        stockDesc = `${symbols.length} 檔股票：${symbols.join('、')}`;
+      } else {
+        stockDesc = `${symbols.length} 檔股票：${symbols.slice(0, 3).join('、')}+${symbols.length - 3} 檔`;
+      }
+      notice.textContent = `已載入上次庫存（${active.length} 筆持倉，${stockDesc}，共 ${totalShares} 股），可按「開始監控」繼續或「賣出全部」平倉`;
+    } else {
+      notice.textContent = `已載入上次存檔（${saved.trades.length} 筆交易記錄），可繼續監控`;
+    }
+    notice.style.display = 'block';
+  }
+})();
+
+</script>
 </body>
 </html>
