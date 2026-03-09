@@ -106,12 +106,12 @@ button.sell-all:hover{background:#b91c1c}
 .phase-badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.72rem;font-weight:600}
 .phase-holding{background:#1e3a5f;color:#93c5fd}
 .phase-trailing{background:#14532d;color:#4ade80}
-/* v0.2.6 estimated price warning */
+/* v0.2.7 estimated price warning */
 .est-warn{background:#423006;color:#fbbf24;border-radius:6px;padding:4px 10px;font-size:.78rem;margin:4px 0}
 .price-type-badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.68rem;font-weight:600;margin-left:4px}
 .price-type-trade{background:#14532d;color:#4ade80}
 .price-type-est{background:#713f12;color:#fbbf24}
-/* v0.2.6 source chain log */
+/* v0.2.7 source chain log */
 .source-chain{font-size:.75rem;color:#94a3b8;margin:4px 0;line-height:1.5}
 .source-chain .src-ok{color:#4ade80}
 .source-chain .src-fail{color:#ef4444}
@@ -120,7 +120,7 @@ button.sell-all:hover{background:#b91c1c}
 <body>
 <div class="wrap">
   <a class="back" href="../index.html">← 回首頁</a>
-  <h1>📈 股市投資策略工具 <span class="ver">v0.2.6</span></h1>
+  <h1>📈 股市投資策略工具 <span class="ver">v0.2.7</span></h1>
 
   <div id="marketBar" class="market-bar closed">非盤中時段 — 等待開盤</div>
   <div id="sourceBar" style="text-align:center;padding:4px;font-size:.75rem;color:#94a3b8;margin:4px 0">來源：— ｜ 更新：—</div>
@@ -233,7 +233,7 @@ let state = resetState();
 let timer = null;
 let lastValidPrice = 0;  // last successfully fetched price
 
-/* v0.2.6: debounce & duplicate-sell guards */
+/* v0.2.7: debounce & duplicate-sell guards */
 let _sellAllLock = false;        // prevent rapid sell-all clicks
 let _sellLotLocks = new Set();   // prevent rapid per-lot sell clicks
 let _tickSoldLots = new Set();   // lots already sold in current tick cycle
@@ -496,7 +496,7 @@ const SOURCES = [
   { name: 'Stooq', fn: fetchStooq },
 ];
 
-/* v0.2.6: last fetch attempt chain for diagnostics */
+/* v0.2.7: last fetch attempt chain for diagnostics */
 let lastFetchChain = [];  // [{source, ok, error, priceType}]
 
 async function fetchPrice(stock) {
@@ -521,7 +521,7 @@ async function fetchPrice(stock) {
   return null;
 }
 
-/* v0.2.6: classify fetch error into user-friendly reason */
+/* v0.2.7: classify fetch error into user-friendly reason */
 function classifyFetchError(e) {
   if (!e) return '未知錯誤';
   const msg = String(e.message || e).toLowerCase();
@@ -533,7 +533,7 @@ function classifyFetchError(e) {
   return '取價失敗';
 }
 
-/* v0.2.6: format source chain for display */
+/* v0.2.7: format source chain for display */
 function formatSourceChain(chain) {
   if (!chain || chain.length === 0) return '';
   return chain.map(c => {
@@ -619,7 +619,7 @@ async function tick() {
   } else {
     $('sourceBar').textContent = `來源：查無現價 ｜ 上次：${lastUpdateTime}`;
   }
-  // v0.2.6: show source chain bar
+  // v0.2.7: show source chain bar
   const chainBar = $('sourceChainBar');
   if (lastFetchChain.length > 0) {
     chainBar.innerHTML = '取價鏈：' + formatSourceChain(lastFetchChain);
@@ -639,12 +639,12 @@ async function tick() {
     addLog(`[${sym}] 查無現價，跳過相關 lots`, 'neutral');
   }
 
-  // v0.2.6: reset per-tick sold guard
+  // v0.2.7: reset per-tick sold guard
   _tickSoldLots = new Set();
 
   // Apply strategy to each active lot using its own symbol's price
   for (const lot of active) {
-    // v0.2.6: skip if already sold in this tick cycle
+    // v0.2.7: skip if already sold in this tick cycle
     if (_tickSoldLots.has(lot.lotId)) continue;
     const entry = priceMap[lot.stock];
     if (!entry) continue;  // no price for this symbol — skip
@@ -759,7 +759,7 @@ async function doManualBuy() {
       result = await validateStock(inputStock);
       if (!result.valid) {
         alert(result.reason + '\n\n💡 若你已知成交價，可在「買入價」欄位輸入價格，改用手動價買入。');
-        // v0.2.6: log source chain on buy failure
+        // v0.2.7: log source chain on buy failure
         addLog(`[${inputStock}] 買入取價失敗：${lastFetchChain.map(c => `${c.source}:${c.error || 'OK'}`).join('→')}`, 'neutral');
         return;
       }
@@ -819,7 +819,7 @@ function stopMonitor() {
 
 /* ── Manual Sell ── */
 async function doManualSell() {
-  // v0.2.6: debounce — prevent rapid double-click
+  // v0.2.7: debounce — prevent rapid double-click
   if (_sellAllLock) return;
   _sellAllLock = true;
   btnManualSell.disabled = true;
@@ -862,7 +862,7 @@ async function doManualSell() {
 }
 
 async function doManualSellLot(lotId) {
-  // v0.2.6: debounce per-lot sell
+  // v0.2.7: debounce per-lot sell
   if (_sellLotLocks.has(lotId)) return;
   _sellLotLocks.add(lotId);
 
@@ -1073,7 +1073,7 @@ function renderLotsPanel() {
     const priceStr = lotPrice !== null ? `$${lotPrice.toFixed(2)}` : '<span style="color:#f59e0b">無即時價</span>';
     const srcStr = entry ? entry.source : '—';
     const timeStr = entry ? entry.time : '—';
-    // v0.2.6: priceType badge
+    // v0.2.7: priceType badge
     const pt = entry ? (entry.priceType || 'TRADE') : null;
     const ptBadge = pt ? `<span class="price-type-badge ${pt === 'TRADE' ? 'price-type-trade' : 'price-type-est'}">${pt}</span>` : '';
     const pctStr = pct !== null ? `<span class="${pctCls}">${sign}${pct.toFixed(2)}%</span>` : '—';
@@ -1082,7 +1082,7 @@ function renderLotsPanel() {
     html += `<span>現價 ${priceStr}${ptBadge} ${pctStr}</span>`;
     html += `<span class="lot-meta">${srcStr} ${timeStr}</span>`;
     html += '</div>';
-    // v0.2.6: estimated price warning row
+    // v0.2.7: estimated price warning row
     if (pt && pt !== 'TRADE') {
       html += `<div class="est-warn">⚠ 推估價（${srcStr}-${pt}），非實際成交價，僅供參考</div>`;
     }
