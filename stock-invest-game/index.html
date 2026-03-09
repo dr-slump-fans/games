@@ -166,7 +166,7 @@ button.sell-all:hover{background:#b91c1c}
     <label>買入價</label>
     <input id="manualBuyPrice" type="number" step="0.01" min="0" placeholder="留空=現價"/>
     <label>股數</label>
-    <input id="manualBuyShares" type="number" min="1" value="1000" style="width:80px"/>
+    <input id="manualBuyShares" type="number" min="1" value="100" style="width:80px"/>
     <button id="btnManualBuy" class="manual-buy">手動買入</button>
   </div>
   <!-- active lots panel -->
@@ -211,7 +211,7 @@ button.sell-all:hover{background:#b91c1c}
 
 <script>
 /* ── Config ── */
-let SHARES = 1000;           // default shares (can be overridden by manual buy)
+let SHARES = 100;            // default shares (can be overridden by manual buy)
 const STOP_LOSS = 0.9;       // sell if price <= buyPrice * 0.9
 const ENTER_TP = 1.1;        // enter trailing-stop mode at +10%
 const NEAR_HIGH = 0.998;     // treat as new high if >= highest * 0.998
@@ -242,7 +242,7 @@ function makeLot(opts) {
   return {
     lotId: nextLotId++,
     stock: opts.stock || '2330',
-    shares: opts.shares || 1000,
+    shares: opts.shares || 100,
     buyPrice: opts.buyPrice || 0,
     highestPrice: opts.highestPrice || opts.buyPrice || 0,
     phase: opts.phase || 'holding',   // holding | trailing | sold
@@ -676,7 +676,7 @@ async function tick() {
 }
 
 function executeSellLot(lot, price, reason) {
-  const sh = lot.shares || 1000;
+  const sh = lot.shares || 100;
   const pnl = (price - lot.buyPrice) * sh;
   const returnPct = ((price - lot.buyPrice) / lot.buyPrice) * 100;
   const trade = { buyPrice: lot.buyPrice, sellPrice: price, pnl, returnPct, reason, shares: sh, buySource: lot.buySource || 'manual', lotId: lot.lotId, stock: lot.stock || '—', time: Date.now() };
